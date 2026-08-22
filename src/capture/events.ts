@@ -37,12 +37,28 @@ export type FocusChangeEvent = {
   reason: string;
 };
 
+export type LockChangeEvent = {
+  kind: "lock-change";
+  tMs: number;
+  locked: boolean;
+  reason: string;
+};
+
+export type ResizeEvent = {
+  kind: "resize";
+  tMs: number;
+  widthPx: number;
+  heightPx: number;
+};
+
 export type CaptureEvent =
   | PointerMotionEvent
   | ButtonEvent
   | TargetSpawnEvent
   | TargetRemoveEvent
-  | FocusChangeEvent;
+  | FocusChangeEvent
+  | LockChangeEvent
+  | ResizeEvent;
 
 export const CAPTURE_SOURCE_KINDS = [
   "synthetic",
@@ -51,6 +67,11 @@ export const CAPTURE_SOURCE_KINDS = [
 ] as const;
 
 export type CaptureSourceKind = (typeof CAPTURE_SOURCE_KINDS)[number];
+
+export const POINTER_LOCK_LOSS_REASON = "pointer-lock-loss";
+export const TAB_HIDDEN_REASON = "tab-hidden";
+export const WINDOW_BLUR_REASON = "window-blur";
+export const USER_ABORT_REASON = "user-abort";
 
 export interface CaptureSourceDescriptor {
   kind: CaptureSourceKind;

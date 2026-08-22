@@ -14,7 +14,12 @@ import type {
   TrialRecord,
 } from "../domain/trial.ts";
 import type { SensitivityConfiguration } from "../domain/settings.ts";
-import { initialReticlePosition, type CaptureEvent } from "./events.ts";
+import { targetPositionAt } from "../domain/trial.ts";
+import {
+  POINTER_LOCK_LOSS_REASON,
+  initialReticlePosition,
+  type CaptureEvent,
+} from "./events.ts";
 
 export interface TrialRecordingRequest {
   id: TrialId;
@@ -25,6 +30,7 @@ export interface TrialRecordingRequest {
   phase: ScenarioPhase;
   scenarioId: string;
   scenarioKind: ScenarioKind;
+  scenarioRepIndex: number | null;
   viewport: { widthPx: number; heightPx: number };
   sensitivity: SensitivityConfiguration;
   dpi: number;
@@ -40,6 +46,8 @@ export class TrialRecorder {
   readonly #targets: TargetSpan[] = [];
   readonly #shots: ShotEvent[] = [];
   readonly #focusInterruptions: TrialRecord["focusInterruptions"] = [];
+  readonly #resizes: TrialRecord["viewportResizes"] = [];
+  #abortedMs: number | null = null;
 
   constructor(request: TrialRecordingRequest) {
     this.#request = request;
@@ -48,6 +56,41 @@ export class TrialRecorder {
 
   get cursorPosition(): Vec2 {
     return this.#cursor;
+  }
+
+  activeTargetsAt(tMs: number): { x: number; y: number; radius: number }[] {
+    const out: { x: number; y: number; radius: number }[] = [];
+    for (const span of this.#targets) {
+      if (span.removedMs !== null && span.removedMs <= tMs) continue;
+      if (span.appearedMs > tMs) continue;
+      const pos =
+        span.motion.kind === "static"
+          ? span.motion.position
+          : targetPositionAt(span, tMs);
+      if (!pos) continue;
+      out.push({ x: pos.x, y: pos.y, radius: span.radiusPx });
+    }
+    return out;
+  }
+
+  get state(): {
+    spawnedTargets: { removedMs: number | null; removalReason: string | null }[];
+    shotCount: number;
+    hitCount: number;
+    latestShot: { aimTargetId: string | null; hit: boolean; tMs: number } | null;
+  } {
+    const last = this.#shots.at(-1);
+    return {
+      spawnedTargets: this.#targets.map((t) => ({
+        removedMs: t.removedMs,
+        removalReason: t.removalReason,
+      })),
+      shotCount: this.#shots.length,
+      hitCount: this.#shots.filter((s) => s.hit).length,
+      latestShot: last
+        ? { aimTargetId: last.aimedTargetId, hit: last.hit, tMs: last.tMs }
+        : null,
+    };
   }
 
   add(event: CaptureEvent): void {
@@ -112,7 +155,32 @@ export class TrialRecorder {
         }
         break;
       }
+      case "lock-change": {
+        if (!event.locked && event.reason === POINTER_LOCK_LOSS_REASON) {
+          this.add({
+            kind: "focus-change",
+            tMs: event.tMs,
+            focused: false,
+            reason: POINTER_LOCK_LOSS_REASON,
+          });
+        }
+        break;
+      }
+      case "resize": {
+        this.#resizes.push({
+          tMs: event.tMs,
+          widthPx: event.widthPx,
+          heightPx: event.heightPx,
+        });
+        break;
+      }
     }
+  }
+
+  abort(tMs: number, reason: string): void {
+    if (this.#abortedMs !== null) return;
+    this.#abortedMs = tMs;
+    this.#focusInterruptions.push({ startMs: tMs, endMs: null, reason });
   }
 
   finish(outcome: TrialOutcome, endedAtMonotonicMs: number): TrialRecord {
@@ -145,9 +213,12 @@ export class TrialRecorder {
       targets: this.#targets.map((t) => structuredClone(t)),
       shots: [...this.#shots],
       focusInterruptions: this.#focusInterruptions.map((f) => ({ ...f })),
+      viewportResizes: this.#resizes.map((r) => ({ ...r })),
       outcome,
       validity: { status: "valid", reasons: [] },
       seedTag: req.seedTag ?? null,
+      scenarioRepIndex: req.scenarioRepIndex,
+      abortedMs: this.#abortedMs,
     };
   }
 

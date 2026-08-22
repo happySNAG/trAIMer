@@ -70,8 +70,13 @@ export function physicalCmPer360(
   calibration: CalibrationParameters,
   dpi: number,
   axis: "x" | "y",
+  sensPercent?: number,
 ): number | null {
   const counts = countsForRotationDegrees(calibration, axis, 360);
   if (counts === null || dpi <= 0) return null;
-  return (counts / dpi) * 2.54;
+  const effectiveCounts =
+    sensPercent !== undefined && sensPercent > 0
+      ? counts * (100 / sensPercent)
+      : counts;
+  return (effectiveCounts / dpi) * 2.54;
 }

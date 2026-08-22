@@ -20,6 +20,26 @@ export interface StoppingCriteria {
   targetUtilityCiHalfWidth: number | null;
 }
 
+export interface AdaptiveAllocationConfig {
+  enabled: boolean;
+  minRepsBeforeAdaptive: number;
+  contenderZThreshold: number;
+  controlRefreshEveryRounds: number;
+}
+
+export interface FatigueProtocolConfig {
+  maxContinuousTestingMs: number;
+  restDurationMs: number;
+  degradationWindowTrials: number;
+  degradationRatioThreshold: number;
+}
+
+export interface YExplorationConfig {
+  enabled: boolean;
+  yFactors: readonly number[];
+  minImprovementZ: number;
+}
+
 export interface ExperimentDefinition {
   id: ExperimentId;
   name: string;
@@ -35,7 +55,16 @@ export interface ExperimentDefinition {
   restBetweenCandidatesMs: number;
   exclusionRules: ExclusionRules;
   stoppingCriteria: StoppingCriteria;
+  adaptiveAllocation: AdaptiveAllocationConfig;
+  fatigueProtocol: FatigueProtocolConfig;
+  yExploration: YExplorationConfig;
   notes?: string | undefined;
+}
+
+export interface SessionPhaseLogEntry {
+  state: string;
+  tIso: string;
+  detail?: string | undefined;
 }
 
 export interface AimSession {
@@ -49,4 +78,5 @@ export interface AimSession {
   startedAtIso: string;
   endedAtIso: string | null;
   deviceDescription: string;
+  phaseLog: SessionPhaseLogEntry[];
 }

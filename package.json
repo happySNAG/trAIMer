@@ -13,6 +13,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "demo": "tsx src/demo/cli.ts",
+    "app": "vite",
+    "build": "vite build",
     "demo:help": "tsx src/demo/cli.ts --help"
   },
   "devDependencies": {
@@ -22,6 +24,7 @@
     "tsx": "^4.19.0",
     "typescript": "^5.8.0",
     "typescript-eslint": "^8.35.0",
+    "vite": "^5.4.21",
     "vitest": "^3.2.0"
   }
 }

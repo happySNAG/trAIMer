@@ -11,11 +11,15 @@ be owned separately; everything here runs without it.
 
 ```bash
 npm install
-npm test        # full suite (93 tests, ~70s; blind-recovery suite dominates)
+npm test        # full suite (163 tests; includes blind-recovery campaigns)
 npm run lint    # eslint
 npm run typecheck
 npm run demo    # simulate a player, optimize, then reveal the hidden optimum
+npm run app     # real-input browser aim lab → http://localhost:5173
+npm run build   # production browser bundle → dist-app/
 ```
+
+See `docs/MANUAL-TEST.md` for the human smoke-test checklist for the browser app.
 
 Calibrated demonstration (also estimates the simulator's true composite
 optimum via Monte Carlo and prints the error against it):

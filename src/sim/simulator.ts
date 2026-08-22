@@ -18,6 +18,13 @@ import type { SyntheticPlayerConfig } from "./player.ts";
 import { Rng, combineSeeds } from "../util/rng.ts";
 import { emitSubmovement } from "./submovement.ts";
 import { planCandidateBlocks, type TrialPlanSpec } from "../experiments/protocol.ts";
+import {
+  createInstanceRng,
+  hashString,
+  planScenarioInstance,
+  plannedTargetPositionAt,
+  type PlannedScenarioInstance,
+} from "../scenarios/planner.ts";
 
 export interface SimulatorOptions {
   viewport?: Viewport;
@@ -31,8 +38,9 @@ export interface SimulatedSessionResult {
 }
 
 interface SensitivityEffect {
-  ratio: number;
-  log2Ratio: number;
+  ratioX: number;
+  log2RatioX: number;
+  ratioY: number;
 }
 
 type TargetCenterFn = (tMs: number) => { x: number; y: number };
@@ -43,6 +51,7 @@ export class SyntheticExperimentRunner {
   readonly #viewport: Viewport;
   readonly #sampleDtMs: number;
   #virtualClockMs = 0;
+  readonly #repCounterByCandidate = new Map<string, number>();
 
   constructor(
     definition: ExperimentDefinition,
@@ -65,25 +74,25 @@ export class SyntheticExperimentRunner {
     const plan = planCandidateBlocks(this.#definition, round, candidateIdFilter);
     const trials: TrialRecord[] = [];
     let lastCandidateId: string | null = null;
-    let measuredIdxWithinBlock = 0;
     for (const spec of plan) {
       if (lastCandidateId !== null && spec.candidateId !== lastCandidateId) {
         this.#virtualClockMs += this.#definition.restBetweenCandidatesMs;
-        measuredIdxWithinBlock = 0;
       }
       lastCandidateId = spec.candidateId;
       const scenario = scenarioById(spec.scenarioId);
-      const rng =
+      let repIndex: number;
+      if (spec.phase === "measured") {
+        repIndex = this.#repCounterByCandidate.get(spec.candidateId) ?? 0;
+        this.#repCounterByCandidate.set(spec.candidateId, repIndex + 1);
+      } else {
+        repIndex = spec.sequenceNumber;
+      }
+      const instanceSeed =
         spec.phase === "measured"
-          ? new Rng(
-              combineSeeds(
-                sessionSeed,
-                round,
-                hashString(spec.scenarioId),
-                measuredIdxWithinBlock,
-              ),
-            )
-          : new Rng(combineSeeds(sessionSeed, round, spec.sequenceNumber));
+          ? { experimentSeed: sessionSeed, round, scenarioId: spec.scenarioId, repIndex }
+          : { experimentSeed: sessionSeed + 7777, round, scenarioId: spec.scenarioId, repIndex };
+      const geometryRng = createInstanceRng(instanceSeed);
+      const playerRng = new Rng(combineSeeds(sessionSeed, round, hashString(spec.scenarioId) ^ (spec.sequenceNumber * 2654435761)));
       const candidate = this.#definition.candidates.find(
         (c) => c.id === (spec.candidateId as CandidateId),
       );
@@ -97,6 +106,7 @@ export class SyntheticExperimentRunner {
         phase: spec.phase,
         scenarioId: scenario.id,
         scenarioKind: scenario.kind,
+        scenarioRepIndex: spec.phase === "measured" ? repIndex : null,
         viewport: this.#viewport,
         sensitivity: candidate.sensitivity,
         dpi: this.#definition.dpi,
@@ -106,10 +116,9 @@ export class SyntheticExperimentRunner {
       };
       const trial =
         scenario.kind === "tracking"
-          ? this.#simulateTrackingTrial(request, scenario, rng)
-          : this.#simulateFlickTrial(request, scenario, rng);
-      this.#virtualClockMs = trial.endedAtMonotonicMs + 800 + rng.range(0, 700);
-      if (spec.phase === "measured") measuredIdxWithinBlock++;
+          ? this.#simulateTrackingTrial(request, scenario, geometryRng, playerRng)
+          : this.#simulateFlickTrial(request, scenario, geometryRng, playerRng);
+      this.#virtualClockMs = trial.endedAtMonotonicMs + 800 + playerRng.range(0, 700);
       trials.push(trial);
     }
     return trials;
@@ -117,20 +126,50 @@ export class SyntheticExperimentRunner {
 
   #effectFor(candidateId: CandidateId): SensitivityEffect {
     const candidate = this.#definition.candidates.find((c) => c.id === candidateId)!;
-    const candEdpi = this.#definition.dpi * candidate.sensitivity.sensX;
-    const trueEdpi = this.#player.trueOptimalEdpi;
-    const ratio = candEdpi / trueEdpi;
-    return { ratio, log2Ratio: Math.log2(ratio) };
+    const candEdpiX = this.#definition.dpi * candidate.sensitivity.sensX;
+    const candEdpiY = this.#definition.dpi * candidate.sensitivity.sensY;
+    return {
+      ratioX: candEdpiX / this.#player.trueOptimalEdpi,
+      log2RatioX: Math.log2(candEdpiX / this.#player.trueOptimalEdpi),
+      ratioY: candEdpiY / this.#player.trueOptimalEdpiY,
+    };
   }
 
   #fatigueOffset(indexInSession: number): number {
     return Math.min(150, this.#player.fatiguePerTrialMs * indexInSession);
   }
 
+  #spawnPlannedTargets(
+    recorder: TrialRecorder,
+    request: TrialRecordingRequest,
+    instance: PlannedScenarioInstance,
+  ): void {
+    instance.targets.forEach((target, ti) => {
+      const targetId: TargetId = `target-${request.id}-${ti}`;
+      recorder.add({
+        kind: "target-spawn",
+        tMs: request.startedAtMonotonicMs + target.spawnDelayMs,
+        targetId,
+        radiusPx: target.radiusPx,
+        motion:
+          target.kind === "static"
+            ? { kind: "static", position: target.position }
+            : {
+                kind: "path",
+                keyframes: target.keyframes.map((k) => ({
+                  tMs: request.startedAtMonotonicMs + k.tMs,
+                  position: k.position,
+                })),
+              },
+      });
+    });
+  }
+
   #simulateFlickTrial(
     request: TrialRecordingRequest,
     scenario: ScenarioDefinition,
-    rng: Rng,
+    geometryRng: Rng,
+    playerRng: Rng,
   ): TrialRecord {
     const recorder = new TrialRecorder(request);
     const effect = this.#effectFor(request.candidateId!);
@@ -142,82 +181,40 @@ export class SyntheticExperimentRunner {
       t += this.#sampleDtMs * 2;
     }
 
-    const targetsCount =
-      scenario.kind === "target-switch" ? (scenario.targetsPerTrial ?? 3) : 1;
     const perTargetBudgetMs =
       scenario.kind === "target-switch"
-        ? Math.floor(scenario.timeoutMs / targetsCount)
+        ? Math.floor(scenario.timeoutMs / (scenario.targetsPerTrial ?? 3))
         : scenario.timeoutMs;
+
+    const targetsCount =
+      scenario.kind === "target-switch"
+        ? (scenario.targetsPerTrial ?? 3)
+        : 1;
+
+    const instance = planScenarioInstance(scenario, this.#viewport, geometryRng);
+    this.#spawnPlannedTargets(recorder, request, instance);
 
     let shotsFired = 0;
     let hitsCount = 0;
 
     for (let ti = 0; ti < targetsCount; ti++) {
-      const spawnT = t + rng.range(30, 90);
-      const center = {
-        x: this.#viewport.widthPx / 2,
-        y: this.#viewport.heightPx / 2,
+      const planned = instance.targets[Math.min(ti, instance.targets.length - 1)]!;
+      const scheduledSpawnT = request.startedAtMonotonicMs + planned.spawnDelayMs;
+      const spawnT = Math.max(scheduledSpawnT, t + playerRng.range(20, 50));
+      const centerAt: TargetCenterFn = (tMs) => {
+        const pos = plannedTargetPositionAt(planned, tMs - request.startedAtMonotonicMs);
+        return pos ?? plannedTargetPositionAt(planned, planned.spawnDelayMs)!;
       };
-      const distance = rng.range(scenario.distanceRangePx.min, scenario.distanceRangePx.max);
-      const angle = this.#pickAngle(scenario, rng, ti);
-      const targetCenter = {
-        x: clampToViewport(center.x + Math.cos(angle) * distance, this.#viewport.widthPx),
-        y: clampToViewport(center.y + Math.sin(angle) * distance, this.#viewport.heightPx),
-      };
-
-      const targetId: TargetId = `target-${request.id}-${ti}`;
-      let centerAt: TargetCenterFn;
-      if (scenario.kind === "flick-dynamic") {
-        const speed = rng.range(
-          scenario.targetSpeedPxPerSec?.min ?? 240,
-          scenario.targetSpeedPxPerSec?.max ?? 480,
-        );
-        const dirX = targetCenter.x > center.x ? -1 : 1;
-        const keyframes: { tMs: number; position: { x: number; y: number } }[] = [];
-        for (let kt = 0; kt <= perTargetBudgetMs; kt += 50) {
-          keyframes.push({
-            tMs: spawnT + kt,
-            position: {
-              x: clampToViewport(targetCenter.x + (dirX * (speed * kt)) / 1000, this.#viewport.widthPx),
-              y: targetCenter.y,
-            },
-          });
-        }
-        recorder.add({
-          kind: "target-spawn",
-          tMs: spawnT,
-          targetId,
-          radiusPx: scenario.targetRadiusPx,
-          motion: { kind: "path", keyframes },
-        });
-        centerAt = (tMs) => {
-          const clamped = Math.min(Math.max(tMs, spawnT), spawnT + perTargetBudgetMs);
-          const idx = Math.min(
-            keyframes.length - 1,
-            Math.max(0, Math.round((clamped - spawnT) / 50)),
-          );
-          return keyframes[idx]!.position;
-        };
-      } else {
-        recorder.add({
-          kind: "target-spawn",
-          tMs: spawnT,
-          targetId,
-          radiusPx: scenario.targetRadiusPx,
-          motion: { kind: "static", position: targetCenter },
-        });
-        centerAt = () => targetCenter;
-      }
 
       const result = this.#flickToTarget(
         recorder,
-        rng,
+        playerRng,
         effect,
-        targetId,
+        `target-${request.id}-${ti}` as TargetId,
         spawnT,
         centerAt(spawnT),
         centerAt,
-        scenario.targetRadiusPx,
+        planned.radiusPx,
         fatigue,
         perTargetBudgetMs,
       );
@@ -238,17 +235,6 @@ export class SyntheticExperimentRunner {
     return recorder.finish(outcome, t);
   }
 
-  #pickAngle(scenario: ScenarioDefinition, rng: Rng, index: number): number {
-    if (scenario.angleMode === "horizontal-biased") {
-      const side = rng.bernoulli(0.5) ? 1 : -1;
-      return side * rng.range(-0.35, 0.35) + (rng.bernoulli(0.5) ? Math.PI : 0);
-    }
-    if (scenario.kind === "target-switch") {
-      return (index * 2.1 + rng.range(-0.6, 0.6)) % (2 * Math.PI);
-    }
-    return rng.range(-Math.PI, Math.PI);
-  }
-
   #flickToTarget(
     recorder: TrialRecorder,
     rng: Rng,
@@ -262,7 +248,6 @@ export class SyntheticExperimentRunner {
     budgetFromSpawnMs: number,
   ): { currentTimeMs: number; completed: boolean; shotsFired: number; hits: number } {
     const p = this.#player;
-    const x = effect.log2Ratio;
     const start = recorder.cursorPosition;
 
     const reactionMedian = p.reactionMedianMs + fatigueMs;
@@ -276,17 +261,24 @@ export class SyntheticExperimentRunner {
     const dyT0 = initialTargetCenter.y - start.y;
     const d0 = Math.hypot(dxT0, dyT0);
 
+    const dirCos = d0 > 0 ? dxT0 / d0 : 1;
+    const dirSin = d0 > 0 ? dyT0 / d0 : 0;
+    const effRatio =
+      Math.pow(Math.max(effect.ratioX, 0.05), Math.abs(dirCos)) *
+      Math.pow(Math.max(effect.ratioY, 0.05), Math.abs(dirSin));
+    const xEff = Math.log2(effRatio);
+
     const vEff = clampNumber(
-      p.referenceFlickSpeedPxPerMs * Math.pow(Math.max(effect.ratio, 0.05), p.velocityAlpha),
+      p.referenceFlickSpeedPxPerMs * Math.pow(Math.max(effRatio, 0.05), p.velocityAlpha),
       0.35,
       14,
     );
 
     let ampFactor: number;
-    if (x < 0) {
-      ampFactor = 1 - p.undershootGain * Math.pow(-x, p.amplitudeExponent);
+    if (xEff < 0) {
+      ampFactor = 1 - p.undershootGain * Math.pow(-xEff, p.amplitudeExponent);
     } else {
-      ampFactor = 1 + p.overshootGain * Math.pow(x, p.amplitudeExponent);
+      ampFactor = 1 + p.overshootGain * Math.pow(xEff, p.amplitudeExponent);
     }
     ampFactor = clampNumber(ampFactor, 0.5, 1.9);
     ampFactor *= Math.exp(
@@ -294,7 +286,7 @@ export class SyntheticExperimentRunner {
         0,
         (p.amplitudeNoiseBase +
           0.09 * (1 - p.flickSkill) +
-          0.03 * Math.abs(x)) * p.trialNoiseScale,
+          0.03 * Math.abs(xEff)) * p.trialNoiseScale,
       ),
     );
 
@@ -308,7 +300,7 @@ export class SyntheticExperimentRunner {
     const uyAim = dyAim / dAim;
 
     const perpJitter =
-      rng.normal(0, p.motorNoisePx * (1 + Math.abs(x)) * p.trialNoiseScale) * dAim * 0.03;
+      rng.normal(0, p.motorNoisePx * (1 + Math.abs(xEff)) * p.trialNoiseScale) * dAim * 0.03;
     const executedDistance = dAim * ampFactor;
     const primaryDestination = {
       x: start.x + uxAim * executedDistance - uyAim * perpJitter,
@@ -319,7 +311,7 @@ export class SyntheticExperimentRunner {
     const tremor =
       p.motorNoisePx *
       p.trialNoiseScale *
-      (1 + 2.5 * Math.pow(Math.max(0, x), 2));
+      (1 + 2.5 * Math.pow(Math.max(0, xEff), 2));
     let point = emitSubmovement(
       {
         from: start,
@@ -335,12 +327,12 @@ export class SyntheticExperimentRunner {
 
     const maxCorrections = 1 + Math.round(3 * (1 - p.correctionSkill));
     const reduceFactor =
-      (0.55 + 0.42 * p.correctionSkill) * Math.max(0.25, 1 - 0.5 * x * x);
+      (0.55 + 0.42 * p.correctionSkill) * Math.max(0.25, 1 - 0.5 * xEff * xEff);
     const correctionNoise =
       p.motorNoisePx *
       (1.7 - 1.15 * p.correctionSkill) *
       p.trialNoiseScale *
-      (1 + 2.5 * x * x);
+      (1 + 2.5 * xEff * xEff);
     let correctionsUsed = 0;
     while (correctionsUsed < maxCorrections) {
       correctionsUsed++;
@@ -425,60 +417,48 @@ export class SyntheticExperimentRunner {
   #simulateTrackingTrial(
     request: TrialRecordingRequest,
     scenario: ScenarioDefinition,
-    rng: Rng,
+    geometryRng: Rng,
+    playerRng: Rng,
   ): TrialRecord {
     const recorder = new TrialRecorder(request);
     const effect = this.#effectFor(request.candidateId!);
     const p = this.#player;
-    const x = effect.log2Ratio;
+    const x = effect.log2RatioX;
 
     const durationMs = scenario.trackingDurationMs ?? scenario.timeoutMs;
-    const center = {
-      x: this.#viewport.widthPx / 2,
-      y: this.#viewport.heightPx / 2,
-    };
-    const ax = this.#viewport.widthPx * 0.28;
-    const ay = this.#viewport.heightPx * 0.22;
-    const periodXms = 2100 + rng.range(-300, 300);
-    const periodYms = 3400 + rng.range(-500, 500);
-    const phase1 = rng.range(0, 2 * Math.PI);
-    const phase2 = rng.range(0, 2 * Math.PI);
+    const instance = planScenarioInstance(scenario, this.#viewport, geometryRng);
+    const keyframes = instance.targets[0]!.kind === "path" ? instance.targets[0]!.keyframes : [];
+    const absoluteKeyframes = keyframes.map((k) => ({
+      tMs: request.startedAtMonotonicMs + k.tMs,
+      position: k.position,
+    }));
 
     const targetId: TargetId = `target-${request.id}`;
-    const keyframes: { tMs: number; position: { x: number; y: number } }[] = [];
-    for (let kt = 0; kt <= durationMs; kt += 50) {
-      keyframes.push({
-        tMs: request.startedAtMonotonicMs + kt,
-        position: {
-          x: center.x + ax * Math.sin((2 * Math.PI * kt) / periodXms + phase1),
-          y: center.y + ay * Math.sin((2 * Math.PI * kt) / periodYms + phase2),
-        },
-      });
-    }
     recorder.add({
       kind: "target-spawn",
       tMs: request.startedAtMonotonicMs,
       targetId,
       radiusPx: scenario.targetRadiusPx,
-      motion: { kind: "path", keyframes },
+      motion: { kind: "path", keyframes: absoluteKeyframes },
     });
 
-    const kpBase = clampNumber(16 * Math.pow(Math.max(effect.ratio, 0.05), 0.45), 2, 26);
+    const kpBase = clampNumber(16 * Math.pow(Math.max(effect.ratioX, 0.05), 0.45), 2, 26);
     const noiseSigma =
       6 *
       (2.2 - 1.65 * p.trackingSkill) *
       p.trialNoiseScale *
       (1 + 2.2 * Math.pow(Math.max(0, x), 2) + 1.6 * Math.pow(Math.max(0, -x), 2));
 
-    let cursor = { ...center };
+    let cursor = { ...absoluteKeyframes[0]!.position };
+    cursor = { x: this.#viewport.widthPx / 2, y: this.#viewport.heightPx / 2 };
     let offset = { x: 0, y: 0 };
-    let nextDistractionT = request.startedAtMonotonicMs + rng.range(1200, 2400);
+    let nextDistractionT = request.startedAtMonotonicMs + playerRng.range(1200, 2400);
 
     let t = request.startedAtMonotonicMs;
     for (let kt = 0; kt <= durationMs; kt += this.#sampleDtMs) {
       t = request.startedAtMonotonicMs + kt;
-      const idx = Math.min(keyframes.length - 1, Math.round(kt / 50));
-      const targetPos = keyframes[idx]!.position;
+      const idx = Math.min(absoluteKeyframes.length - 1, Math.round(kt / 50));
+      const targetPos = absoluteKeyframes[idx]!.position;
 
       const gain = 1 - Math.exp(-kpBase * (this.#sampleDtMs / 1000));
       const desired = {
@@ -486,19 +466,19 @@ export class SyntheticExperimentRunner {
         y: targetPos.y - offset.y,
       };
       const step = {
-        x: (desired.x - cursor.x) * gain + rng.normal(0, noiseSigma),
-        y: (desired.y - cursor.y) * gain + rng.normal(0, noiseSigma),
+        x: (desired.x - cursor.x) * gain + playerRng.normal(0, noiseSigma),
+        y: (desired.y - cursor.y) * gain + playerRng.normal(0, noiseSigma),
       };
       recorder.add({ kind: "pointer-sample", tMs: t, dx: step.x, dy: step.y });
       cursor = { x: cursor.x + step.x, y: cursor.y + step.y };
 
       if (t >= nextDistractionT) {
-        if ((1 - p.trackingSkill) * 0.45 > rng.next()) {
-          const mag = rng.range(50, 130);
-          const ang = rng.range(-Math.PI, Math.PI);
+        if ((1 - p.trackingSkill) * 0.45 > playerRng.next()) {
+          const mag = playerRng.range(50, 130);
+          const ang = playerRng.range(-Math.PI, Math.PI);
           offset = { x: Math.cos(ang) * mag, y: Math.sin(ang) * mag };
         }
-        nextDistractionT = t + rng.range(1400, 2600);
+        nextDistractionT = t + playerRng.range(1400, 2600);
       }
       offset = { x: offset.x * 0.92, y: offset.y * 0.92 };
     }
@@ -507,20 +487,6 @@ export class SyntheticExperimentRunner {
   }
 }
 
-function hashString(value: string): number {
-  let h = 2166136261 >>> 0;
-  for (let i = 0; i < value.length; i++) {
-    h ^= value.charCodeAt(i);
-    h = Math.imul(h, 16777619) >>> 0;
-  }
-  return h >>> 0;
-}
-
 function clampNumber(v: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, v));
-}
-
-function clampToViewport(v: number, max: number): number {
-  const margin = 24;
-  return Math.min(max - margin, Math.max(margin, v));
 }

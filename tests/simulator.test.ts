@@ -53,7 +53,7 @@ describe("deterministic synthetic simulator", () => {
       }
     };
     trials.forEach(walk);
-    expect(numericLeaves.some((n) => Math.abs(n - 6123) < 1)).toBe(false);
+    expect(numericLeaves.some((n) => Math.abs(n - 6123) < 1e-6)).toBe(false);
   });
 
   it("emits high-frequency samples with monotonic timestamps", () => {

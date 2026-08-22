@@ -56,4 +56,15 @@ export interface Recommendation {
   warnings: string[];
   refusedHighConfidence: boolean;
   rationaleLines: string[];
+  unresolvedBoundary: boolean;
+  yExploration?: YExplorationSummary | undefined;
+  furtherTestingSuggested: boolean;
+}
+
+export interface YExplorationSummary {
+  explored: boolean;
+  recommendedEqualY: boolean;
+  bestUnequalYCandidateId: string | null;
+  improvementZ: number | null;
+  rationaleLines: string[];
 }

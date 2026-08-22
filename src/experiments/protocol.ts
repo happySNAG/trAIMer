@@ -1,8 +1,11 @@
 import type {
+  AdaptiveAllocationConfig,
   ExclusionRules,
   ExperimentDefinition,
+  FatigueProtocolConfig,
   ScenarioMixEntry,
   StoppingCriteria,
+  YExplorationConfig,
 } from "../domain/experiment.ts";
 import { CORE_SCENARIOS, type ScenarioDefinition } from "../domain/scenario.ts";
 import type { SensitivityCandidate } from "../domain/candidate.ts";
@@ -40,6 +43,9 @@ export interface ExperimentBuildOptions {
   restBetweenCandidatesMs?: number;
   exclusionRules?: Partial<ExclusionRules>;
   stoppingCriteria?: Partial<StoppingCriteria>;
+  adaptiveAllocation?: Partial<AdaptiveAllocationConfig>;
+  fatigueProtocol?: Partial<FatigueProtocolConfig>;
+  yExploration?: Partial<YExplorationConfig>;
   notes?: string;
 }
 
@@ -59,6 +65,26 @@ export const DEFAULT_STOPPING_CRITERIA: StoppingCriteria = {
   minValidTrialsPerCandidate: 4,
   maxSearchRounds: 2,
   targetUtilityCiHalfWidth: null,
+};
+
+export const DEFAULT_ADAPTIVE_ALLOCATION: AdaptiveAllocationConfig = {
+  enabled: true,
+  minRepsBeforeAdaptive: 8,
+  contenderZThreshold: 2,
+  controlRefreshEveryRounds: 2,
+};
+
+export const DEFAULT_FATIGUE_PROTOCOL: FatigueProtocolConfig = {
+  maxContinuousTestingMs: 12 * 60 * 1000,
+  restDurationMs: 45 * 1000,
+  degradationWindowTrials: 6,
+  degradationRatioThreshold: 1.25,
+};
+
+export const DEFAULT_Y_EXPLORATION: YExplorationConfig = {
+  enabled: false,
+  yFactors: [0.85, 1, 1.18],
+  minImprovementZ: 2,
 };
 
 function scenarioCatalogSubset(ids: readonly string[]): ScenarioDefinition[] {
@@ -128,6 +154,18 @@ export function buildExperimentDefinition(
       ...DEFAULT_STOPPING_CRITERIA,
       ...options.stoppingCriteria,
     },
+    adaptiveAllocation: {
+      ...DEFAULT_ADAPTIVE_ALLOCATION,
+      ...options.adaptiveAllocation,
+    },
+    fatigueProtocol: {
+      ...DEFAULT_FATIGUE_PROTOCOL,
+      ...options.fatigueProtocol,
+    },
+    yExploration: {
+      ...DEFAULT_Y_EXPLORATION,
+      ...options.yExploration,
+    },
     notes: options.notes ?? undefined,
   };
 }
@@ -143,6 +181,7 @@ export function planCandidateBlocks(
   definition: ExperimentDefinition,
   round: number,
   candidateIdFilter?: readonly string[],
+  allocation?: ReadonlyMap<string, number>,
 ): TrialPlanSpec[] {
   const rng = new Rng(definition.orderSeed * 7919 + round * 104729);
   let candidateIds = definition.randomizeOrder
@@ -153,9 +192,20 @@ export function planCandidateBlocks(
     candidateIds = candidateIds.filter((id) => allow.has(id));
   }
 
-  const reps = definition.measuredRepsPerCandidatePerRound;
+  const repsFromAllocation = (candidateId: string): number =>
+    allocation?.get(candidateId) ?? definition.measuredRepsPerCandidatePerRound;
+  const maxReps = Math.max(
+    ...candidateIds.map((id) => repsFromAllocation(id)),
+    0,
+  );
+  const reps = maxReps > 0 ? maxReps : definition.measuredRepsPerCandidatePerRound;
+  void reps;
   const sharedScenarioDraws: string[] = [];
-  for (let r = 0; r < reps; r++) {
+  const drawCount = Math.max(
+    ...candidateIds.map((id) => repsFromAllocation(id)),
+    0,
+  );
+  for (let r = 0; r < drawCount; r++) {
     sharedScenarioDraws.push(pickWeightedScenario(definition, rng));
   }
 
@@ -167,7 +217,9 @@ export function planCandidateBlocks(
       warmups.push(pickWeightedScenario(definition, rng));
     }
     const permRng = new Rng(definition.orderSeed * 31 + round * 977 + hashString(candidateId));
-    const candidateScenarios = permRng.shuffle(sharedScenarioDraws);
+    const candidateReps = repsFromAllocation(candidateId);
+    if (candidateReps <= 0) continue;
+    const candidateScenarios = permRng.shuffle(sharedScenarioDraws).slice(0, candidateReps);
     for (const scenarioId of warmups) {
       specs.push({ candidateId, scenarioId, phase: "warmup", sequenceNumber: seq++ });
     }

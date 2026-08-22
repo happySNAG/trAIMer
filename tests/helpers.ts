@@ -17,6 +17,8 @@ export interface MakeTrialOptions {
   scenarioId?: string;
   scenarioKind?: ScenarioKind;
   phase?: ScenarioPhase;
+  candidateId?: string;
+  scenarioRepIndex?: number | null;
   sensitivity?: SensitivityConfiguration;
   dpi?: number;
   startedAtMonotonicMs?: number;
@@ -33,7 +35,7 @@ export function makeTrial(options: MakeTrialOptions = {}): TrialRecord {
     id: (options.id ?? "trial-test") as TrialRecord["id"],
     sessionId: "session-test",
     experimentId: null,
-    candidateId: "cand-baseline",
+    candidateId: (options.candidateId ?? "cand-baseline") as TrialRecord["candidateId"],
     indexInSession: 0,
     phase: options.phase ?? "measured",
     scenarioId: options.scenarioId ?? "flick-static-medium",
@@ -43,6 +45,7 @@ export function makeTrial(options: MakeTrialOptions = {}): TrialRecord {
     dpi: options.dpi ?? 800,
     expectedSampleIntervalMs: 4.1667,
     startedAtMonotonicMs: options.startedAtMonotonicMs ?? 0,
+    scenarioRepIndex: null,
   };
   return {
     id: request.id,
@@ -51,6 +54,7 @@ export function makeTrial(options: MakeTrialOptions = {}): TrialRecord {
     candidateId: request.candidateId,
     indexInSession: 0,
     phase: request.phase,
+    scenarioRepIndex: options.scenarioRepIndex ?? null,
     scenarioId: request.scenarioId,
     scenarioKind: request.scenarioKind,
     captureContext: {
@@ -74,7 +78,9 @@ export function makeTrial(options: MakeTrialOptions = {}): TrialRecord {
     targets: options.targets ?? [],
     shots: options.shots ?? [],
     focusInterruptions: options.focusInterruptions ?? [],
+    viewportResizes: [],
     outcome: options.outcome ?? "hit",
+    abortedMs: null,
     validity: { status: "valid", reasons: [] },
     seedTag: null,
   };

@@ -1,6 +1,7 @@
 export interface SyntheticPlayerConfig {
   displayName: string;
   trueOptimalEdpi: number;
+  trueOptimalEdpiY: number;
   reactionMedianMs: number;
   reactionLognormalSigma: number;
   referenceFlickSpeedPxPerMs: number;
@@ -22,6 +23,7 @@ export interface SyntheticPlayerConfig {
 export const DEFAULT_PLAYER_CONFIG: SyntheticPlayerConfig = {
   displayName: "synthetic-medium",
   trueOptimalEdpi: 5600,
+  trueOptimalEdpiY: 5600,
   reactionMedianMs: 210,
   reactionLognormalSigma: 0.2,
   referenceFlickSpeedPxPerMs: 4.2,

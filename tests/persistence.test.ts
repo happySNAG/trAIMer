@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  LocalJsonStore,
+  createLocalJsonStore,
   SCHEMA_VERSION,
   buildExperimentDefinition,
   playerPreset,
@@ -19,7 +19,7 @@ afterAll(async () => {
   await rm(storeRoot, { recursive: true, force: true });
 });
 
-const store = new LocalJsonStore(storeRoot);
+const store = createLocalJsonStore(storeRoot);
 
 describe("persistence round trips", () => {
   it("stores and loads a player profile", async () => {

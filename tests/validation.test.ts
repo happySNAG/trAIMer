@@ -169,7 +169,35 @@ describe("trial validation", () => {
     expect(validity.reasons[0]!.code).toBe("FOCUS_LOSS");
   });
 
-  it("flags large sample gaps", () => {
+  it("flags large gaps during continuous movement (capture stall)", () => {
+    const samples = [
+      { tMs: 10, cursor: { x: 640, y: 360 } },
+      { tMs: 14, cursor: { x: 648, y: 360 } },
+      { tMs: 18, cursor: { x: 656, y: 360 } },
+      { tMs: 418, cursor: { x: 700, y: 360 } },
+      { tMs: 422, cursor: { x: 708, y: 360 } },
+      ...Array.from({ length: 25 }, (_, i) => ({
+        tMs: 430 + i * 4,
+        cursor: { x: 716 + i * 2, y: 360 },
+      })),
+    ];
+    const record = makeTrial({
+      samples,
+      targets: [
+        {
+          targetId: "target-v7",
+          radiusPx: 26,
+          appearedMs: 12,
+          removedMs: null,
+          removalReason: null,
+          motion: { kind: "static", position: { x: 800, y: 360 } },
+        },
+      ],
+    });
+    expect(codesOf(record)).toContain("LARGE_SAMPLE_GAP");
+  });
+
+  it("does not flag silent reaction pauses as stalls", () => {
     const record = makeTrial({
       samples: [
         { tMs: 10, cursor: { x: 640, y: 360 } },
@@ -181,7 +209,7 @@ describe("trial validation", () => {
       ],
       targets: [
         {
-          targetId: "target-v7",
+          targetId: "target-v7b",
           radiusPx: 26,
           appearedMs: 15,
           removedMs: null,
@@ -190,7 +218,7 @@ describe("trial validation", () => {
         },
       ],
     });
-    expect(codesOf(record)).toContain("LARGE_SAMPLE_GAP");
+    expect(codesOf(record)).not.toContain("LARGE_SAMPLE_GAP");
   });
 
   it("flags impossible movement speed", () => {

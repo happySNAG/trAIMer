@@ -18,6 +18,9 @@ export const PERSISTED_KINDS = [
   "candidate-evaluation",
   "recommendation",
   "optimizer-run",
+  "calibration-record",
+  "session-checkpoint",
+  "session-bundle",
 ] as const;
 
 export type PersistedKind = (typeof PERSISTED_KINDS)[number];

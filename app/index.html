@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Aldo Aim Lab</title>
+  </head>
+  <body>
+    <div id="app">
+      <nav id="tabs">
+        <button data-tab="setup" class="active">Setup</button>
+        <button data-tab="calibration">Calibration</button>
+        <button data-tab="data">Data</button>
+        <button data-tab="results">Results</button>
+      </nav>
+      <main>
+        <section id="view-setup"></section>
+        <section id="view-run" hidden></section>
+        <section id="view-results" hidden></section>
+        <section id="view-data" hidden></section>
+        <section id="view-calibration" hidden></section>
+      </main>
+    </div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

@@ -1,5 +1,3 @@
-import { mkdir, readFile, writeFile, readdir } from "node:fs/promises";
-import { join } from "node:path";
 import type {
   AimSession,
   ExperimentDefinition,
@@ -9,8 +7,9 @@ import type { PlayerProfile } from "../domain/player.ts";
 import type { Recommendation } from "../domain/recommendation.ts";
 import type { TrialRecord } from "../domain/trial.ts";
 import { unwrapEnvelope, wrapEnvelope } from "./migrations.ts";
+import type { StoreBackend } from "./backends.ts";
 
-export const OPTIMIZER_VERSION = "optimizer-v1";
+export const OPTIMIZER_VERSION = "optimizer-v2";
 
 export interface OptimizerRunMetadata {
   experimentId: string;
@@ -28,103 +27,89 @@ function safeFileSegment(segment: string): string {
 }
 
 export class LocalJsonStore {
-  readonly #rootDir: string;
+  readonly #backend: StoreBackend;
 
-  constructor(rootDir: string) {
-    this.#rootDir = rootDir;
-  }
-
-  async #ensureDir(dir: string): Promise<void> {
-    await mkdir(dir, { recursive: true });
-  }
-
-  async #writeJson(path: string, data: unknown): Promise<void> {
-    await this.#ensureDir(join(this.#rootDir, path, ".."));
-    await writeFile(
-      join(this.#rootDir, path),
-      JSON.stringify(data, null, 2),
-      "utf8",
-    );
-  }
-
-  async #readJson<T>(path: string): Promise<T | null> {
-    try {
-      const text = await readFile(join(this.#rootDir, path), "utf8");
-      return JSON.parse(text) as T;
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") return null;
-      throw err;
-    }
+  constructor(backend: StoreBackend) {
+    this.#backend = backend;
   }
 
   async saveRaw(kind: PersistedKind, relPath: string, payload: unknown): Promise<void> {
     const envelope = wrapEnvelope(kind, payload, new Date().toISOString());
-    await this.#writeJson(relPath, envelope);
+    await this.#backend.writeFile(relPath, JSON.stringify(envelope, null, 2));
   }
 
   async loadRaw<T>(
     kind: PersistedKind,
     relPath: string,
   ): Promise<{ payload: T; migratedFrom: number | null } | null> {
-    const raw = await this.#readJson<unknown>(relPath);
+    const raw = await this.#backend.readFile(relPath);
     if (raw === null) return null;
-    return unwrapEnvelope<T>(kind, raw);
+    return unwrapEnvelope<T>(kind, JSON.parse(raw));
   }
 
   saveProfile(profile: PlayerProfile): Promise<void> {
-    return this.saveRaw("player-profile", join("profiles", safeFileSegment(profile.id) + ".json"), profile);
+    return this.saveRaw("player-profile", joinPath("profiles", safeFileSegment(profile.id) + ".json"), profile);
   }
 
   loadProfile(id: string): Promise<PlayerProfile | null> {
-    return this.loadRaw<PlayerProfile>("player-profile", join("profiles", safeFileSegment(id) + ".json")).then((r) => r?.payload ?? null);
+    return this.loadRaw<PlayerProfile>("player-profile", joinPath("profiles", safeFileSegment(id) + ".json")).then((r) => r?.payload ?? null);
   }
 
   saveSession(session: AimSession): Promise<void> {
-    return this.saveRaw("aim-session", join("sessions", safeFileSegment(session.id) + ".json"), session);
+    return this.saveRaw("aim-session", joinPath("sessions", safeFileSegment(session.id) + ".json"), session);
   }
 
   loadSession(id: string): Promise<AimSession | null> {
-    return this.loadRaw<AimSession>("aim-session", join("sessions", safeFileSegment(id) + ".json")).then((r) => r?.payload ?? null);
+    return this.loadRaw<AimSession>("aim-session", joinPath("sessions", safeFileSegment(id) + ".json")).then((r) => r?.payload ?? null);
+  }
+
+  async listSessionIds(): Promise<string[]> {
+    const files = await this.#backend.listFiles(joinPath("sessions"));
+    return files.map((f) => f.slice(0, -".json".length));
   }
 
   saveExperiment(definition: ExperimentDefinition): Promise<void> {
-    return this.saveRaw("experiment-definition", join("experiments", safeFileSegment(definition.id) + ".json"), definition);
+    return this.saveRaw("experiment-definition", joinPath("experiments", safeFileSegment(definition.id) + ".json"), definition);
   }
 
   loadExperiment(id: string): Promise<ExperimentDefinition | null> {
-    return this.loadRaw<ExperimentDefinition>("experiment-definition", join("experiments", safeFileSegment(id) + ".json")).then((r) => r?.payload ?? null);
+    return this.loadRaw<ExperimentDefinition>("experiment-definition", joinPath("experiments", safeFileSegment(id) + ".json")).then((r) => r?.payload ?? null);
   }
 
   saveTrial(experimentId: string, trial: TrialRecord): Promise<void> {
     return this.saveRaw(
       "trial-record",
-      join("trials", safeFileSegment(experimentId), safeFileSegment(trial.id) + ".json"),
+      joinPath("trials", safeFileSegment(experimentId), safeFileSegment(trial.id) + ".json"),
       trial,
     );
   }
 
   async listTrialIds(experimentId: string): Promise<string[]> {
-    const dir = join(this.#rootDir, "trials", safeFileSegment(experimentId));
-    try {
-      const files = await readdir(dir);
-      return files.filter((f) => f.endsWith(".json")).map((f) => f.slice(0, -".json".length)).sort();
-    } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
-      throw err;
-    }
+    const files = await this.#backend.listFiles(
+      joinPath("trials", safeFileSegment(experimentId)),
+    );
+    return files.map((f) => f.slice(0, -".json".length));
   }
 
   loadTrial(experimentId: string, trialId: string): Promise<TrialRecord | null> {
     return this.loadRaw<TrialRecord>(
       "trial-record",
-      join("trials", safeFileSegment(experimentId), safeFileSegment(trialId) + ".json"),
+      joinPath("trials", safeFileSegment(experimentId), safeFileSegment(trialId) + ".json"),
     ).then((r) => r?.payload ?? null);
+  }
+
+  loadAllTrials(experimentId: string): Promise<TrialRecord[]> {
+    return this.listTrialIds(experimentId).then((ids) =>
+      Promise.all(ids.map((id) => this.loadTrial(experimentId, id))).then((list) =>
+        list.filter((t): t is TrialRecord => t !== null),
+      ),
+    );
   }
 
   saveRecommendation(recommendation: Recommendation): Promise<void> {
     return this.saveRaw(
       "recommendation",
-      join("recommendations", safeFileSegment(recommendation.experimentId) + ".json"),
+      joinPath("recommendations", safeFileSegment(recommendation.experimentId) + ".json"),
       recommendation,
     );
   }
@@ -132,14 +117,14 @@ export class LocalJsonStore {
   loadRecommendation(experimentId: string): Promise<Recommendation | null> {
     return this.loadRaw<Recommendation>(
       "recommendation",
-      join("recommendations", safeFileSegment(experimentId) + ".json"),
+      joinPath("recommendations", safeFileSegment(experimentId) + ".json"),
     ).then((r) => r?.payload ?? null);
   }
 
   async saveOptimizerRun(meta: OptimizerRunMetadata): Promise<void> {
     await this.saveRaw(
       "optimizer-run",
-      join("optimizer-runs", safeFileSegment(meta.experimentId) + ".json"),
+      joinPath("optimizer-runs", safeFileSegment(meta.experimentId) + ".json"),
       meta,
     );
   }
@@ -147,4 +132,10 @@ export class LocalJsonStore {
   static currentSchemaVersion(): number {
     return SCHEMA_VERSION;
   }
+}
+
+function joinPath(...segments: string[]): string {
+  let out = segments[0]!;
+  for (let i = 1; i < segments.length; i++) out = `${out}/${segments[i]!}`;
+  return out;
 }

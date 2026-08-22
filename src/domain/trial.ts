@@ -9,7 +9,8 @@ export type TrialOutcome =
   | "hit"
   | "miss-shot-fired"
   | "timeout-no-shot"
-  | "tracking-complete";
+  | "tracking-complete"
+  | "aborted";
 
 export interface PointerSample {
   tMs: number;
@@ -46,6 +47,12 @@ export interface FocusInterruption {
   reason: string;
 }
 
+export interface ViewportResize {
+  tMs: number;
+  widthPx: number;
+  heightPx: number;
+}
+
 export type ScenarioKind =
   | "flick-static"
   | "flick-dynamic"
@@ -76,9 +83,12 @@ export interface TrialRecord {
   targets: TargetSpan[];
   shots: ShotEvent[];
   focusInterruptions: FocusInterruption[];
+  viewportResizes: ViewportResize[];
   outcome: TrialOutcome;
   validity: TrialValidity;
   seedTag: string | null;
+  scenarioRepIndex: number | null;
+  abortedMs: number | null;
 }
 
 export function targetPositionAt(

@@ -19,7 +19,14 @@ import {
   type ExclusionPolicy,
 } from "./evaluate.ts";
 import {
+  computeCellUtilities,
+  computePairedComparisons,
+  lookupComparison,
+  type PairedComparison,
+} from "./paired.ts";
+import {
   computeConfidence,
+  dunnettAdjustedExclusionZ,
   labelForConfidence,
 } from "./confidence.ts";
 import { fitQuadraticWeighted } from "./quadratic.ts";
@@ -41,8 +48,12 @@ export const DEFAULT_OPTIMIZER_CONFIG: OptimizerConfig = {
       "IMPOSSIBLE_TIMESTAMPS",
       "MISSING_TARGET_APPEARANCE",
       "INSUFFICIENT_SAMPLES",
+      "LARGE_SAMPLE_GAP",
       "IMPOSSIBLE_MOVEMENT",
       "CONFIG_MISMATCH",
+      "POINTER_LOCK_LOSS",
+      "TAB_HIDDEN",
+      "RESIZE_DURING_TRIAL",
     ],
     suspectPolicy: "exclude",
   },
@@ -100,6 +111,15 @@ export class SensitivityOptimizer {
   findSensitivityFor(candidateId: string | null) {
     if (!candidateId) return undefined;
     return this.#definition.candidates.find((c) => c.id === candidateId)?.sensitivity;
+  }
+
+  pairedComparisons(): Map<string, PairedComparison> {
+    const cellUtilities = computeCellUtilities(
+      this.#definition,
+      this.#trialsByCandidate,
+      this.#config.exclusionPolicy,
+    );
+    return computePairedComparisons(this.#trialsByCandidate, cellUtilities);
   }
 
   evaluations(): CandidateEvaluation[] {
@@ -251,19 +271,42 @@ export class SensitivityOptimizer {
 
     const best = evals[0]!;
     const runnerUp = evals[1] ?? null;
-    const gap =
-      runnerUp === null ? null : best.utilityMean - runnerUp.utilityMean;
-    const gapSe =
-      runnerUp === null
-        ? null
-        : Math.hypot(best.utilityStandardError, runnerUp.utilityStandardError);
-    const z = gap !== null && gapSe !== null && gapSe > 0 ? gap / gapSe : null;
+    const paired = this.pairedComparisons();
+    let gap: number | null = null;
+    let z: number | null = null;
+    let gapBasis: "paired" | "pooled" | "none" = "none";
+    if (runnerUp !== null) {
+      const pairedCmp = lookupComparison(paired, best.candidateId, runnerUp.candidateId);
+      if (pairedCmp && pairedCmp.pairedCells >= 3 && pairedCmp.diffStandardError > 0) {
+        gap = pairedCmp.diffMean;
+        z = pairedCmp.z;
+        gapBasis = "paired";
+      } else {
+        gap = best.utilityMean - runnerUp.utilityMean;
+        const gapSe = Math.hypot(
+          best.utilityStandardError,
+          runnerUp.utilityStandardError,
+        );
+        z = gapSe > 0 ? gap / gapSe : null;
+        gapBasis = "pooled";
+      }
+    }
+    if (gapBasis === "paired") {
+      notes.push("best-vs-runner-up gap uses paired instance differences");
+    }
 
-    const tiedSet = new Set<string>();
-    const bestLower = best.utilityMean - 1.96 * best.utilityStandardError;
+    const exclusionZ = dunnettAdjustedExclusionZ(evals.length);
+    const tiedSet = new Set<string>([best.candidateId]);
     for (const e of evals) {
-      const upper = e.utilityMean + 1.96 * e.utilityStandardError;
-      if (upper >= bestLower) tiedSet.add(e.candidateId);
+      if (e.candidateId === best.candidateId) continue;
+      const cmp = lookupComparison(paired, best.candidateId, e.candidateId);
+      if (cmp && cmp.pairedCells >= 3 && cmp.diffStandardError > 0) {
+        if (cmp.z > -exclusionZ) tiedSet.add(e.candidateId);
+      } else {
+        const upper = e.utilityMean + 1.96 * e.utilityStandardError;
+        const bestLower = best.utilityMean - 1.96 * best.utilityStandardError;
+        if (upper >= bestLower) tiedSet.add(e.candidateId);
+      }
     }
     const tiedEvals = evals.filter((e) => tiedSet.has(e.candidateId));
     const xs = tiedEvals.map((e) => e.edpi);
@@ -298,6 +341,24 @@ export class SensitivityOptimizer {
     const atBoundary =
       Math.abs(best.edpi - sortedEdpis[0]!) < 1e-9 ||
       Math.abs(best.edpi - sortedEdpis[sortedEdpis.length - 1]!) < 1e-9;
+    void sortedEdpis;
+
+    const roundsExhausted = this.#roundsRun >= this.#config.maxSearchRounds;
+    const expansionCandidates = this.#definition.candidates.filter(
+      (c) =>
+        c.origin.kind === "manual" &&
+        c.origin.label.startsWith("boundary expansion"),
+    );
+    const boundaryTouched = expansionCandidates.length > 0 || atBoundary;
+    const evaluatedExpansionIncomplete = expansionCandidates.some((c) => {
+      const evaluation = evals.find((e) => e.candidateId === c.id);
+      return (
+        evaluation !== undefined &&
+        evaluation.trialsIncluded.length < this.#config.minValidTrialsPerCandidate
+      );
+    });
+    const unresolvedBoundary =
+      atBoundary && (evaluatedExpansionIncomplete || roundsExhausted);
 
     const vertexFit = fitQuadraticWeighted(
       evals.map((e) => ({
@@ -343,6 +404,18 @@ export class SensitivityOptimizer {
           : "weak";
     if (separation === "weak") {
       confidence = Math.min(confidence, 0.65);
+    }
+    if (unresolvedBoundary) {
+      confidence = Math.min(confidence, 0.45);
+      warnings.push(
+        "unresolved boundary: the optimum may lie beyond the tested range; further testing suggested",
+      );
+    }
+    if (boundaryTouched && !unresolvedBoundary) {
+      confidence = Math.min(confidence, 0.65);
+      warnings.push(
+        "the search reached the edge of the initially tested range; confirm before large commitments",
+      );
     }
 
     let vertexCiLine: string | null = null;
@@ -417,6 +490,11 @@ export class SensitivityOptimizer {
     rationale.push(
       `statistically indistinguishable candidates span ${rangeMin.toFixed(0)}–${rangeMax.toFixed(0)} eDPI`,
     );
+    if (unresolvedBoundary) {
+      rationale.push(
+        "point estimate pinned to the best tested candidate because the optimum may lie beyond the tested range",
+      );
+    }
     if (vertexCiLine) {
       rationale.push(`surrogate vertex 95% CI: ${vertexCiLine}`);
     }
@@ -424,9 +502,17 @@ export class SensitivityOptimizer {
     const unweightedFit = fitQuadraticWeighted(
       evals.map((e) => ({ x: e.log2RatioVsBaseline, y: e.utilityMean, weight: 1 })),
     );
+    const spanInterior = (xv: number): boolean =>
+      xv > testedMinX + 0.02 && xv < testedMaxX - 0.02;
     const pointCandidates = [best.log2RatioVsBaseline];
-    if (vertexFit?.vertexX != null) pointCandidates.push(vertexFit.vertexX);
-    if (unweightedFit?.vertexX != null) pointCandidates.push(unweightedFit.vertexX);
+    if (!unresolvedBoundary) {
+      if (vertexFit?.vertexX != null && spanInterior(vertexFit.vertexX)) {
+        pointCandidates.push(vertexFit.vertexX);
+      }
+      if (unweightedFit?.vertexX != null && spanInterior(unweightedFit.vertexX)) {
+        pointCandidates.push(unweightedFit.vertexX);
+      }
+    }
     pointCandidates.sort((p, q) => p - q);
     const medianIndex = Math.floor(pointCandidates.length / 2);
     const vertexOctaves =
@@ -473,6 +559,13 @@ export class SensitivityOptimizer {
       warnings,
       refusedHighConfidence: confidence < 0.5,
       rationaleLines: rationale,
+      unresolvedBoundary,
+      yExploration: undefined,
+      furtherTestingSuggested:
+        unresolvedBoundary ||
+        boundaryTouched ||
+        confidence < 0.5 ||
+        separation !== "clear",
     };
   }
 
@@ -525,6 +618,9 @@ export class SensitivityOptimizer {
       rationaleLines: [
         `only ${analyzed} valid trials across ${evals.length} candidates; minimum required is ${this.#config.minValidTrialsPerCandidate} per candidate and at least 3 candidates`,
       ],
+      unresolvedBoundary: false,
+      yExploration: undefined,
+      furtherTestingSuggested: true,
     };
   }
 }

@@ -151,3 +151,48 @@ plugged in later without touching any call site (`rotationDegreesForCounts`,
 - Optimizer strategy is screening + quadratic refinement; GP/BO-style search is
   future work. Utility weights are fixed defaults pending real-player data.
 - Tracking directional lag uses discrete scan steps tied to sample spacing.
+
+## Pass 2 additions
+
+- **Browser runtime** (`app/`, Vite + vanilla TS): Setup/Run/Results/Data/
+  Calibration views around a fixed 1280×720 logical canvas. The engine remains
+  DOM-free; only `app/` touches the DOM.
+- **PointerLockCaptureSource + VirtualReticle** (`src/capture/browserSource.ts`):
+  real mouse deltas normalized into CaptureEvents, applied-delta clamping so
+  recorded cursor == rendered reticle, lock-loss/denial handling, blur /
+  visibility / resize events.
+- **Scenario instance planner** (`src/scenarios/planner.ts`): single source of
+  deterministic geometry shared by simulator and browser runtime — identical
+  instances per `(seed, round, scenario, repIndex)` across candidates.
+- **ScenarioDirector** (`src/scenarios/director.ts`): spawns planned targets on
+  schedule, sequences target-switch trials, detects completion, computes
+  outcome, supports abort.
+- **Session state machine** (`src/session/stateMachine.ts`) with explicit
+  transition table; **SessionRunner** orchestrates rounds/blocks/rests via
+  injected ports (clock, sleep, store, trial execution), persists every trial
+  immediately and writes session checkpoints (crash/resume data).
+- **Adaptive allocation** (`src/session/allocation.ts`): after a balanced
+  minimum, reps concentrate on statistically tied contenders; dominated
+  candidates receive periodic control refreshes; budget-capped; decisions carry
+  machine-readable reasons; fully deterministic.
+- **Fatigue protocol** (`src/session/fatigue.ts`): max continuous testing time,
+  rest enforcement, rolling acquisition-time degradation detection; short-
+  session guard warns against large sensitivity changes from thin evidence.
+- **Paired statistics** (`src/optimizer/paired.ts` + `docs/STATISTICS.md`):
+  paired differences over shared cells replace scenario centering as the primary
+  contrast; Dunnett-adjusted exclusion threshold controls multiplicity on the
+  tied set.
+- **Boundary handling**: expansion proposals, vertex-inside-span point guard,
+  `unresolvedBoundary` recommendation flag, boundary-touched confidence cap —
+  wide honest ranges preferred over wrong precise numbers.
+- **Independent-Y staged exploration** (`src/optimizer/yAxis.ts`): stage 2 tests
+  modest Y-only variants against an equal-Y anchor at the chosen X; equality is
+  recommended unless a reliable paired improvement exists. Simulator gains
+  `trueOptimalEdpiY` with directional-weighting heuristic.
+- **Calibration workflow** (`src/calibration/core.ts`, Calibration tab):
+  repeated known-angle measurements → outlier rejection (MAD) → mean ± CI →
+  adequacy gates → versioned `calibration-record`; cm/360 via the existing
+  calibration interface (now sens-aware).
+- **Persistence ports** (`StoreBackend`): Node fs backend (CLI/tests), in-memory
+  backend (tests), IndexedDB backend (browser); envelope/migration guarantees
+  unchanged; versioned session-bundle export/import.
