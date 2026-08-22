@@ -1,0 +1,27 @@
+{
+  "name": "aldo-aim-lab",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Fortnite-focused aim measurement and sensitivity optimization engine (headless core).",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "demo": "tsx src/demo/cli.ts",
+    "demo:help": "tsx src/demo/cli.ts --help"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.30.0",
+    "@types/node": "^24.0.0",
+    "eslint": "^9.30.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.8.0",
+    "typescript-eslint": "^8.35.0",
+    "vitest": "^3.2.0"
+  }
+}
