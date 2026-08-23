@@ -12,6 +12,7 @@ import {
 } from "./stateMachine.ts";
 import type { SessionStateName } from "./types.ts";
 import { assessFatigue } from "./fatigue.ts";
+import { AuditLog, type AuditEntry } from "./audit.ts";
 import { allocateReps, type AllocationDecision } from "./allocation.ts";
 import type {
   SessionCheckpoint,
@@ -36,6 +37,7 @@ export class SessionRunner {
   #blindedLabels = new Map<string, string>();
   #pauseRequested = false;
   #cancelRequested = false;
+  readonly #audit = new AuditLog();
 
   constructor(definition: ExperimentDefinition, ports: SessionRunnerPorts) {
     this.#definition = definition;
@@ -54,6 +56,10 @@ export class SessionRunner {
     return this.#blindedLabels;
   }
 
+  auditEntries(): readonly AuditEntry[] {
+    return this.#audit.entries();
+  }
+
   #setState(next: SessionStateName, detail?: string): void {
     const event = safeEvent(this.#state, next);
     const transitioned = nextSessionState(this.#state, event);
@@ -70,9 +76,18 @@ export class SessionRunner {
     this.#ports.onStateChange?.(next, detail);
   }
 
-  async run(): Promise<{ status: "complete" | "aborted"; trials: TrialRecord[] }> {
+  async run(): Promise<{
+    status: "complete" | "aborted";
+    trials: TrialRecord[];
+    auditTrail: readonly AuditEntry[];
+  }> {
     if (this.#state !== "idle") throw new Error("runner already used");
     this.#setState("setup");
+    this.#audit.append(this.#ports.nowIso(), "experiment-created", {
+      experimentId: String(this.#definition.id),
+      candidateCount: this.#definition.candidates.length,
+      rounds: this.#definition.stoppingCriteria.maxSearchRounds,
+    });
     this.#sessionId = makeSessionId(
       `${this.#definition.id}-${Date.now()}`.replace(/[^a-zA-Z0-9-]/g, "-"),
     );
@@ -114,6 +129,13 @@ export class SessionRunner {
     const optimizer = new SensitivityOptimizer(this.#definition);
     for (const trial of this.#allTrials) optimizer.addTrials([trial]);
     const recommendation = optimizer.recommend();
+    for (const line of recommendation.rationaleLines.slice(0, 3)) {
+      this.#audit.append(this.#ports.nowIso(), "recommendation-created", {
+        edpi: Math.round(recommendation.recommendedEdpi),
+        confidence: Number(recommendation.confidence.toFixed(3)),
+        note: line,
+      });
+    }
     await this.#ports.store.saveRecommendation(recommendation);
     await this.#ports.store.saveOptimizerRun({
       experimentId: this.#definition.id,
@@ -125,7 +147,7 @@ export class SessionRunner {
     this.#setState("complete");
     await this.#persistCheckpoint("complete");
     await this.#ports.execution.releaseCapture();
-    return { status: "complete", trials: this.#allTrials };
+    return { status: "complete", trials: this.#allTrials, auditTrail: this.auditEntries() };
   }
 
   async #executionGate(): Promise<boolean> {
@@ -141,7 +163,9 @@ export class SessionRunner {
 
       if (lastCandidateId !== null && spec.candidateId !== lastCandidateId) {
         this.#setState("rest", "between candidate blocks");
+        this.#audit.append(this.#ports.nowIso(), "rest-started", { reason: "candidate-transition" });
         await this.#ports.sleep(this.#definition.restBetweenCandidatesMs);
+        this.#audit.append(this.#ports.nowIso(), "rest-ended", {});
         this.#continuousTestingMs = 0;
         this.#measuredTrialsSinceRest = [];
         this.#setState("candidate-transition");
@@ -161,10 +185,12 @@ export class SessionRunner {
         );
         if (fatigue.shouldRest) {
           this.#setState("rest", fatigue.reason ?? "fatigue protocol");
+          this.#audit.append(this.#ports.nowIso(), "rest-started", { reason: fatigue.reason ?? "fatigue" });
           await this.#ports.sleep(this.#definition.fatigueProtocol.restDurationMs);
           this.#continuousTestingMs = 0;
           this.#measuredTrialsSinceRest = [];
           this.#setState("inter-trial", "fatigue rest finished");
+          this.#audit.append(this.#ports.nowIso(), "rest-ended", {});
         }
         this.#setState("trial-ready", `${label} · ${scenario.label}`);
       }
@@ -174,8 +200,27 @@ export class SessionRunner {
 
       const startedAt = this.#ports.clock.nowMs();
       this.#setState("trial-active");
+      this.#audit.append(this.#ports.nowIso(), "trial-started", {
+        candidateId: spec.candidateId,
+        scenarioId: spec.scenarioId,
+        phase: spec.phase,
+        round,
+        repIndex: repIndex ?? -1,
+        sequenceNumber: spec.sequenceNumber,
+      });
       const record = await this.#ports.execution.executeTrial(spec, round, repIndex);
       record.scenarioRepIndex = repIndex;
+      this.#audit.append(this.#ports.nowIso(), "trial-ended", {
+        trialId: record.id,
+        outcome: record.outcome,
+        validityStatus: record.validity.status,
+      });
+      if (record.validity.status !== "valid") {
+        this.#audit.append(this.#ports.nowIso(), "trial-invalidated", {
+          trialId: record.id,
+          reasons: record.validity.reasons.map((r) => r.code).join("+"),
+        });
+      }
       const elapsed = this.#ports.clock.nowMs() - startedAt;
       this.#activeTestingMs += Math.max(0, Math.min(elapsed, scenario.timeoutMs * 3));
       if (spec.phase === "measured") {
@@ -257,6 +302,11 @@ export class SessionRunner {
     const allocation = new Map<string, number>();
     for (const decision of decisions) {
       allocation.set(decision.candidateId, decision.reps);
+      this.#audit.append(this.#ports.nowIso(), "adaptive-allocation-decision", {
+        candidateId: decision.candidateId,
+        reps: decision.reps,
+        reason: decision.reason,
+      });
     }
     return allocation;
   }
@@ -292,13 +342,13 @@ export class SessionRunner {
     this.#ports.onStateChange?.(state);
   }
 
-  async #abortRun(reason: string): Promise<{ status: "aborted"; trials: TrialRecord[] }> {
+  async #abortRun(reason: string): Promise<{ status: "aborted"; trials: TrialRecord[]; auditTrail: readonly AuditEntry[] }> {
     this.#cancelRequested = true;
     this.#forceState("aborted");
     this.#phaseLog.push({ state: "aborted-detail", tIso: this.#ports.nowIso(), detail: reason });
     await this.#persistCheckpoint("aborted");
     await this.#ports.execution.releaseCapture().catch(() => undefined);
-    return { status: "aborted", trials: this.#allTrials };
+    return { status: "aborted", trials: this.#allTrials, auditTrail: this.auditEntries() };
   }
 
   async #persistCheckpoint(status: SessionCheckpoint["status"]): Promise<void> {

@@ -29,10 +29,16 @@ import {
   dunnettAdjustedExclusionZ,
   labelForConfidence,
 } from "./confidence.ts";
+import { buildExplanation } from "./explainability.ts";
+import { buildConfidenceCalibration } from "../confidence/calibration.ts";
+import { computeInputQuality, type InputQualityReport } from "../diagnostics/inputQuality.ts";
+import { detectAdaptation } from "./adaptation.ts";
 import { fitQuadraticWeighted } from "./quadratic.ts";
 import {
   DEFAULT_DIMENSION_SCORING,
   DEFAULT_UTILITY_WEIGHTS,
+  scoreTrialDimensions,
+  trialUtilityFromDimensions,
 } from "./scoring.ts";
 
 export interface OptimizerConfig {
@@ -40,6 +46,7 @@ export interface OptimizerConfig {
   validationExpectations: ValidationExpectations;
   minValidTrialsPerCandidate: number;
   maxSearchRounds: number;
+  inputQuality?: InputQualityReport | null | undefined;
 }
 
 export const DEFAULT_OPTIMIZER_CONFIG: OptimizerConfig = {
@@ -71,10 +78,20 @@ export class SensitivityOptimizer {
   readonly #config: OptimizerConfig;
   readonly #trialsByCandidate = new Map<string, TrialRecord[]>();
   #roundsRun = 0;
+  #inputQualityOverride: InputQualityReport | null | undefined;
 
   constructor(definition: ExperimentDefinition, config?: Partial<OptimizerConfig>) {
     this.#definition = definition;
     this.#config = { ...DEFAULT_OPTIMIZER_CONFIG, ...config };
+    this.#inputQualityOverride = config?.inputQuality ?? undefined;
+  }
+
+  setInputQuality(report: InputQualityReport | null): void {
+    this.#inputQualityOverride = report;
+  }
+
+  get inputQuality(): InputQualityReport | null {
+    return this.#inputQualityOverride ?? null;
   }
 
   get roundsRun(): number {
@@ -111,6 +128,28 @@ export class SensitivityOptimizer {
   findSensitivityFor(candidateId: string | null) {
     if (!candidateId) return undefined;
     return this.#definition.candidates.find((c) => c.id === candidateId)?.sensitivity;
+  }
+
+  #worstTrialInputQuality(): InputQualityReport | null {
+    let worst: InputQualityReport | null = null;
+    for (const trials of this.#trialsByCandidate.values()) {
+      for (const trial of trials) {
+        if (trial.phase !== "measured" || trial.validity.status === "invalid") continue;
+        const report = computeInputQuality(trial);
+        if (!worst || report.score < worst.score) worst = report;
+      }
+    }
+    return worst;
+  }
+
+  adaptationEffects(): ReturnType<typeof detectAdaptation> {
+    return detectAdaptation(this.#trialsByCandidate, (trial) => {
+      const scenario = this.#definition.scenarioCatalog.find(
+        (s) => s.id === trial.scenarioId,
+      );
+      const { dimensions } = scoreTrialDimensions(trial, scenario);
+      return trialUtilityFromDimensions(dimensions, DEFAULT_UTILITY_WEIGHTS);
+    });
   }
 
   pairedComparisons(): Map<string, PairedComparison> {
@@ -248,6 +287,10 @@ export class SensitivityOptimizer {
     const baselineEdpiForRange = (): number =>
       this.#definition.dpi * this.#definition.baselineSensitivity.sensX;
     const evals = this.evaluations();
+    const inputQualityReport =
+      this.#inputQualityOverride !== undefined && this.#inputQualityOverride !== null
+        ? this.#inputQualityOverride
+        : this.#worstTrialInputQuality();
     const warnings: string[] = [];
     const rationale: string[] = [];
     const notes: string[] = [];
@@ -405,6 +448,16 @@ export class SensitivityOptimizer {
     if (separation === "weak") {
       confidence = Math.min(confidence, 0.65);
     }
+    if (
+      inputQualityReport &&
+      (inputQualityReport.warnings.unsuitableForHighConfidence ||
+        inputQualityReport.score < 0.7)
+    ) {
+      confidence = Math.min(confidence, 0.45);
+      warnings.push(
+        `capture quality is degraded (input-quality score ${inputQualityReport.score.toFixed(2)}); confidence capped and retest recommended`,
+      );
+    }
     if (unresolvedBoundary) {
       confidence = Math.min(confidence, 0.45);
       warnings.push(
@@ -529,7 +582,7 @@ export class SensitivityOptimizer {
     );
     const recommendedEdpi = this.#definition.dpi * primarySensitivity.sensX;
 
-    return {
+    const recommendationShell: Recommendation = {
       experimentId: this.#definition.id,
       primarySensitivity,
       recommendedEdpi,
@@ -565,7 +618,29 @@ export class SensitivityOptimizer {
         unresolvedBoundary ||
         boundaryTouched ||
         confidence < 0.5 ||
-        separation !== "clear",
+        separation !== "clear" ||
+        (inputQualityReport?.warnings.unsuitableForHighConfidence ?? false),
+    } satisfies Recommendation;
+    const recommendation = recommendationShell;
+    const explanation = buildExplanation({
+      definition: this.#definition,
+      evaluations: evals,
+      recommendation,
+      inputQuality: inputQualityReport,
+    });
+    return {
+      ...recommendation,
+      confidenceCalibration: buildConfidenceCalibration({
+        trialsAnalyzed: analyzed,
+        candidatesEvaluated: evals.length,
+        utilityGapZ: z,
+        separation,
+        unresolvedBoundary,
+        searchRoundsRun: this.#roundsRun,
+        inputQuality: inputQualityReport,
+      }),
+      explanation,
+      inputQuality: inputQualityReport,
     };
   }
 
@@ -621,6 +696,16 @@ export class SensitivityOptimizer {
       unresolvedBoundary: false,
       yExploration: undefined,
       furtherTestingSuggested: true,
+      confidenceCalibration: buildConfidenceCalibration({
+        trialsAnalyzed: analyzed,
+        candidatesEvaluated: evals.length,
+        utilityGapZ: null,
+        separation: "insufficient",
+        unresolvedBoundary: false,
+        searchRoundsRun: this.#roundsRun,
+        inputQuality: null,
+      }),
+      inputQuality: null,
     };
   }
 }

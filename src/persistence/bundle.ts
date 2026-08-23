@@ -12,6 +12,11 @@ export interface SessionBundle {
     session: unknown | null;
     trials: unknown[];
     recommendation: unknown | null;
+    humanSession?: unknown | null;
+    auditTrail?: unknown[] | null;
+    inputQualityByTrialId?: Record<string, unknown> | null;
+    reliabilitySummary?: unknown | null;
+    optimizerMetadata?: unknown | null;
   };
 }
 
@@ -32,6 +37,11 @@ export async function exportExperimentBundle(
       session: null,
       trials,
       recommendation,
+      humanSession: null,
+      auditTrail: null,
+      inputQualityByTrialId: null,
+      reliabilitySummary: null,
+      optimizerMetadata: null,
     },
   };
 }
@@ -85,6 +95,13 @@ export async function importExperimentBundle(
     await store.saveRecommendation(b.payload.recommendation as never);
     recommendationImported = true;
   }
+  if (b.payload.humanSession != null) {
+    unwrapOrThrow("human-session", b.payload.humanSession);
+    const hs = b.payload.humanSession as { sessionId?: string };
+    if (hs.sessionId) {
+      await store.saveRaw("human-session", `human-sessions/${hs.sessionId}.json`, b.payload.humanSession);
+    }
+  }
 
   return { experimentId, trialsImported, recommendationImported };
 }
@@ -92,4 +109,92 @@ export async function importExperimentBundle(
 function unwrapOrThrow(kind: PersistedKind, payload: unknown): void {
   const probe = wrapEnvelope(kind, payload, "1970-01-01T00:00:00.000Z");
   unwrapEnvelope(kind, probe);
+}
+
+export interface CompactAnalysisSummary {
+  bundleKind: "session-bundle";
+  experimentId: string | null;
+  exportedAtIso: string;
+  session: {
+    startedAtIso: string | null;
+    durationMin: number | null;
+    measuredTrials: number;
+    invalidTrials: number;
+    scenarioOrder: string[] | null;
+  } | null;
+  recommendation: {
+    recommendedEdpi: number | null;
+    confidence: number | null;
+    confidenceBasis: string | null;
+    rangeEdpi: [number, number] | null;
+    unresolvedBoundary: boolean | null;
+    furtherTestingSuggested: boolean | null;
+  } | null;
+  inputQualityWorstScore: number | null;
+  adaptationDetected: boolean | null;
+  retestOfExperimentId: string | null;
+}
+
+export function compactAnalysisSummary(bundle: SessionBundle): CompactAnalysisSummary {
+  const rec = bundle.payload.recommendation as
+    | {
+        recommendedEdpi: number;
+        confidence: number;
+        confidenceCalibration?: { basis: string };
+        edpiRange: { min: number; max: number };
+        unresolvedBoundary: boolean;
+        furtherTestingSuggested: boolean;
+        adaptationEffects?: { anySignificantImprovement: boolean };
+      }
+    | null
+    | undefined;
+  const hs = bundle.payload.humanSession as
+    | {
+        startedAtIso: string;
+        endedAtIso: string | null;
+        wallClockMs: number;
+        measuredCount: number;
+        scenarioOrder: string[];
+        retestOfExperimentId: string | null;
+      }
+    | null
+    | undefined;
+  const trials = (bundle.payload.trials ?? []) as { validity?: { status?: string } }[];
+  const invalidTrials = trials.filter((t) => t.validity?.status !== "valid").length;
+  const iqScores = Object.values(
+    (bundle.payload.inputQualityByTrialId ?? {}) as Record<string, { score?: number }>,
+  )
+    .map((r) => r.score)
+    .filter((s): s is number => typeof s === "number");
+
+  return {
+    bundleKind: "session-bundle",
+    experimentId:
+      (bundle.payload.experimentDefinition as { id?: string } | undefined)?.id ?? null,
+    exportedAtIso: bundle.exportedAtIso,
+    session: hs
+      ? {
+          startedAtIso: hs.startedAtIso,
+          durationMin:
+            hs.wallClockMs > 0 ? Math.round(hs.wallClockMs / 600) / 100 : null,
+          measuredTrials: hs.measuredCount,
+          invalidTrials,
+          scenarioOrder: hs.scenarioOrder ?? null,
+        }
+      : null,
+    recommendation: rec
+      ? {
+          recommendedEdpi: rec.recommendedEdpi ?? null,
+          confidence: rec.confidence ?? null,
+          confidenceBasis: rec.confidenceCalibration?.basis ?? null,
+          rangeEdpi: [rec.edpiRange.min, rec.edpiRange.max],
+          unresolvedBoundary: rec.unresolvedBoundary ?? null,
+          furtherTestingSuggested: rec.furtherTestingSuggested ?? null,
+        }
+      : null,
+    inputQualityWorstScore:
+      iqScores.length > 0 ? Math.min(...iqScores) : null,
+    adaptationDetected: rec?.adaptationEffects?.anySignificantImprovement ?? null,
+    retestOfExperimentId: hs?.retestOfExperimentId ?? null,
+  };
 }

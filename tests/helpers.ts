@@ -27,6 +27,7 @@ export interface MakeTrialOptions {
   shots?: TrialRecord["shots"];
   outcome?: TrialOutcome;
   focusInterruptions?: TrialRecord["focusInterruptions"];
+  viewportResizes?: TrialRecord["viewportResizes"];
 }
 
 export function makeTrial(options: MakeTrialOptions = {}): TrialRecord {

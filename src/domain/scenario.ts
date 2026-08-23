@@ -11,6 +11,11 @@ export interface ScenarioDefinition {
   targetSpeedPxPerSec?: { min: number; max: number };
   trackingDurationMs?: number;
   targetsPerTrial?: number;
+  difficulty: {
+    tier: "easy" | "medium" | "hard";
+    discriminatesDimensions: string[];
+    notes: string;
+  };
   notes?: string;
 }
 
@@ -20,8 +25,13 @@ const FLICK_STATIC_MEDIUM: ScenarioDefinition = {
   label: "Static flick, medium targets",
   timeoutMs: 900,
   targetRadiusPx: 26,
-  distanceRangePx: { min: 220, max: 620 },
+  distanceRangePx: { min: 240, max: 620 },
   angleMode: "any",
+  difficulty: {
+    tier: "medium",
+    discriminatesDimensions: ["speed", "accuracy"],
+    notes: "core flick signal; generous radius keeps miss noise low",
+  },
 };
 
 const FLICK_STATIC_SMALL: ScenarioDefinition = {
@@ -30,8 +40,13 @@ const FLICK_STATIC_SMALL: ScenarioDefinition = {
   label: "Static flick, small targets",
   timeoutMs: 1000,
   targetRadiusPx: 16,
-  distanceRangePx: { min: 260, max: 640 },
+  distanceRangePx: { min: 280, max: 640 },
   angleMode: "any",
+  difficulty: {
+    tier: "hard",
+    discriminatesDimensions: ["accuracy", "overshootControl", "undershootControl"],
+    notes: "small radius punishes amplitude errors — strongest sens discriminator",
+  },
 };
 
 const FLICK_DYNAMIC_HORIZONTAL: ScenarioDefinition = {
@@ -40,9 +55,14 @@ const FLICK_DYNAMIC_HORIZONTAL: ScenarioDefinition = {
   label: "Flick to horizontally strafing target",
   timeoutMs: 1100,
   targetRadiusPx: 24,
-  distanceRangePx: { min: 240, max: 560 },
+  distanceRangePx: { min: 260, max: 560 },
   angleMode: "horizontal-biased",
-  targetSpeedPxPerSec: { min: 220, max: 520 },
+  targetSpeedPxPerSec: { min: 260, max: 520 },
+  difficulty: {
+    tier: "hard",
+    discriminatesDimensions: ["speed", "correctionEfficiency"],
+    notes: "interception timing separates over/under-flicking styles",
+  },
 };
 
 const TARGET_SWITCH_SEQUENCE: ScenarioDefinition = {
@@ -51,9 +71,14 @@ const TARGET_SWITCH_SEQUENCE: ScenarioDefinition = {
   label: "Three-target switch sequence",
   timeoutMs: 2400,
   targetRadiusPx: 24,
-  distanceRangePx: { min: 200, max: 480 },
+  distanceRangePx: { min: 220, max: 480 },
   angleMode: "any",
   targetsPerTrial: 3,
+  difficulty: {
+    tier: "hard",
+    discriminatesDimensions: ["speed", "consistency", "correctionEfficiency"],
+    notes: "sequential load exposes consistency across repeated acquisitions",
+  },
 };
 
 const TRACKING_SINE: ScenarioDefinition = {
@@ -65,7 +90,12 @@ const TRACKING_SINE: ScenarioDefinition = {
   distanceRangePx: { min: 0, max: 0 },
   angleMode: "any",
   trackingDurationMs: 6000,
-  targetSpeedPxPerSec: { min: 260, max: 420 },
+  targetSpeedPxPerSec: { min: 280, max: 420 },
+  difficulty: {
+    tier: "hard",
+    discriminatesDimensions: ["trackingPrecision", "consistency"],
+    notes: "Lissajous path with both axes in motion; jitter/lag sensitive",
+  },
 };
 
 export const CORE_SCENARIOS: readonly ScenarioDefinition[] = [

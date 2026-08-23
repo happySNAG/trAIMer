@@ -19,7 +19,9 @@ npm run app     # real-input browser aim lab → http://localhost:5173
 npm run build   # production browser bundle → dist-app/
 ```
 
-See `docs/MANUAL-TEST.md` for the human smoke-test checklist for the browser app.
+See `docs/MANUAL-TEST.md` for the human smoke-test checklist for the browser app,
+and `docs/HUMAN-VALIDATION.md` for the repeated-session protocol used to
+produce trustworthy recommendations.
 
 Calibrated demonstration (also estimates the simulator's true composite
 optimum via Monte Carlo and prints the error against it):

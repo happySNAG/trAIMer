@@ -238,17 +238,19 @@ export function validateTrial(
   } else if (record.shots.length >= 2) {
     let rapidPairs = 0;
     for (let i = 1; i < record.shots.length; i++) {
-      if (record.shots[i]!.tMs - record.shots[i - 1]!.tMs <
-          config.duplicateClickWindowMs) {
+      if (
+        record.shots[i]!.tMs - record.shots[i - 1]!.tMs <
+        config.duplicateClickWindowMs
+      ) {
         rapidPairs++;
       }
     }
-    if (rapidPairs > 0 && record.scenarioKind === "tracking") {
+    if (rapidPairs > 0) {
       reasons.push(
         reason(
           "DUPLICATE_CLICKS",
           "suspect",
-          `${rapidPairs} click pair(s) within ${config.duplicateClickWindowMs}ms during tracking`,
+          `${rapidPairs} accidental double-click pair(s) within ${config.duplicateClickWindowMs}ms`,
         ),
       );
     }

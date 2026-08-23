@@ -21,6 +21,11 @@ import { SessionRunner } from "../../src/session/runner.ts";
 import type { SessionStateName } from "../../src/session/types.ts";
 import { makeExperimentId, makeSessionId, makeTrialId } from "../../src/domain/ids.ts";
 import type { AppSettings } from "./state.ts";
+import {
+  buildHumanSessionRecord,
+  finalizeHumanSessionRecord,
+} from "../../src/session/humanSession.ts";
+import { makePlayerId } from "../../src/domain/ids.ts";
 
 export const LOGICAL_VIEWPORT = { widthPx: 1280, heightPx: 720 };
 
@@ -60,6 +65,10 @@ export class BrowserRunController {
   #rafHandle: number | null = null;
   #fatalInterruptionSeen = false;
   #sessionId: ReturnType<typeof makeSessionId> | null = null;
+  #measuredCount = 0;
+  #invalidCount = 0;
+  #warmupCount = 0;
+  #startedAtIso = new Date().toISOString();
 
   private constructor(
     canvas: HTMLCanvasElement,
@@ -126,14 +135,84 @@ export class BrowserRunController {
         releaseCapture: async () => capture.releaseLock(),
       },
       onStateChange: (state, detail) => this.#callbacks.onHud(state, detail ?? ""),
-      onTrialPersisted: (trial) => this.#callbacks.onTrialPersisted(trial),
+      onTrialPersisted: (trial) => {
+        if (trial.phase === "measured") this.#measuredCount++;
+        else this.#warmupCount++;
+        if (trial.validity.status !== "valid") this.#invalidCount++;
+        this.#callbacks.onTrialPersisted(trial);
+      },
     });
     this.#runner = runner;
 
     const outcome = await runner.run();
     capture.stop();
+
+    try {
+      let record = buildHumanSessionRecord({
+        sessionId: this.#sessionId!,
+        experimentId: this.#definition.id,
+        playerId: makePlayerId(this.#settings.playerName.toLowerCase()),
+        displayName: this.#settings.playerName,
+        dpi: this.#settings.dpi,
+        startingSensitivity: {
+          sensX: this.#settings.sensX,
+          sensY: this.#settings.sensY,
+        },
+        device: {
+          userAgent: navigator.userAgent,
+          platform: navigator.platform ?? "unknown",
+          screenPx: { width: window.screen.width, height: window.screen.height },
+          pointerCoalescingSupported:
+            capture.capabilities?.coalescingSupported ?? null,
+        },
+        startedAtIso: this.#startedAtIso,
+        scenarioOrder: [...new Set(outcome.trials.map((t) => t.scenarioId))],
+        candidateOrderBlinded: [...runner.blindedLabels.values()],
+        candidateReveal: Object.fromEntries(runner.blindedLabels),
+        warmupCount: this.#warmupCount,
+        measuredCount: this.#measuredCount,
+        invalidTrialCount: this.#invalidCount,
+        pausePeriods: [],
+        fatigueIndicators: { forcedRests: 0, degradationDetected: false, degradationRatio: null },
+        optimizerVersion: "optimizer-v2",
+        scoringWeights: {},
+        calibrationAdequateX: null,
+        calibrationAdequateY: null,
+        retestOfExperimentId: null,
+        sessionIndexForPlayer: 1,
+      });
+      const recommendation =
+        this.#store !== null
+          ? await this.#store.loadRecommendation(this.#definition.id)
+          : null;
+      record = finalizeHumanSessionRecord(
+        record,
+        new Date().toISOString(),
+        recommendation,
+        0,
+      );
+      await this.#store?.saveRaw(
+        "human-session",
+        `human-sessions/${this.#sessionId}.json`,
+        record,
+      );
+      await this.#store?.saveRaw(
+        "audit-trail",
+        `audit/${this.#definition.id}.json`,
+        { entries: outcome.auditTrail },
+      );
+    } catch {
+      this.#humanSessionPersistFailed = true;
+    }
+
     this.#callbacks.onExperimentFinished(outcome.status);
     return outcome;
+  }
+
+  #humanSessionPersistFailed = false;
+
+  get humanSessionPersistFailed(): boolean {
+    return this.#humanSessionPersistFailed;
   }
 
   pause(): void {

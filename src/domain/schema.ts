@@ -21,6 +21,10 @@ export const PERSISTED_KINDS = [
   "calibration-record",
   "session-checkpoint",
   "session-bundle",
+  "human-session",
+  "native-capture-fixture",
+  "reliability-summary",
+  "audit-trail",
 ] as const;
 
 export type PersistedKind = (typeof PERSISTED_KINDS)[number];

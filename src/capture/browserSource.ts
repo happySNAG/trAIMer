@@ -27,6 +27,47 @@ export interface BrowserDocumentLike extends DomEventTargetLike {
 export interface MouseMoveLike {
   movementX?: number;
   movementY?: number;
+  timeStamp?: number;
+  getCoalescedEvents?(): unknown[];
+}
+
+export interface PointerEventCapabilities {
+  pointerEventSupported: boolean;
+  coalescingSupported: boolean;
+  capturePath: "pointermove-coalesced" | "pointermove" | "mousemove";
+}
+
+/**
+ * Capability detection for high-fidelity pointer capture. Browsers that
+ * support Pointer Events with getCoalescedEvents() deliver every raw OS
+ * sample between frames; otherwise we fall back to mousemove (frame-coalesced,
+ * silent while still). Raw timestamps come from event.timeStamp when finite.
+ */
+export function detectPointerEventCapabilities(
+  element: DomEventTargetLike & { onpointermove?: unknown },
+): PointerEventCapabilities {
+  const pointerEventSupported = "onpointermove" in element;
+  let coalescingSupported = false;
+  if (typeof window !== "undefined" && typeof window.PointerEvent === "function") {
+    try {
+      const probe = new PointerEvent("pointermove", {
+        movementX: 1,
+        movementY: 0,
+      });
+      coalescingSupported =
+        typeof probe.getCoalescedEvents === "function" &&
+        probe.getCoalescedEvents().length >= 0;
+    } catch {
+      coalescingSupported = false;
+    }
+  }
+  const capturePath: PointerEventCapabilities["capturePath"] =
+    pointerEventSupported && coalescingSupported
+      ? "pointermove-coalesced"
+      : pointerEventSupported
+        ? "pointermove"
+        : "mousemove";
+  return { pointerEventSupported, coalescingSupported, capturePath };
 }
 
 export interface MouseButtonLike {
@@ -94,6 +135,11 @@ export class PointerLockCaptureSource implements CaptureSource {
   #locked = false;
   #pendingLock: ((granted: boolean) => void) | null = null;
   #lockTimer: ReturnType<typeof setTimeout> | null = null;
+  #capabilities: PointerEventCapabilities | null = null;
+
+  get capabilities(): PointerEventCapabilities | null {
+    return this.#capabilities;
+  }
 
   constructor(options: BrowserCaptureOptions) {
     this.#options = options;
@@ -108,17 +154,45 @@ export class PointerLockCaptureSource implements CaptureSource {
     this.#sink = sink;
     const { element, document, window } = this.#options;
 
-    this.#listen(element, "mousemove", (raw) => {
-      const ev = raw as MouseMoveLike;
-      if (!this.#locked) return;
-      const applied = this.#reticle.applyRawDelta(ev.movementX ?? 0, ev.movementY ?? 0);
+    const emitSample = (dx: number, dy: number, tMs: number): void => {
+      const applied = this.#reticle.applyRawDelta(dx, dy);
       sink.onEvent({
         kind: "pointer-sample",
-        tMs: nowMs(),
+        tMs,
         dx: applied.dx,
         dy: applied.dy,
       });
-    });
+    };
+
+    const handleMove = (raw: unknown): void => {
+      const ev = raw as MouseMoveLike;
+      if (!this.#locked) return;
+      const coalesced =
+        typeof ev.getCoalescedEvents === "function"
+          ? (ev.getCoalescedEvents() as MouseMoveLike[])
+          : [];
+      if (coalesced.length > 0) {
+        for (const sub of coalesced) {
+          const ts =
+            typeof sub.timeStamp === "number" && Number.isFinite(sub.timeStamp)
+              ? sub.timeStamp
+              : nowMs();
+          emitSample(sub.movementX ?? 0, sub.movementY ?? 0, ts);
+        }
+        return;
+      }
+      const ts =
+        typeof ev.timeStamp === "number" && Number.isFinite(ev.timeStamp)
+          ? ev.timeStamp
+          : nowMs();
+      emitSample(ev.movementX ?? 0, ev.movementY ?? 0, ts);
+    };
+
+    const capabilities = detectPointerEventCapabilities(element as never);
+    this.#capabilities = capabilities;
+    const moveType =
+      capabilities.capturePath === "mousemove" ? "mousemove" : "pointermove";
+    this.#listen(element, moveType, handleMove);
 
     this.#listen(element, "mousedown", (raw) => {
       const ev = raw as MouseButtonLike;

@@ -1,4 +1,6 @@
 import type { SensitivityConfiguration } from "./settings.ts";
+import type { InputQualityReport } from "../diagnostics/inputQuality.ts";
+import type { AdaptationReport } from "../optimizer/adaptation.ts";
 
 export type AimDimension =
   | "speed"
@@ -59,6 +61,70 @@ export interface Recommendation {
   unresolvedBoundary: boolean;
   yExploration?: YExplorationSummary | undefined;
   furtherTestingSuggested: boolean;
+  confidenceCalibration?: ConfidenceCalibrationMetadata | undefined;
+  explanation?: RecommendationExplanation | undefined;
+  sensitivityChangePlan?: SensitivityChangePlan | undefined;
+  inputQuality?: InputQualityReport | null | undefined;
+  adaptationEffects?: AdaptationReport | undefined;
+}
+
+
+
+export interface ConfidenceCalibrationMetadata {
+  basis: "heuristic";
+  heuristicVersion: string;
+  diagnostics: {
+    trialsAnalyzed: number;
+    candidatesEvaluated: number;
+    utilityGapZ: number | null;
+    separation: string;
+    unresolvedBoundary: boolean;
+    inputQualityScore: number | null;
+    searchRoundsRun: number;
+  };
+  empiricalModelVersion: null;
+  notes: string[];
+}
+
+export interface CandidateExplanationRow {
+  candidateId: string;
+  edpiX: number;
+  utilityMean: number | null;
+  utilityStandardError: number | null;
+  validTrials: number;
+  tiedWithBest: boolean | null;
+}
+
+export interface ScenarioContribution {
+  scenarioId: string;
+  difficultyTier: string;
+  validTrials: number;
+  meanUtilityBest: number | null;
+  meanUtilityRunnerUp: number | null;
+}
+
+export interface RecommendationExplanation {
+  whyThisX: string[];
+  whyThisY: string[];
+  candidatesTested: CandidateExplanationRow[];
+  scenarioContributions: ScenarioContribution[];
+  evidenceForWinner: string[];
+  evidenceAgainstWinner: string[];
+  uncertaintyRemaining: string[];
+  furtherTestingActions: string[];
+  boundaryReached: boolean;
+  captureQualityAdequate: boolean | null;
+}
+
+export interface SensitivityChangePlan {
+  policyApplied: boolean;
+  currentSensX: number;
+  recommendedNowSensX: number;
+  recommendedNowEdpi: number;
+  fullInferredSensX: number;
+  stepOctavesAllowed: number;
+  rationaleLines: string[];
+  retestAfterSessions: number;
 }
 
 export interface YExplorationSummary {

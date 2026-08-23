@@ -110,6 +110,67 @@ export function renderResultsView(
     }
   }
 
+  container.append(el("h3", { text: "Confidence basis" }));
+  container.append(
+    el("p", {
+      class: "note",
+      text:
+        rec.confidenceCalibration
+          ? `basis: ${rec.confidenceCalibration.basis} (${rec.confidenceCalibration.heuristicVersion}) — not an empirically validated probability`
+          : "basis: heuristic",
+    }),
+  );
+
+  if (rec.inputQuality) {
+    container.append(el("h3", { text: "Input quality" }));
+    container.append(
+      el("p", {
+        text: `score ${rec.inputQuality.score.toFixed(2)} · ~${rec.inputQuality.metrics.observedRateHz.toFixed(0)} Hz`,
+      }),
+    );
+    const iqList = el("ul", {});
+    for (const line of rec.inputQuality.warningLines) iqList.append(el("li", { text: line }));
+    if (rec.inputQuality.warningLines.length === 0) {
+      iqList.append(el("li", { text: "(no capture-quality warnings)" }));
+    }
+    container.append(iqList);
+  }
+
+  if (rec.sensitivityChangePlan?.policyApplied) {
+    container.append(el("h3", { text: "Staged change plan" }));
+    const plan = rec.sensitivityChangePlan;
+    container.append(
+      el("p", {
+        text: `change to ${plan.recommendedNowSensX.toFixed(2)}% X now (full inferred optimum ${plan.fullInferredSensX.toFixed(2)}%); retest after ${plan.retestAfterSessions} session(s)`,
+      }),
+    );
+  }
+
+  if (rec.explanation) {
+    container.append(el("h3", { text: "Why this recommendation" }));
+    const why = el("ul", {});
+    for (const line of [
+      ...rec.explanation.whyThisX,
+      ...rec.explanation.whyThisY,
+      ...rec.explanation.furtherTestingActions,
+    ]) {
+      why.append(el("li", { text: line }));
+    }
+    container.append(why);
+  }
+
+  if (rec.adaptationEffects && rec.adaptationEffects.effects.length > 0) {
+    container.append(el("h3", { text: "Adaptation effects" }));
+    container.append(
+      el("p", {
+        class: "note",
+        text: rec.adaptationEffects.anySignificantImprovement
+          ? "late-session improvement detected for at least one candidate — first encounters were likely still adaptation"
+          : "no significant early-vs-late adaptation detected",
+      }),
+    );
+  }
+
   const details = el("details", {});
   details.append(
     el("summary", { text: "Raw recommendation JSON" }),
