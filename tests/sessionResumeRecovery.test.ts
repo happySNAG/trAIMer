@@ -228,6 +228,7 @@ describe("production session resume/recovery", () => {
     expect(() =>
       parseResumeCheckpoint({
         schemaVersion: RESUME_CHECKPOINT_SCHEMA_VERSION,
+        kind: "session-resume",
         sessionId: "session-x",
         // missing experimentId
         completedSequenceKeys: [],

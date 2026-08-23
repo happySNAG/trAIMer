@@ -1,4 +1,5 @@
 import { renderSetupView } from "./setupView.ts";
+import { loadSettings } from "./state.ts";
 import { BrowserRunController, type RunControllerCallbacks } from "./runController.ts";
 import { renderResultsView } from "./resultsView.ts";
 import { renderDataView } from "./dataView.ts";
@@ -15,6 +16,14 @@ import { APP_VERSION, ENGINE_VERSION } from "../../src/version.ts";
 import { toAimLabError } from "../../src/errors/types.ts";
 import { LocalDiagnosticLog } from "../../src/diagnostics/localLog.ts";
 import { installTestHooks, testModeEnabled } from "./testHooks.ts";
+import {
+  gatherPreflightEnvironment,
+  loadStoredEngineVersions,
+} from "./preflightClient.ts";
+import { runPreflightChecks } from "../../src/preflight/preflight.ts";
+import { renderPreflightPanel } from "./preflightView.ts";
+import { buildFinalResult } from "../../src/results/finalResult.ts";
+import { planNextTest } from "../../src/session/retest.ts";
 
 const view = (id: string): HTMLElement => {
   const node = document.getElementById(id);
@@ -77,7 +86,7 @@ function activate(tab: string): void {
   if (tab === "history") {
     void store().then((s) => renderHistoryView(views.history, s));
   }
-  if (tab === "diagnostics") renderDiagnosticsView(views.diagnostics, sessionToken(), diagnosticLog);
+  if (tab === "diagnostics") renderDiagnosticsView(views.diagnostics, sessionToken(), diagnosticLog, store());
 }
 
 function sessionToken(): string {
@@ -203,9 +212,31 @@ function makeCallbacks(run: RunView): RunControllerCallbacks {
         status === "complete"
           ? "Session complete — opening results…"
           : "Session aborted — partial data was saved.";
+      let finalResult = null;
       try {
         const s = await store();
         lastRecommendation = await s.loadRecommendation(controller!.definition.id);
+        if (lastRecommendation) {
+          const settingsNow = loadSettings();
+          const definition = controller!.definition;
+          const retestPlan = planNextTest(definition, lastRecommendation, {
+            priorSessionEndedAtIso: new Date().toISOString(),
+            nowIso: new Date().toISOString(),
+            orderSeed: settingsNow.experimentSeed + 1,
+          });
+          finalResult = buildFinalResult({
+            recommendation: lastRecommendation,
+            dpi: settingsNow.dpi,
+            currentSensXPercent: settingsNow.sensX,
+            currentSensYPercent: settingsNow.sensY,
+            calibration: null,
+            retestPlan,
+          });
+          diagnosticLog.log("info", "final-result", {
+            action: finalResult.recommendedNextAction,
+            edpi: Math.round(finalResult.immediateRecommended.edpi),
+          });
+        }
       } catch (err) {
         const aimErr = toAimLabError(err);
         diagnosticLog.error(aimErr.code, aimErr.message);
@@ -215,6 +246,7 @@ function makeCallbacks(run: RunView): RunControllerCallbacks {
         renderResultsView(views.results, {
           recommendation: lastRecommendation,
           trialsAnalyzed: lastTrialsAnalyzed.count,
+          finalResult,
         });
         activate("results");
       }, 900);
@@ -253,6 +285,24 @@ renderSetupView(views.setup, {
     });
   },
 });
+
+// ---- startup preflight panel (Pass 5, requirement E) ----
+void (async () => {
+  try {
+    const s = await store();
+    const env = await gatherPreflightEnvironment(s);
+    env.storedArtifactEngineVersions = await loadStoredEngineVersions(s);
+    const report = runPreflightChecks(env);
+    const holder = el("div", { class: "preflight-panel" });
+    views.setup.prepend(holder);
+    renderPreflightPanel(holder, report, null);
+  } catch (err) {
+    diagnosticLog.error("PREFLIGHT_FAILED", String(err));
+    const holder = el("div", { class: "preflight-panel" });
+    views.setup.prepend(holder);
+    renderPreflightPanel(holder, null, String(err));
+  }
+})();
 
 // ---- startup resume list (requirement L) ----
 void (async () => {

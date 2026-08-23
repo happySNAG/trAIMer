@@ -26,6 +26,8 @@ import {
   finalizeHumanSessionRecord,
 } from "../../src/session/humanSession.ts";
 import { makePlayerId } from "../../src/domain/ids.ts";
+import { OPTIMIZER_VERSION } from "../../src/version.ts";
+import { assessTimeJump } from "../../src/lifecycle/lifecycle.ts";
 
 export const LOGICAL_VIEWPORT = { widthPx: 1280, heightPx: 720 };
 
@@ -196,7 +198,7 @@ export class BrowserRunController {
         invalidTrialCount: this.#invalidCount,
         pausePeriods: [],
         fatigueIndicators: { forcedRests: 0, degradationDetected: false, degradationRatio: null },
-        optimizerVersion: "optimizer-v2",
+        optimizerVersion: OPTIMIZER_VERSION,
         scoringWeights: {},
         calibrationAdequateX: null,
         calibrationAdequateY: null,
@@ -401,8 +403,20 @@ export class BrowserRunController {
   #startRenderLoop(director: ScenarioDirector): void {
     const ctx = this.#canvas.getContext("2d");
     if (!ctx) throw new Error("2d canvas unavailable");
+    let previousFrameNowMs: number | null = null;
     const frame = (): void => {
       const now = performance.now();
+      // Sleep/wake hardening: a >2 s monotonic jump mid-trial invalidates the
+      // trial exactly like lock loss (timestamps across sleep are not data).
+      if (previousFrameNowMs !== null) {
+        const jump = assessTimeJump(previousFrameNowMs, now);
+        if (jump.jumped && this.#active !== null && !this.#active.fatalSeen) {
+          this.#active.fatalSeen = true;
+          this.#fatalInterruptionSeen = true;
+          this.#active.recorder.abort(now, "sleep-wake-time-jump");
+        }
+      }
+      previousFrameNowMs = now;
       const status = director.tick(now);
       this.#drawFrame(ctx, director.recorder.activeTargetsAt(now));
       if (status.finished || this.#fatalInterruptionSeen) {

@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  engine:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - name: no-telemetry audit (sources)
+        run: node scripts/audit-no-telemetry.mjs
+
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - run: npx playwright install chromium --with-deps
+      - run: npm run test:browser
+      - run: npm run build
+      - name: release artifact verification
+        run: node scripts/verify-release.mjs
+      - name: no-telemetry audit (bundle)
+        run: node scripts/audit-no-telemetry.mjs
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-traces
+          path: test-results/
+          retention-days: 7
+
+  native-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: protocol parity checks (host-independent)
+        shell: bash
+        run: |
+          npm ci
+          npx vitest run tests/nativeProtocolConstants.test.ts
+          bash scripts/build-native-windows.sh
+      - name: compile helper (MSVC)
+        shell: cmd
+        run: |
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat" || exit /b 1
+          scripts\build-native-windows.bat
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aldo_capture_helper
+          path: native/windows/aldo_capture_helper.exe
+          retention-days: 30

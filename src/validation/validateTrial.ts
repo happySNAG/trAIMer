@@ -81,6 +81,24 @@ export function validateTrial(
   let previousCursor: { x: number; y: number } | null = null;
   for (let i = 0; i < samples.length; i++) {
     const s = samples[i]!;
+    // Non-finite values poison every downstream comparison (NaN > limit is
+    // always false) — fail closed on them explicitly (Pass 5 adversarial fix).
+    if (
+      !Number.isFinite(s.tMs) ||
+      !Number.isFinite(s.cursor.x) ||
+      !Number.isFinite(s.cursor.y) ||
+      !Number.isFinite(s.dx) ||
+      !Number.isFinite(s.dy)
+    ) {
+      reasons.push(
+        reason(
+          "IMPOSSIBLE_TIMESTAMPS",
+          "fatal",
+          `sample ${i} contains non-finite values (tMs=${String(s.tMs)}, cursor=${String(s.cursor?.x)},${String(s.cursor?.y)})`,
+        ),
+      );
+      break;
+    }
     if (s.tMs < record.startedAtMonotonicMs - 1e-6) {
       reasons.push(
         reason(
@@ -142,7 +160,18 @@ export function validateTrial(
     previousCursor = s.cursor;
   }
 
-  if (record.endedAtMonotonicMs < record.startedAtMonotonicMs) {
+  if (
+    !Number.isFinite(record.startedAtMonotonicMs) ||
+    !Number.isFinite(record.endedAtMonotonicMs)
+  ) {
+    reasons.push(
+      reason(
+        "IMPOSSIBLE_TIMESTAMPS",
+        "fatal",
+        "trial start/end timestamps must be finite numbers",
+      ),
+    );
+  } else if (record.endedAtMonotonicMs < record.startedAtMonotonicMs) {
     reasons.push(
       reason(
         "IMPOSSIBLE_TIMESTAMPS",

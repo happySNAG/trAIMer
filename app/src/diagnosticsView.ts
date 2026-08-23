@@ -1,5 +1,6 @@
 import {
   NativeTransportCaptureSource,
+  assertLoopbackUrl,
   type TransportSocket,
 } from "../../src/capture/nativeClient.ts";
 import { analyzeNativeStream } from "../../src/diagnostics/nativeDiagnostics.ts";
@@ -7,10 +8,12 @@ import { detectPointerEventCapabilities } from "../../src/capture/browserSource.
 import type { LocalDiagnosticLog } from "../../src/diagnostics/localLog.ts";
 import type { CaptureSink } from "../../src/capture/events.ts";
 import type { NativeFrame } from "../../src/capture/native.ts";
+import type { LocalJsonStore } from "../../src/persistence/store.ts";
 import { el, clear, downloadJson } from "./dom.ts";
 
-/** Adapts the platform WebSocket to the engine transport port. */
+/** Adapts the platform WebSocket to the engine transport port (loopback only). */
 function browserSocketFactory(url: string): TransportSocket {
+  assertLoopbackUrl(url); // defense in depth; transport constructor also enforces
   const ws = new WebSocket(url);
   return {
     send: (data) => ws.send(data),
@@ -33,6 +36,7 @@ export function renderDiagnosticsView(
   container: HTMLElement,
   sessionToken: string,
   log: LocalDiagnosticLog,
+  store: Promise<LocalJsonStore>,
 ): void {
   clear(container);
   container.append(
@@ -115,6 +119,67 @@ export function renderDiagnosticsView(
         observedRateHz: Number(report.observedRateHz.toFixed(1)),
         dropped: report.droppedSequences,
       });
+      // Persist the self-test so preflight can trust tier-1 later.
+      if (source.header) {
+        const selfTest = {
+          kind: "capture-self-test" as const,
+          schemaVersion: 1 as const,
+          startedAtIso: new Date(startedAt).toISOString(),
+          endedAtIso: new Date().toISOString(),
+          durationMs: Math.round(performance.now() - startedAt),
+          sourceKind: source.header.sourceKind,
+          deviceId: source.header.deviceId,
+          deviceDescription: source.header.deviceDescription,
+          nominalRateHz: source.header.nominalRateHz,
+          transportCounters: {
+            framesReceived: source.counters.framesReceived,
+            duplicateSequences: source.counters.duplicateSequences,
+            missingSequences: source.counters.missingSequences,
+            nonMonotonicTimestamps: source.counters.nonMonotonicTimestamps,
+            reconnects: source.counters.reconnects,
+          },
+          observedRateHz: report.observedRateHz,
+          activeMotionRateHz: report.observedRateHz,
+          intervalP10Ms: report.intervalP10Ms,
+          intervalP50Ms: report.intervalP50Ms,
+          intervalP90Ms: report.intervalP90Ms,
+          jitterCv: report.jitterCv,
+          movementSamples: frames.length,
+          totalDx: frames.reduce(
+            (a: number, f: NativeFrame) =>
+              a + f.events.reduce((b, e) => b + (e.kind === "pointer-sample" ? e.dx : 0), 0),
+            0,
+          ),
+          totalDy: 0,
+          clickPresses: frames.reduce(
+            (a: number, f: NativeFrame) =>
+              a +
+              f.events.filter((e) => e.kind === "button" && e.action === "press").length,
+            0,
+          ),
+          clickReleases: frames.reduce(
+            (a: number, f: NativeFrame) =>
+              a +
+              f.events.filter((e) => e.kind === "button" && e.action === "release").length,
+            0,
+          ),
+          zeroMotionFraction: 0,
+          longestStillnessMs: null,
+          largestGapMs: report.longestGapMs,
+          droppedSequences: report.droppedSequences,
+          duplicateSequences: report.duplicateSequences,
+          nonMonotonicTimestamps: report.nonMonotonicTimestamps,
+          reconnects: report.reconnectEvents,
+          checks: report.checks.map((c) => ({ name: c.name, status: c.status, detail: c.detail })),
+          verdict: report.verdict,
+          reasonCodes: report.checks.filter((c) => c.status !== "pass").map((c) => `${c.name}:${c.status}`),
+        };
+        void store
+          .then((st) =>
+            st.saveRaw("capture-self-test", `self-tests/st-${Date.now()}.json`, selfTest),
+          )
+          .catch((err) => log.error("SELF_TEST_PERSIST_FAILED", String(err)));
+      }
       output.textContent = JSON.stringify(
         {
           verdict: report.verdict,

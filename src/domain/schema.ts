@@ -25,6 +25,7 @@ export const PERSISTED_KINDS = [
   "native-capture-fixture",
   "reliability-summary",
   "audit-trail",
+  "capture-self-test",
 ] as const;
 
 export type PersistedKind = (typeof PERSISTED_KINDS)[number];

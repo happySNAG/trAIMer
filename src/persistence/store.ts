@@ -8,8 +8,15 @@ import type { Recommendation } from "../domain/recommendation.ts";
 import type { TrialRecord } from "../domain/trial.ts";
 import { unwrapEnvelope, wrapEnvelope } from "./migrations.ts";
 import type { StoreBackend } from "./backends.ts";
+import { OPTIMIZER_VERSION as CANONICAL_OPTIMIZER_VERSION } from "../version.ts";
 
-export const OPTIMIZER_VERSION = "optimizer-v2";
+/**
+ * Canonical optimizer version, kept as a local alias for store metadata
+ * consumers. The single public export lives in src/version.ts (index re-exports
+ * it exactly once).
+ */
+const OPTIMIZER_VERSION = CANONICAL_OPTIMIZER_VERSION;
+void OPTIMIZER_VERSION;
 
 export interface OptimizerRunMetadata {
   experimentId: string;

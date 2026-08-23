@@ -17,14 +17,13 @@ import {
   manualCandidate,
 } from "../sensmath/candidates.ts";
 import { Rng } from "../util/rng.ts";
+import { RC_BUILDER_DEFAULTS, V1_RC_PROTOCOL_DEFAULTS } from "./rcDefaults.ts";
 
-export const DEFAULT_LADDER_FACTORS: readonly number[] = [
-  1 / 1.35,
-  1 / 1.15,
-  1,
-  1.15,
-  1.35,
-];
+export const DEFAULT_LADDER_FACTORS: readonly number[] =
+  RC_BUILDER_DEFAULTS.ladderFactors;
+
+/** The canonical documented V1 RC defaults (see rcDefaults.ts). */
+export { V1_RC_PROTOCOL_DEFAULTS };
 
 export interface ExperimentBuildOptions {
   id: ExperimentId;
@@ -50,41 +49,23 @@ export interface ExperimentBuildOptions {
 }
 
 export const DEFAULT_EXCLUSION_RULES: ExclusionRules = {
-  fatalReasons: [
-    "IMPOSSIBLE_TIMESTAMPS",
-    "MISSING_TARGET_APPEARANCE",
-    "INSUFFICIENT_SAMPLES",
-    "IMPOSSIBLE_MOVEMENT",
-    "CONFIG_MISMATCH",
-  ],
-  suspectPolicy: "exclude",
+  ...RC_BUILDER_DEFAULTS.exclusionRules,
 };
 
 export const DEFAULT_STOPPING_CRITERIA: StoppingCriteria = {
-  maxTotalMeasuredTrials: 240,
-  minValidTrialsPerCandidate: 4,
-  maxSearchRounds: 2,
-  targetUtilityCiHalfWidth: null,
+  ...RC_BUILDER_DEFAULTS.stoppingCriteria,
 };
 
 export const DEFAULT_ADAPTIVE_ALLOCATION: AdaptiveAllocationConfig = {
-  enabled: true,
-  minRepsBeforeAdaptive: 8,
-  contenderZThreshold: 2,
-  controlRefreshEveryRounds: 2,
+  ...RC_BUILDER_DEFAULTS.adaptiveAllocation,
 };
 
 export const DEFAULT_FATIGUE_PROTOCOL: FatigueProtocolConfig = {
-  maxContinuousTestingMs: 12 * 60 * 1000,
-  restDurationMs: 45 * 1000,
-  degradationWindowTrials: 6,
-  degradationRatioThreshold: 1.25,
+  ...RC_BUILDER_DEFAULTS.fatigueProtocol,
 };
 
 export const DEFAULT_Y_EXPLORATION: YExplorationConfig = {
-  enabled: false,
-  yFactors: [0.85, 1, 1.18],
-  minImprovementZ: 2,
+  ...RC_BUILDER_DEFAULTS.yExploration,
 };
 
 function scenarioCatalogSubset(ids: readonly string[]): ScenarioDefinition[] {
@@ -95,18 +76,10 @@ function scenarioCatalogSubset(ids: readonly string[]): ScenarioDefinition[] {
   });
 }
 
-const DEFAULT_MIX_IDS = [
-  "flick-static-medium",
-  "flick-static-small",
-  "flick-dynamic-horizontal",
-  "target-switch-triple",
-  "tracking-smooth-sine",
-];
-
 export function buildExperimentDefinition(
   options: ExperimentBuildOptions,
 ): ExperimentDefinition {
-  const scenarioIds = options.scenarioIds ?? DEFAULT_MIX_IDS;
+  const scenarioIds = options.scenarioIds ?? RC_BUILDER_DEFAULTS.scenarioIds;
   const catalog = scenarioCatalogSubset(scenarioIds);
   const mix: ScenarioMixEntry[] = catalog.map((s) => ({
     scenarioId: s.id,
@@ -136,12 +109,16 @@ export function buildExperimentDefinition(
     candidates,
     scenarioMix: mix,
     scenarioCatalog: catalog,
-    warmupTrialsPerCandidateBlock: options.warmupTrialsPerCandidateBlock ?? 2,
+    warmupTrialsPerCandidateBlock:
+      options.warmupTrialsPerCandidateBlock ??
+      RC_BUILDER_DEFAULTS.warmupTrialsPerCandidateBlock,
     measuredRepsPerCandidatePerRound:
-      options.measuredRepsPerCandidatePerRound ?? 8,
+      options.measuredRepsPerCandidatePerRound ??
+      RC_BUILDER_DEFAULTS.measuredRepsPerCandidatePerRound,
     randomizeOrder: options.randomizeOrder ?? true,
     orderSeed: options.orderSeed ?? 1,
-    restBetweenCandidatesMs: options.restBetweenCandidatesMs ?? 15000,
+    restBetweenCandidatesMs:
+      options.restBetweenCandidatesMs ?? RC_BUILDER_DEFAULTS.restBetweenCandidatesMs,
     exclusionRules: {
       fatalReasons:
         options.exclusionRules?.fatalReasons ??

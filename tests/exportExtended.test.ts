@@ -12,6 +12,7 @@ import {
   playerPreset,
   equalXy,
 } from "../src/index.ts";
+import { sha256Hex, stableStringify } from "../src/persistence/backup.ts";
 import type { TrialRecord } from "../src/domain/trial.ts";
 
 describe("extended analysis export", () => {
@@ -82,6 +83,12 @@ describe("extended analysis export", () => {
       { seq: 0, tIso: "2026-08-22T10:00:00.000Z", category: "experiment-created", detail: {} },
       { seq: 1, tIso: "2026-08-22T10:24:00.000Z", category: "recommendation-created", detail: {} },
     ];
+    // Extending a bundle after export changes its contents: refresh the
+    // integrity metadata so the import checksum still matches.
+    bundle.integrity = {
+      algorithm: "sha256",
+      checksumHex: await sha256Hex(stableStringify(bundle.payload)),
+    };
     return { store, backend, bundle, definition };
   }
 

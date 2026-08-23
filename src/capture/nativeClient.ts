@@ -80,6 +80,41 @@ export interface NativeTransportOptions {
 
 const DEFAULT_RECONNECT = { maxAttempts: 3, initialDelayMs: 250, maxDelayMs: 4000 };
 
+/** Security limits (Pass 5): a hostile/buggy helper cannot exhaust memory. */
+export const NATIVE_TRANSPORT_LIMITS = {
+  /** Maximum inbound message size in characters (~1 MiB). Legit frames are <10 KB. */
+  maxMessageChars: 1_000_000,
+  /** Maximum events per frame accepted. */
+  maxEventsPerFrame: 4096,
+} as const;
+
+/**
+ * Validates that a transport URL targets loopback only. The native capture
+ * transport must NEVER leave the machine; this fails closed on anything else.
+ */
+export function assertLoopbackUrl(url: string): void {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new NativeTransportError(`invalid transport url: ${url}`);
+  }
+  if (parsed.protocol !== "ws:" && parsed.protocol !== "wss:") {
+    throw new NativeTransportError(`transport must use ws:// or wss:// (got ${parsed.protocol})`);
+  }
+  const host = parsed.hostname.toLowerCase();
+  if (
+    host !== "127.0.0.1" &&
+    host !== "localhost" &&
+    host !== "::1" &&
+    host !== "[::1]"
+  ) {
+    throw new NativeTransportError(
+      `native capture is loopback-only; refusing non-local host "${parsed.hostname}"`,
+    );
+  }
+}
+
 interface WelcomeMessage extends NativeStreamHeader {
   helperVersion: string;
 }
@@ -119,9 +154,15 @@ export class NativeTransportCaptureSource implements CaptureSource {
     lastSequenceSeen: null,
   };
   #lastFrameMonotonicMs: number | null = null;
-  #seenSequences = new Set<number>();
+  /*
+   * Sequence continuity is enforced via `lastSequenceSeen` alone. Sequences
+   * are strictly increasing within an epoch, so a Set of seen sequences is
+   * redundant AND unbounded (a leak at 1000 Hz over a long session); the
+   * non-monotonic check already rejects duplicates and regressions.
+   */
 
   constructor(options: NativeTransportOptions) {
+    assertLoopbackUrl(options.url);
     this.#options = options;
     this.descriptor = {
       kind: "native",
@@ -249,6 +290,14 @@ export class NativeTransportCaptureSource implements CaptureSource {
   }
 
   #handleMessage(raw: string): void {
+    if (raw.length > NATIVE_TRANSPORT_LIMITS.maxMessageChars) {
+      this.#fail(
+        new NativeTransportError(
+          `oversized message rejected (${raw.length} chars > ${NATIVE_TRANSPORT_LIMITS.maxMessageChars})`,
+        ),
+      );
+      return;
+    }
     let msg: ServerMessage;
     try {
       msg = JSON.parse(raw) as ServerMessage;
@@ -286,7 +335,6 @@ export class NativeTransportCaptureSource implements CaptureSource {
         // A new connection starts a NEW stream epoch: sequence numbering and
         // timestamps restart under the helper. Cumulative counters survive;
         // continuity state resets so reconnects are not miscounted as drops.
-        this.#seenSequences.clear();
         this.#counters.lastSequenceSeen = null;
         this.#lastFrameMonotonicMs = null;
         this.#setStatus("streaming", `accepted by ${this.#header.deviceId}`);
@@ -324,14 +372,18 @@ export class NativeTransportCaptureSource implements CaptureSource {
       this.#fail(new NativeTransportError("malformed frame timestamp"));
       return;
     }
-    if (this.#seenSequences.has(seq)) {
-      this.#counters.duplicateSequences++;
-      this.#fail(new NativeTransportError(`duplicate frame sequence ${seq}`));
-      return;
-    }
     const lastSeq = this.#counters.lastSequenceSeen;
+    // Strictly increasing within an epoch: duplicates and regressions both
+    // fail closed here (bounded memory — no seen-set retained).
     if (lastSeq !== null && seq <= lastSeq) {
-      this.#fail(new NativeTransportError(`non-monotonic sequence ${seq} after ${lastSeq}`));
+      if (seq === lastSeq) this.#counters.duplicateSequences++;
+      this.#fail(
+        new NativeTransportError(
+          seq === lastSeq
+            ? `duplicate frame sequence ${seq}`
+            : `non-monotonic sequence ${seq} after ${lastSeq}`,
+        ),
+      );
       return;
     }
     if (lastSeq !== null && seq > lastSeq + 1) {
@@ -351,6 +403,14 @@ export class NativeTransportCaptureSource implements CaptureSource {
         this.#counters.longestGapMs = gap;
       }
     }
+    if (msg.events.length > NATIVE_TRANSPORT_LIMITS.maxEventsPerFrame) {
+      this.#fail(
+        new NativeTransportError(
+          `oversized frame: ${msg.events.length} events > ${NATIVE_TRANSPORT_LIMITS.maxEventsPerFrame}`,
+        ),
+      );
+      return;
+    }
     const events: CaptureEvent[] = [];
     for (const rawEvent of msg.events) {
       const ev = validateCaptureEvent(rawEvent);
@@ -362,7 +422,6 @@ export class NativeTransportCaptureSource implements CaptureSource {
     }
     // Recorded ONLY after every event validated — a failed frame leaves zero
     // trace in counters, sequence tracking, or sinks.
-    this.#seenSequences.add(seq);
     this.#counters.framesReceived++;
     this.#counters.lastSequenceSeen = seq;
     this.#lastFrameMonotonicMs = msg.tMonotonicMs;

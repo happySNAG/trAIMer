@@ -2,11 +2,18 @@ import type { PersistedKind } from "../domain/schema.ts";
 import { SCHEMA_VERSION } from "../domain/schema.ts";
 import { unwrapEnvelope, wrapEnvelope } from "./migrations.ts";
 import type { LocalJsonStore } from "./store.ts";
+import { sha256Hex, stableStringify } from "./backup.ts";
+
+export interface BundleIntegrity {
+  algorithm: "sha256";
+  checksumHex: string;
+}
 
 export interface SessionBundle {
   schemaVersion: number;
   kind: "session-bundle";
   exportedAtIso: string;
+  integrity?: BundleIntegrity;
   payload: {
     experimentDefinition: unknown;
     session: unknown | null;
@@ -28,21 +35,26 @@ export async function exportExperimentBundle(
   if (!definition) throw new Error(`experiment ${experimentId} not found`);
   const trials = await store.loadAllTrials(experimentId);
   const recommendation = await store.loadRecommendation(experimentId);
+  const payload: SessionBundle["payload"] = {
+    experimentDefinition: definition,
+    session: null,
+    trials,
+    recommendation,
+    humanSession: null,
+    auditTrail: null,
+    inputQualityByTrialId: null,
+    reliabilitySummary: null,
+    optimizerMetadata: null,
+  };
   return {
     schemaVersion: SCHEMA_VERSION,
     kind: "session-bundle",
     exportedAtIso: new Date().toISOString(),
-    payload: {
-      experimentDefinition: definition,
-      session: null,
-      trials,
-      recommendation,
-      humanSession: null,
-      auditTrail: null,
-      inputQualityByTrialId: null,
-      reliabilitySummary: null,
-      optimizerMetadata: null,
+    integrity: {
+      algorithm: "sha256",
+      checksumHex: await sha256Hex(stableStringify(payload)),
     },
+    payload,
   };
 }
 
@@ -61,6 +73,8 @@ export async function importExperimentBundle(
     !b ||
     b.kind !== "session-bundle" ||
     typeof b.schemaVersion !== "number" ||
+    !Number.isSafeInteger(b.schemaVersion) ||
+    b.schemaVersion < 0 ||
     !b.payload ||
     typeof b.payload !== "object"
   ) {
@@ -71,32 +85,44 @@ export async function importExperimentBundle(
       `bundle schemaVersion ${b.schemaVersion} is newer than supported ${SCHEMA_VERSION}`,
     );
   }
+  if (b.integrity) {
+    const actual = await sha256Hex(stableStringify(b.payload));
+    if (actual !== b.integrity.checksumHex) {
+      throw new Error("bundle integrity checksum mismatch — file is corrupted");
+    }
+  }
   const definition = b.payload.experimentDefinition as { id?: string } | undefined;
   if (!definition || typeof definition.id !== "string") {
     throw new Error("bundle missing experiment definition");
   }
   const experimentId = definition.id;
 
+  // ---- FULL validation pass BEFORE any mutation (zero partial state) ----
   unwrapOrThrow("experiment-definition", b.payload.experimentDefinition);
-  await store.saveExperiment(b.payload.experimentDefinition as never);
-
-  let trialsImported = 0;
   for (const trial of (b.payload.trials ?? []) as unknown[]) {
     unwrapOrThrow("trial-record", trial);
     const t = trial as { id?: string };
     if (!t.id) throw new Error("bundle trial missing id");
+    void t;
+  }
+  if (b.payload.recommendation != null) unwrapOrThrow("recommendation", b.payload.recommendation);
+  if (b.payload.humanSession != null) unwrapOrThrow("human-session", b.payload.humanSession);
+
+  // ---- mutation pass ----
+  await store.saveExperiment(b.payload.experimentDefinition as never);
+
+  let trialsImported = 0;
+  for (const trial of (b.payload.trials ?? []) as unknown[]) {
     await store.saveTrial(experimentId, trial as never);
     trialsImported++;
   }
 
   let recommendationImported = false;
   if (b.payload.recommendation != null) {
-    unwrapOrThrow("recommendation", b.payload.recommendation);
     await store.saveRecommendation(b.payload.recommendation as never);
     recommendationImported = true;
   }
   if (b.payload.humanSession != null) {
-    unwrapOrThrow("human-session", b.payload.humanSession);
     const hs = b.payload.humanSession as { sessionId?: string };
     if (hs.sessionId) {
       await store.saveRaw("human-session", `human-sessions/${hs.sessionId}.json`, b.payload.humanSession);

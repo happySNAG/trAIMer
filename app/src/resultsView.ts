@@ -1,10 +1,13 @@
 import type { Recommendation } from "../../src/domain/recommendation.ts";
+import type { FinalResult } from "../../src/results/finalResult.ts";
 import { el, clear } from "./dom.ts";
 import { loadSettings } from "./state.ts";
 
 export interface ResultsInput {
   recommendation: Recommendation | null;
   trialsAnalyzed: number;
+  /** Pass 5 frozen results contract; rendered as the headline when present. */
+  finalResult?: FinalResult | null | undefined;
 }
 
 export function renderResultsView(
@@ -26,6 +29,42 @@ export function renderResultsView(
   }
 
   const rec = input.recommendation;
+
+  if (input.finalResult) {
+    const fr = input.finalResult;
+    const headline = el("table", {});
+    const nextActionLabels: Record<string, string> = {
+      "apply-recommended-change": "Apply the recommended change",
+      "apply-staged-change": "Apply the bounded first step",
+      "run-targeted-retest": "Run the targeted retest",
+      "run-clean-repeat": "Run one clean repeat session",
+      "recalibrate-first": "Recalibrate before trusting results",
+      "collect-more-sessions": "Collect more sessions first",
+      "keep-current-settings": "Keep your current settings",
+    };
+    for (const [label, value] of [
+      ["Next action", nextActionLabels[fr.recommendedNextAction] ?? fr.recommendedNextAction],
+      ["Current X / Y", `${fr.currentSensitivity.sensXPercent.toFixed(2)} % · ${fr.currentSensitivity.sensYPercent.toFixed(2)} %`],
+      ["Apply now", `${fr.immediateRecommended.sensXPercent.toFixed(2)} % · ${fr.immediateRecommended.sensYPercent.toFixed(2)} % (${fr.immediateRecommended.edpi.toFixed(0)} eDPI)`],
+      ...(fr.fullInferredSensitivity
+        ? [["Full inferred", `${fr.fullInferredSensitivity.sensXPercent.toFixed(2)} % — retest before moving further`] as [string, string]]
+        : []),
+      ["Plausible eDPI range", `${fr.plausibleEdpiRange.min.toFixed(0)} – ${fr.plausibleEdpiRange.max.toFixed(0)}`],
+      ["Confidence", `${(fr.confidence * 100).toFixed(0)} % (${fr.confidenceLabel}, ${fr.confidenceBasis})`],
+      ["Boundary", fr.boundaryStatus],
+      ["Capture quality", fr.captureQualityGrade ? `${fr.captureQualityGrade} (${fr.captureQualityScore?.toFixed(2)})` : "—"],
+      ["Search shape", fr.searchAdequacyClassification ?? "—"],
+    ] as [string, string][]) {
+      headline.append(el("tr", {}, [el("th", { text: label }), el("td", { text: value })]));
+    }
+    container.append(
+      el("h3", { text: "What to do next" }),
+      headline,
+      el("h4", { text: "Why" }),
+      el("ul", {}, fr.nextActionRationale.map((l) => el("li", { text: l }))),
+    );
+  }
+
   const rows: [string, string][] = [
     ["Player", settings.playerName],
     ["DPI", String(settings.dpi)],

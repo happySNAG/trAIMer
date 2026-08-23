@@ -100,6 +100,9 @@ export function parseResumeCheckpoint(raw: unknown): ResumeCheckpoint {
       `unsupported checkpoint schemaVersion ${String(c.schemaVersion)} (expected ${RESUME_CHECKPOINT_SCHEMA_VERSION})`,
     );
   }
+  if (c.kind !== "session-resume") {
+    throw new Error(`corrupted checkpoint: wrong kind ${String(c.kind)}`);
+  }
   if (
     typeof c.sessionId !== "string" ||
     typeof c.experimentId !== "string" ||

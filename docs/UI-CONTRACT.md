@@ -71,3 +71,26 @@ is a bug.
   invalidated with visible audit metadata.
 - No network access, no telemetry; the diagnostic bundle is user-triggered.
 - Confidence is always labeled heuristic until empirical calibration exists.
+
+## 6. Pass 5 additions to this contract
+
+New stable engine seams the redesign must use (never reimplement):
+
+| API | Module | Notes |
+| --- | --- | --- |
+| `runPreflightChecks(env)` + `PREFLIGHT_THRESHOLDS` | `src/preflight/preflight.ts` | Setup-tab panel; verdicts READY / READY_WITH_WARNINGS / NOT_READY_FOR_HIGH_CONFIDENCE / BLOCKED; reason codes rendered verbatim |
+| `analyzeCaptureSelfTest(...)` | `src/diagnostics/captureSelfTest.ts` | Diagnostics probe persists `capture-self-test` records; verdict gates native tier-1 trust |
+| `buildFinalResult(input)` → `FinalResult` (`final-result-v1`) | `src/results/finalResult.ts` | THE results-screen object incl. ONE decided next action + rationale |
+| `planNextTest(...)` → `NextTestPlan` | `src/session/retest.ts` | retest loop: triggers, targeted-vs-repeat, enforced rest |
+| `exportBackupAll` / `importBackupAll` | `src/persistence/backup.ts` | whole-store backup with SHA-256 integrity; restore validates everything pre-write |
+| `ContractState<T>` loaders | `src/contracts/states.ts` | empty/loading/ready/error for history & results views |
+| lifecycle helpers (`assessTimeJump`, `InstanceGuard`, `LIFECYCLE_POLICY`) | `src/lifecycle/lifecycle.ts` | sleep/wake invalidation, duplicate-instance guard |
+
+### Handoff state (Pass 5)
+
+The engine is feature-complete for V1 RC. Every calculation, threshold,
+verdict, and next-action decision lives in `src/**`; the app layer only
+renders. Claude Code may restyle all of `app/**` freely under §1 while
+keeping the seams above intact. The Results view already renders
+`FinalResult` as its headline; History renders `HistorySnapshot`; Setup
+renders the preflight report and resume list.
