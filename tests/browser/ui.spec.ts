@@ -66,6 +66,38 @@ test.describe("data safety surfaces", () => {
   });
 });
 
+test.describe("UI Pass 3 refinements", () => {
+  test("preflight can be re-run in place from the readiness card", async ({ page }) => {
+    await page.goto("/");
+    await page.click(`#tabs button[data-tab="setup"]`);
+    await expect(page.locator("#setup-preflight")).toContainText("System readiness", {
+      timeout: 15_000,
+    });
+    await page.click("#setup-preflight button:has-text('Run checks again')");
+    // The panel re-renders with a fresh report rather than disappearing.
+    await expect(page.locator("#setup-preflight")).toContainText("System readiness", {
+      timeout: 15_000,
+    });
+    await expect(page.locator("#setup-preflight .preflight-group").first()).toBeVisible();
+  });
+
+  test("empty history answers what to do next", async ({ page }) => {
+    await page.goto("/");
+    await page.click(`#tabs button[data-tab="history"]`);
+    await expect(page.locator("#view-history")).toContainText("No sessions recorded yet");
+    await expect(
+      page.locator("#view-history button", { hasText: "Start an aim test" }),
+    ).toBeVisible();
+  });
+
+  test("first-use Home explains the three-step flow", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.locator("#view-home")).toContainText("Confirm your setup");
+    await expect(page.locator("#view-home")).toContainText("Play the blinded test");
+    await expect(page.locator("#view-home")).toContainText("Get a measured answer");
+  });
+});
+
 test.describe("diagnostics presentation", () => {
   test("player-level status tiles render before any technical detail", async ({ page }) => {
     await page.goto("/");

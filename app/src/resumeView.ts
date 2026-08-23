@@ -100,7 +100,8 @@ export async function renderResumeList(
     // treatment; older ones resume via a quieter control.
     const resumeBtn = button("Resume", { variant: first ? "primary" : "secondary", icon: "play" });
     resumeBtn.addEventListener("click", () => callbacks.onResume(checkpoint));
-    const exportBtn = button("Export diagnostic bundle", { variant: "ghost", icon: "download" });
+    // The exported file is the session's resume bundle — say so.
+    const exportBtn = button("Export session bundle", { variant: "ghost", icon: "download" });
     exportBtn.addEventListener("click", () => callbacks.onExport(checkpoint));
     const discardBtn = button("Discard", { variant: "danger" });
     discardBtn.addEventListener("click", () => callbacks.onDiscard(checkpoint));

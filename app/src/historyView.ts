@@ -3,6 +3,7 @@ import type { LocalJsonStore } from "../../src/persistence/store.ts";
 import { el, clear } from "./dom.ts";
 import {
   badge,
+  button,
   card,
   codeChip,
   emptyState,
@@ -34,6 +35,7 @@ const DIMENSION_LABELS: Record<string, string> = {
 export async function renderHistoryView(
   container: HTMLElement,
   store: LocalJsonStore,
+  onStartTest?: () => void,
 ): Promise<void> {
   clear(container);
   container.append(
@@ -61,6 +63,9 @@ export async function renderHistoryView(
         "history",
         "No sessions recorded yet",
         "Once you complete aim tests, this page tracks your sensitivity, confidence, and capture quality over time.",
+        onStartTest
+          ? button("Start an aim test", { variant: "primary", icon: "play", onClick: onStartTest })
+          : undefined,
       ),
     );
     renderCalibrationHistory(container, snap);
@@ -252,10 +257,14 @@ function buildSessionDetail(s: SessionSummaryViewModel, snap: HistorySnapshot): 
   rankingCol.append(el("p", { class: "session-detail-title", text: "Candidate ranking" }));
   if (ranking && ranking.rows.length > 0) {
     const list = el("div", { class: "dim-chips" });
+    // The stored ranking may carry one shared placeholder eDPI for every row;
+    // repeating an identical number per chip reads as data when it isn't.
+    const distinctEdpi = new Set(ranking.rows.map((r) => r.edpiX.toFixed(0)));
     for (const row of [...ranking.rows].sort((a, b) => a.rank - b.rank)) {
       const chip = el("div", { class: "dim-chip" });
+      const edpiPart = distinctEdpi.size > 1 ? ` · ${row.edpiX.toFixed(0)} eDPI` : "";
       chip.append(
-        el("span", { class: "dim-chip-name", text: `#${row.rank} · ${row.edpiX.toFixed(0)} eDPI${row.tiedWithBest && row.rank !== 1 ? " · tied" : ""}` }),
+        el("span", { class: "dim-chip-name", text: `#${row.rank}${edpiPart}${row.tiedWithBest && row.rank !== 1 ? " · tied" : ""}` }),
         el("span", {
           class: `dim-chip-value${row.rank === 1 ? " tone-accent" : ""}`,
           text: row.utilityMean !== null ? row.utilityMean.toFixed(3) : "—",

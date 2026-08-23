@@ -82,24 +82,39 @@ async function store(): Promise<LocalJsonStore> {
   return new LocalJsonStore(new IndexedDbBackend(await openAimLabDb()));
 }
 
-// ---- preflight, computed once at boot and shared by Home + Test ----
+// ---- preflight, shared by Home + Test; recomputable on demand ----
 
 interface PreflightOutcome {
   report: PreflightReport | null;
   errorText: string | null;
 }
 
-const preflightOutcome: Promise<PreflightOutcome> = (async () => {
-  try {
-    const s = await store();
-    const env = await gatherPreflightEnvironment(s);
-    env.storedArtifactEngineVersions = await loadStoredEngineVersions(s);
-    return { report: runPreflightChecks(env), errorText: null };
-  } catch (err) {
-    diagnosticLog.error("PREFLIGHT_FAILED", String(err));
-    return { report: null, errorText: String(err) };
-  }
-})();
+function computePreflight(): Promise<PreflightOutcome> {
+  return (async () => {
+    try {
+      const s = await store();
+      const env = await gatherPreflightEnvironment(s);
+      env.storedArtifactEngineVersions = await loadStoredEngineVersions(s);
+      return { report: runPreflightChecks(env), errorText: null };
+    } catch (err) {
+      diagnosticLog.error("PREFLIGHT_FAILED", String(err));
+      return { report: null, errorText: String(err) };
+    }
+  })();
+}
+
+let preflightOutcome: Promise<PreflightOutcome> = computePreflight();
+
+/** Renders the Test-tab preflight panel; "Run checks again" recomputes. */
+async function renderSetupPreflight(): Promise<void> {
+  const holder = views.setup.querySelector<HTMLElement>("#setup-preflight");
+  if (!holder) return;
+  const outcome = await preflightOutcome;
+  renderPreflightPanel(holder, outcome.report, outcome.errorText, () => {
+    preflightOutcome = computePreflight();
+    void renderSetupPreflight();
+  });
+}
 
 // ---- navigation ----
 
@@ -134,10 +149,19 @@ function activate(tab: string): void {
     node.hidden = name !== tab;
   }
   if (tab === "home") void renderHome();
+  if (tab === "setup") {
+    // Keep the recoverable-session list current — a session may have finished
+    // or been discarded since the tab was last built.
+    const resumeContainer = views.setup.querySelector<HTMLElement>("#setup-resume");
+    if (resumeContainer) {
+      clear(resumeContainer);
+      void mountResumeList(resumeContainer);
+    }
+  }
   if (tab === "data") void renderDataView(views.data);
   if (tab === "calibration") renderCalibrationView(views.calibration);
   if (tab === "history") {
-    void store().then((s) => renderHistoryView(views.history, s));
+    void store().then((s) => renderHistoryView(views.history, s, () => activate("setup")));
   }
   if (tab === "diagnostics") renderDiagnosticsView(views.diagnostics, sessionToken(), diagnosticLog, store());
   if (tab === "results") void renderResults();
@@ -626,11 +650,7 @@ async function mountResumeList(container: HTMLElement): Promise<void> {
 
 // ---- startup: preflight panel + resume list on the Test tab ----
 
-void (async () => {
-  const outcome = await preflightOutcome;
-  const holder = views.setup.querySelector<HTMLElement>("#setup-preflight");
-  if (holder) renderPreflightPanel(holder, outcome.report, outcome.errorText);
-})();
+void renderSetupPreflight();
 
 void (async () => {
   const resumeContainer = views.setup.querySelector<HTMLElement>("#setup-resume");

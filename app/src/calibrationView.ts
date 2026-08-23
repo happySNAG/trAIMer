@@ -56,7 +56,7 @@ export function renderCalibrationView(container: HTMLElement): void {
             el("p", {
               class: "muted",
               text:
-                "The engine treats the mouse-to-rotation transform as UNCALIBRATED until you complete this flow. Testing still works; physical distances (cm/360) stay unavailable.",
+                "Testing works without it, but physical distances (like cm per 360°) stay unavailable until you complete this flow and the engine judges the measurements adequate.",
             }),
           ),
         );
@@ -127,7 +127,9 @@ export function renderCalibrationView(container: HTMLElement): void {
   const startButton = button("Start rep", { variant: "primary", icon: "play" });
   const stopButton = button("Stop rep", { variant: "secondary" });
   stopButton.disabled = true;
-  const computeButton = button("Compute & save calibration", { variant: "primary", icon: "check" });
+  // Secondary until at least one rep exists — one volt action per screen.
+  const computeButton = button("Compute & save calibration", { variant: "secondary", icon: "check" });
+  computeButton.disabled = true;
 
   const measurementsTableHolder = el("div", {});
   const status = el("div", {});
@@ -138,6 +140,7 @@ export function renderCalibrationView(container: HTMLElement): void {
   const measurements: Omit<CalibrationMeasurement, "rejected" | "rejectReason">[] = [];
 
   function redrawMeasurements(): void {
+    computeButton.disabled = measurements.length === 0;
     clear(measurementsTableHolder);
     const derived = measurements.map((m) => m.thetaDeg / (m.countsX * (m.sensPercent / 100)));
     measurementsTableHolder.append(
@@ -228,7 +231,7 @@ export function renderCalibrationView(container: HTMLElement): void {
     );
   });
 
-  container.append(sectionLabel("Guided procedure — external, manual"));
+  container.append(sectionLabel("Guided procedure"));
   container.append(
     grid(
       2,

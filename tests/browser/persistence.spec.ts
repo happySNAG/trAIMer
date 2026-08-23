@@ -9,7 +9,7 @@ test.describe("persistence failure states", () => {
 
     // Create a malformed bundle file and feed it through the import input.
     const fileChooserPromise = page.waitForEvent("filechooser");
-    await page.locator('#view-data input[type="file"]:not(.hidden)').click();
+    await page.locator('#view-data button', { hasText: "Choose bundle file" }).click();
     const chooser = await fileChooserPromise;
     await chooser.setFiles({
       name: "broken-bundle.json",
@@ -17,7 +17,7 @@ test.describe("persistence failure states", () => {
       buffer: Buffer.from(JSON.stringify({ kind: "not-a-bundle", payload: {} })),
     });
 
-    await expect(page.locator("#view-data")).toContainText("import failed", {
+    await expect(page.locator("#view-data")).toContainText("Import rejected", {
       timeout: 10_000,
     });
   });
@@ -26,7 +26,7 @@ test.describe("persistence failure states", () => {
     await page.goto("/");
     await page.click(`#tabs button[data-tab="data"]`);
     const fileChooserPromise = page.waitForEvent("filechooser");
-    await page.locator('#view-data input[type="file"]:not(.hidden)').click();
+    await page.locator('#view-data button', { hasText: "Choose bundle file" }).click();
     const chooser = await fileChooserPromise;
     await chooser.setFiles({
       name: "future-bundle.json",
@@ -35,7 +35,7 @@ test.describe("persistence failure states", () => {
         JSON.stringify({ kind: "session-bundle", schemaVersion: 99, payload: {} }),
       ),
     });
-    await expect(page.locator("#view-data")).toContainText("import failed", {
+    await expect(page.locator("#view-data")).toContainText("Import rejected", {
       timeout: 10_000,
     });
   });
@@ -147,7 +147,7 @@ test.describe("resume checkpoint UI", () => {
     await expect(resumeList).toContainText("E2EPlayer");
     await expect(resumeList).toContainText("Resume");
     await expect(resumeList).toContainText("Discard");
-    await expect(resumeList).toContainText("Export diagnostic bundle");
+    await expect(resumeList).toContainText("Export session bundle");
 
     // Discard (with confirmation) marks the checkpoint aborted and clears the
     // list after the automatic reload.

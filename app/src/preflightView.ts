@@ -4,7 +4,7 @@ import type {
   PreflightReport,
 } from "../../src/preflight/preflight.ts";
 import { el, clear } from "./dom.ts";
-import { badge, card, formatDateTime, icon, type Tone } from "./ui.ts";
+import { badge, button, card, formatDateTime, icon, type Tone } from "./ui.ts";
 
 const VERDICT_META: Record<
   PreflightReport["overall"],
@@ -33,9 +33,21 @@ const VERDICT_META: Record<
   },
 };
 
-/** Player-facing grouping of engine checks (presentation only). */
+/**
+ * Player-facing grouping of engine checks (presentation only). The panel lays
+ * out in CSS columns, so the tall CAPTURE group is listed last to pack into
+ * its own column instead of leaving a void beside the short groups.
+ */
 const GROUPS: { name: string; checks: PreflightCheckName[] }[] = [
   { name: "Mouse", checks: ["pointer-capture-mode", "dpi-configured"] },
+  { name: "Sensitivity", checks: ["xy-configured"] },
+  { name: "Calibration", checks: ["calibration-state"] },
+  { name: "Display", checks: ["viewport-display"] },
+  { name: "Storage", checks: ["persistent-storage"] },
+  {
+    name: "System",
+    checks: ["runtime-support", "version-compatibility", "unfinished-checkpoints"],
+  },
   {
     name: "Capture",
     checks: [
@@ -46,14 +58,6 @@ const GROUPS: { name: string; checks: PreflightCheckName[] }[] = [
       "timestamp-monotonicity",
       "jitter-and-drop-diagnostics",
     ],
-  },
-  { name: "Sensitivity", checks: ["xy-configured"] },
-  { name: "Calibration", checks: ["calibration-state"] },
-  { name: "Display", checks: ["viewport-display"] },
-  { name: "Storage", checks: ["persistent-storage"] },
-  {
-    name: "System",
-    checks: ["runtime-support", "version-compatibility", "unfinished-checkpoints"],
   },
 ];
 
@@ -92,12 +96,20 @@ export function renderPreflightPanel(
   container: HTMLElement,
   report: PreflightReport | null,
   errorText: string | null,
+  onRefresh?: () => void,
 ): void {
   clear(container);
   if (errorText) {
     container.append(
       card(
-        { title: "System check unavailable", icon: "warn", tone: "danger" },
+        {
+          title: "System check unavailable",
+          icon: "warn",
+          tone: "danger",
+          actions: onRefresh
+            ? [button("Run checks again", { variant: "ghost", icon: "history", onClick: onRefresh })]
+            : [],
+        },
         el("p", { class: "muted", text: "The preflight check could not run. Your data is safe; testing may still work, but confidence gating cannot be verified." }),
         el("p", { class: "preflight-check-code", text: errorText }),
       ),
@@ -122,6 +134,12 @@ export function renderPreflightPanel(
     groupsWrap.append(buildGroup("Other", leftovers));
   }
 
+  const actions: HTMLElement[] = [badge(meta.tone, meta.label, { dot: true })];
+  if (onRefresh) {
+    actions.push(
+      button("Run checks again", { variant: "ghost", icon: "history", onClick: onRefresh }),
+    );
+  }
   container.append(
     card(
       {
@@ -129,7 +147,7 @@ export function renderPreflightPanel(
         subtitle: `Checked ${formatDateTime(report.generatedAtIso)} · ${report.release.appVersion} · ${report.release.engineVersion}`,
         icon: "shield",
         tone: meta.tone,
-        actions: [badge(meta.tone, meta.label, { dot: true })],
+        actions,
       },
       el("p", { class: "muted", text: meta.blurb }),
       groupsWrap,

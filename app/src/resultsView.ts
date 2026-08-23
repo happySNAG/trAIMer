@@ -409,7 +409,7 @@ function renderFinalResult(
         el("span", { class: "home-cell-title", text: "Trials" }),
       ]),
       kvList([
-        ["Analyzed", String(input.trialsAnalyzed)],
+        ["Measured", String(input.trialsAnalyzed)],
         ["Excluded", String(fr.excludedTrials.count)],
       ]),
     );

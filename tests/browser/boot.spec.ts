@@ -12,7 +12,8 @@ test.describe("boot and navigation", () => {
 
   test("Home renders readiness, current setup, and the primary start action", async ({ page }) => {
     await page.goto("/");
-    await expect(page.locator("#view-home .page-title")).toContainText("Welcome back");
+    // First use (no history) greets without "back".
+    await expect(page.locator("#view-home .page-title")).toContainText("Welcome");
     await expect(page.locator("#view-home button", { hasText: "Start Aim Test" })).toBeVisible();
     await expect(page.locator("#view-home")).toContainText("Mouse DPI");
     await expect(page.locator("#view-home")).toContainText("eDPI");
@@ -40,11 +41,15 @@ test.describe("boot and navigation", () => {
     await expect(page.locator("#view-diagnostics button", { hasText: "Export diagnostic bundle" })).toBeVisible();
   });
 
-  test("Calibration view renders the external manual workflow", async ({ page }) => {
+  test("Calibration view renders the guided manual workflow", async ({ page }) => {
     await page.goto("/");
     await page.click(`#tabs button[data-tab="calibration"]`);
-    await expect(page.locator("#view-calibration")).toContainText("external, manual");
+    await expect(page.locator("#view-calibration")).toContainText("Guided procedure");
     await expect(page.locator("#view-calibration button", { hasText: "Start rep" })).toBeVisible();
+    // Compute stays disabled until at least one rep is recorded.
+    await expect(
+      page.locator("#view-calibration button", { hasText: "Compute & save calibration" }),
+    ).toBeDisabled();
   });
 
   test("Test tab shows the preflight readiness report", async ({ page }) => {

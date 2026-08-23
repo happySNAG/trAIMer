@@ -42,7 +42,6 @@ export type IconName =
   | "x"
   | "info"
   | "mouse"
-  | "monitor"
   | "zap"
   | "download"
   | "upload"
@@ -90,7 +89,6 @@ const ICON_PATHS: Record<IconName, string[]> = {
   x: ["M6 6l12 12", "M18 6 6 18"],
   info: ["M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z", "M12 11v5.5", "M12 7.6h.01"],
   mouse: ["M12 2.8a5.2 5.2 0 0 1 5.2 5.2v8a5.2 5.2 0 0 1-10.4 0V8A5.2 5.2 0 0 1 12 2.8Z", "M12 6.5v3.5"],
-  monitor: ["M3 4.5h18v12.5H3z", "M8.5 21h7", "M12 17v4"],
   zap: ["M13 2.5 4 14h6.5L11 21.5 20 10h-6.5z"],
   download: ["M12 3.5v11", "M7.5 10 12 14.5 16.5 10", "M4 20.5h16"],
   upload: ["M12 14.5v-11", "M7.5 8 12 3.5 16.5 8", "M4 20.5h16"],
@@ -286,11 +284,10 @@ export interface StatOptions {
   unit?: string;
   sub?: string;
   tone?: Tone;
-  large?: boolean;
 }
 
 export function statTile(label: string, value: string, opts: StatOptions = {}): HTMLElement {
-  const node = el("div", { class: `stat${opts.large ? " stat-large" : ""}` });
+  const node = el("div", { class: "stat" });
   node.append(el("p", { class: "stat-label", text: label }));
   const valueWrap = el("p", { class: `stat-value${opts.tone ? ` tone-${opts.tone}` : ""}` });
   valueWrap.append(el("span", { class: "stat-number", text: value }));
@@ -518,7 +515,7 @@ export function trendChart(
     const single = el("div", { class: "trend-single" });
     single.append(
       el("span", { class: "trend-single-value mono", text: fmt(only.value) }),
-      el("span", { class: "muted", text: `${formatDate(only.atIso)} · trend line starts with your second session` }),
+      el("span", { class: "muted", text: `${formatDate(only.atIso)} · trend begins with your second session` }),
     );
     wrap.append(single);
     return wrap;

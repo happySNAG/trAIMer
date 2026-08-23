@@ -27,18 +27,20 @@ export interface HomeContext {
   resumeMount(container: HTMLElement): Promise<void>;
 }
 
+// One vocabulary for the preflight verdict everywhere: these labels match the
+// Test screen's readiness card exactly.
 const VERDICT_PRESENTATION: Record<
   PreflightReport["overall"],
   { tone: Tone; label: string; line: string }
 > = {
   READY: {
     tone: "ok",
-    label: "System ready",
+    label: "Ready",
     line: "All checks passed. Conditions are good for a high-confidence session.",
   },
   READY_WITH_WARNINGS: {
     tone: "warn",
-    label: "Ready, with warnings",
+    label: "Ready with warnings",
     line: "You can test now. Review the warnings on the Test screen for best results.",
   },
   NOT_READY_FOR_HIGH_CONFIDENCE: {
@@ -48,7 +50,7 @@ const VERDICT_PRESENTATION: Record<
   },
   BLOCKED: {
     tone: "danger",
-    label: "Setup needed",
+    label: "Blocked",
     line: "Something blocks reliable measurement. The Test screen shows exactly what to fix.",
   },
 };
@@ -57,12 +59,13 @@ export async function renderHomeView(container: HTMLElement, ctx: HomeContext): 
   clear(container);
   const settings = loadSettings();
 
-  container.append(
-    pageHeader(
-      `Welcome back, ${settings.playerName}`,
-      "Find the Fortnite sensitivity the evidence supports — measured, not guessed.",
-    ),
+  // "Welcome back" only once there is history to come back to.
+  const header = pageHeader(
+    `Welcome, ${settings.playerName}`,
+    "Find the Fortnite sensitivity the evidence supports — measured, not guessed.",
   );
+  const headerTitle = header.querySelector<HTMLElement>(".page-title");
+  container.append(header);
 
   // ---- resume (first-class recovery) ----
   const resumeHolder = el("div", { class: "resume-list" });
@@ -123,7 +126,7 @@ export async function renderHomeView(container: HTMLElement, ctx: HomeContext): 
     readiness.append(badge(pres.tone, pres.label, { dot: true }));
     const captureCheck = report.checks.find((c) => c.name === "pointer-capture-mode");
     if (captureCheck) {
-      readiness.append(el("span", { class: "muted", text: captureCheck.detail }));
+      readiness.append(el("span", { class: "muted", text: `Capture: ${captureCheck.detail}` }));
     }
     readinessLine.textContent = pres.line;
   });
@@ -138,6 +141,9 @@ export async function renderHomeView(container: HTMLElement, ctx: HomeContext): 
     const api = new HistoryApi(ctx.store);
     const sessions = await api.listSessions();
     const withRec = sessions.filter((s) => s.recommendedEdpi !== null);
+    if (sessions.length > 0 && headerTitle) {
+      headerTitle.textContent = `Welcome back, ${settings.playerName}`;
+    }
     clear(latestHolder);
     if (withRec.length === 0) {
       latestHolder.append(
@@ -160,6 +166,7 @@ export async function renderHomeView(container: HTMLElement, ctx: HomeContext): 
           ]),
         ),
       );
+      latestHolder.append(buildFirstUseSteps());
     } else {
       latestHolder.append(buildLatestPanel(withRec[0]!, sessions, api, ctx));
     }
@@ -169,6 +176,33 @@ export async function renderHomeView(container: HTMLElement, ctx: HomeContext): 
       el("p", { class: "muted", text: "History is unavailable right now — see Diagnostics." }),
     );
   }
+}
+
+/** First-use orientation: what a session is, in three quiet steps. */
+function buildFirstUseSteps(): HTMLElement {
+  const panel = card({ class: "home-steps" });
+  const body = panel.querySelector<HTMLElement>(".card-body");
+  if (!body) return panel;
+  body.style.padding = "0";
+  const wrap = el("div", { class: "cell-grid-3" });
+  const steps: [string, string, string][] = [
+    ["1", "Confirm your setup", "Enter your mouse DPI and current Fortnite sensitivity — that's the starting point of the search."],
+    ["2", "Play the blinded test", "Short aim drills across several hidden sensitivities, with rests enforced to protect the data."],
+    ["3", "Get a measured answer", "The engine compares the evidence and recommends the sensitivity it actually supports."],
+  ];
+  for (const [num, title, body_] of steps) {
+    const cell = el("div", {});
+    cell.append(
+      el("div", { class: "home-cell-head" }, [
+        el("span", { class: "home-step-num mono", text: num }),
+        el("span", { class: "home-cell-title", style: "flex:1", text: title }),
+      ]),
+      el("p", { class: "muted", text: body_ }),
+    );
+    wrap.append(cell);
+  }
+  body.append(wrap);
+  return panel;
 }
 
 function buildLatestPanel(
@@ -186,6 +220,15 @@ function buildLatestPanel(
 
   // Zone 1 — recommendation.
   const recCell = el("div", {});
+  const recNumber = el("span", {
+    class: "stat-number tone-accent",
+    style: "font-size:34px",
+    text: latest.recommendedEdpi!.toFixed(0),
+  });
+  const recValueRow = el("p", { class: "stat-value" }, [
+    recNumber,
+    el("span", { class: "stat-unit", text: "eDPI" }),
+  ]);
   recCell.append(
     el("div", { class: "home-cell-head" }, [
       el("span", { class: "home-cell-title", text: `Latest recommendation · ${formatDate(latest.startedAtIso)}` }),
@@ -195,10 +238,7 @@ function buildLatestPanel(
         onClick: () => ctx.onNavigate("results"),
       }),
     ]),
-    el("p", { class: "stat-value" }, [
-      el("span", { class: "stat-number tone-accent", style: "font-size:34px", text: latest.recommendedEdpi!.toFixed(0) }),
-      el("span", { class: "stat-unit", text: "eDPI" }),
-    ]),
+    recValueRow,
     el("p", {
       class: "muted mono",
       text: latest.edpiRange
@@ -206,6 +246,14 @@ function buildLatestPanel(
         : "",
     }),
   );
+  // The engine's own refusal flag: a preliminary number must not carry the
+  // confident volt treatment on the landing screen either.
+  void ctx.store.loadRecommendation(latest.experimentId).then((rec) => {
+    if (rec?.refusedHighConfidence) {
+      recNumber.classList.remove("tone-accent");
+      recValueRow.append(badge("warn", "preliminary", { dot: true }));
+    }
+  }).catch(() => {});
   wrap.append(recCell);
 
   // Zone 2 — evidence.
@@ -261,7 +309,7 @@ function buildLatestPanel(
       trendCell.append(
         el("p", {
           class: "muted",
-          text: "Your trend line starts with the second completed session.",
+          text: "Your trend begins with your second completed session.",
         }),
       );
     }

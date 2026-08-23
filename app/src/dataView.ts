@@ -79,9 +79,12 @@ export async function renderDataView(container: HTMLElement): Promise<void> {
   // ---- import session bundle ----
   container.append(sectionLabel("Import"));
   const importStatus = el("div", {});
-  const fileInput = el("input", { type: "file", accept: "application/json" });
+  const fileInput = el("input", { type: "file", accept: "application/json", class: "hidden" }) as HTMLInputElement;
+  const importBtn = button("Choose bundle file…", { variant: "secondary", icon: "upload" });
+  importBtn.addEventListener("click", () => fileInput.click());
   fileInput.addEventListener("change", async () => {
-    const file = (fileInput as HTMLInputElement).files?.[0];
+    const file = fileInput.files?.[0];
+    fileInput.value = "";
     if (!file) return;
     clear(importStatus);
     try {
@@ -94,8 +97,8 @@ export async function renderDataView(container: HTMLElement): Promise<void> {
       importStatus.append(
         inlineAlert(
           "danger",
-          `import failed: ${errorMessage(err)}`,
-          "Nothing was written — your existing data is untouched.",
+          "Import rejected — nothing was written.",
+          errorMessage(err),
         ),
       );
     }
@@ -107,6 +110,7 @@ export async function renderDataView(container: HTMLElement): Promise<void> {
         subtitle: "Load a previously exported session — validated fully before anything is written",
         icon: "upload",
       },
+      el("div", {}, [importBtn]),
       fileInput,
       importStatus,
     ),
