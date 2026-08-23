@@ -94,3 +94,31 @@ renders. Claude Code may restyle all of `app/**` freely under §1 while
 keeping the seams above intact. The Results view already renders
 `FinalResult` as its headline; History renders `HistorySnapshot`; Setup
 renders the preflight report and resume list.
+
+### Pass 6 compatibility statement (additive, non-breaking)
+
+Pass 6 was executed in parallel with the Fable UI redesign. Every change is
+backward-compatible with the frozen seams above; no shape, field, verdict
+enum, or reason code was removed or renamed:
+
+- `planNextTest` gained OPTIONAL context inputs (`chainDepth`,
+  `maxChainDepth`) for loop prevention; the returned `NextTestPlan` shape is
+  UNCHANGED. Callers that ignore the new fields behave exactly as before.
+- `planNextTest` may now return `kind:"none"` with a "manual review"
+  rationale once a retest chain reaches its depth limit — UIs already render
+  `kind:"none"` plans (recalibrate-first precedent).
+- Trial validation became MORE ACCURATE: deliberate inter-target pauses are
+  no longer misflagged as capture stalls (`LARGE_SAMPLE_GAP` false positives
+  eliminated). Sessions will show fewer invalid trials; reason codes and
+  severity semantics are unchanged.
+- Input-quality jitter is now robust (median/MAD over continuous-motion
+  runs). Honest sessions will show HIGHER input-quality scores and therefore
+  less-often-capped confidence. The report shape (`InputQualityReport`) is
+  unchanged.
+- Persistence paths are validated segment-by-segment (S9); all previously
+  valid paths remain valid.
+- New engine-only modules used by tests/CI (campaigns, packaging, release
+  manifest) are not UI-facing.
+
+No visual or layout prescription is added; the redesign remains free within
+§1.

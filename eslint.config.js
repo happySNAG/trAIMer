@@ -3,7 +3,7 @@ import tseslint from "typescript-eslint";
 
 export default tseslint.config(
   {
-    ignores: ["node_modules/", "dist/", "dist-app/", "coverage/", "test-results/", "playwright-report/"],
+    ignores: ["node_modules/", "dist/", "dist-app/", "coverage/", "test-results/", "playwright-report/", "release/"],
   },
   js.configs.recommended,
   ...tseslint.configs.recommended,
@@ -19,10 +19,10 @@ export default tseslint.config(
     },
   },
   {
-    // Node scripts: console/process are the whole point.
+    // Node scripts: console/process/Buffer are the whole point.
     files: ["scripts/**/*.mjs", "*.config.mjs"],
     languageOptions: {
-      globals: { console: "readonly", process: "readonly" },
+      globals: { console: "readonly", process: "readonly", Buffer: "readonly" },
     },
     rules: {
       "no-console": "off",

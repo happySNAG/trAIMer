@@ -16,6 +16,8 @@ export interface CalibrationOptions {
   repsPerCandidatePerRound?: number;
   rounds?: number;
   seedBase?: number;
+  /** Simulation sampling rate (default 240 Hz); lower values run faster. */
+  sampleHz?: number;
 }
 
 const CALIBRATION_LADDER = [
@@ -58,7 +60,10 @@ export function estimateCompositeOptimumEdpi(
   options: CalibrationOptions,
 ): CalibrationResult {
   const def = buildCalibrationDefinition(options);
-  const runner = new SyntheticExperimentRunner(def, player);
+  const runner =
+    options.sampleHz !== undefined
+      ? new SyntheticExperimentRunner(def, player, { sampleHz: options.sampleHz })
+      : new SyntheticExperimentRunner(def, player);
   const trialsByCandidate = new Map<string, TrialRecord[]>();
   const rounds = options.rounds ?? 3;
   const seedBase = options.seedBase ?? 900001;

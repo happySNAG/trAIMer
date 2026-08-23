@@ -95,4 +95,53 @@ for (const doc of [
   check(`release doc ${doc} exists`, existsSync(doc));
 }
 
+// ---- 6. packaged release folder (Pass 6, --release-dir <path>) ----
+const releaseDirIdx = process.argv.indexOf("--release-dir");
+if (releaseDirIdx >= 0 && process.argv[releaseDirIdx + 1]) {
+  const releasePath = process.argv[releaseDirIdx + 1];
+  check("release folder exists", existsSync(releasePath), releasePath);
+  if (existsSync(releasePath)) {
+    for (const required of [
+      "aldo_capture_helper.exe",
+      "start-aldo-lab.ps1",
+      "stop-aldo-lab.ps1",
+      "FIRST-RUN.md",
+      "manifest.json",
+      join("app", "index.html"),
+    ]) {
+      check(`release contains ${required}`, existsSync(join(releasePath, required)));
+    }
+    const manifestPath = join(releasePath, "manifest.json");
+    if (existsSync(manifestPath)) {
+      const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+      check(
+        "release manifest declares the current app version",
+        manifest.appVersion === pkg.version,
+        `${manifest.appVersion} vs ${pkg.version}`,
+      );
+      check(
+        "release helper is NOT a placeholder binary",
+        manifest.helperBinaryIsPlaceholder !== true,
+      );
+      // Recompute every file hash from disk and compare to the manifest.
+      const { createHash } = await import("node:crypto");
+      let allMatch = true;
+      for (const entry of manifest.files ?? []) {
+        const full = join(releasePath, entry.path);
+        if (!existsSync(full)) {
+          allMatch = false;
+          break;
+        }
+        const actual = createHash("sha256").update(readFileSync(full)).digest("hex");
+        if (actual !== entry.sha256) {
+          allMatch = false;
+          console.log(`  hash mismatch: ${entry.path}`);
+          break;
+        }
+      }
+      check("every packaged file matches its manifest SHA-256", allMatch);
+    }
+  }
+}
+
 process.exit(failures > 0 ? 1 : 0);

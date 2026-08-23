@@ -74,3 +74,13 @@ Measured on the dev MacBook Pro (M-class, Node 25); CI re-runs
 | Session quality over 120 trials | < 100 ms | ~50 ms |
 | Full 300-trial analyze → recommend | < 5 s | ~2.9 s incl. persistence round-trip |
 | Production bundle size | ≤ 250 KB js | ~142 KB (47 KB gzip), zero network calls |
+
+### Pass 6 additions
+
+| Path | Budget | Measured (Pass 6) |
+|---|---|---|
+| Full `recommend()` on a 60-trial session (incl. metrics re-derivation) | < 150 ms | < 40 ms after trial-metrics memoization (was ~1.35 s) |
+| Monte Carlo campaign case (session + ground truth + analysis) | informational | ~115–140 ms/case; 1700-case campaign ≈ 4 min |
+| High-rate ingest (125–8000 Hz simulated streams) | no catastrophic degradation | lossless serialization, monotonic validation, bounded memory at every rate incl. 8 kHz |
+| History snapshot over 240 sessions / 2.4 k trials | < 10 s in-memory | well under (see tests/historyScale.test.ts) |
+| Release repackaging determinism | byte-identical manifests | verified (docs/PASS6-DETERMINISM-REPRODUCIBILITY.md) |

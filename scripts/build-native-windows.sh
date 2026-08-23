@@ -41,12 +41,12 @@ echo "✓ configuration validated"
 # 2. Compilation.
 if [[ "${1:-}" == "--compile" ]]; then
   if command -v cl >/dev/null 2>&1; then
-    echo "-- MSVC build --"
-    cl //O2 //W4 "$C_SRC" //Fe:"$EXE" ws2_32.lib user32.lib
+    echo "-- MSVC build (W4 warnings-as-errors) --"
+    cl //O2 //W4 //WX "$C_SRC" //Fe:"$EXE" ws2_32.lib user32.lib
     echo "✓ built $EXE"
   elif command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1; then
-    echo "-- MinGW cross build --"
-    x86_64-w64-mingw32-gcc -O2 -Wall -o "$EXE" "$C_SRC" -lws2_32 -luser32
+    echo "-- MinGW cross build (warnings-as-errors) --"
+    x86_64-w64-mingw32-gcc -O2 -Wall -Werror -o "$EXE" "$C_SRC" -lws2_32 -luser32
     echo "✓ built $EXE"
   else
     fail "--compile requested but no MSVC (cl) or mingw (x86_64-w64-mingw32-gcc) toolchain found"
@@ -55,8 +55,8 @@ else
   cat <<'EOF'
 Compilation requires a Windows host (or MinGW cross toolchain). Run there:
 
-  MSVC Developer Prompt:   cl /O2 /W4 native\windows\aldo_capture_helper.c /Fe:native\windows\aldo_capture_helper.exe ws2_32.lib user32.lib
-  MinGW:                   gcc -O2 -Wall -o native/windows/aldo_capture_helper.exe native/windows/aldo_capture_helper.c -lws2_32 -luser32
+  MSVC Developer Prompt:   cl /O2 /W4 /WX native\windows\aldo_capture_helper.c /Fe:native\windows\aldo_capture_helper.exe ws2_32.lib user32.lib
+  MinGW:                   gcc -O2 -Wall -Werror -o native/windows/aldo_capture_helper.exe native/windows/aldo_capture_helper.c -lws2_32 -luser32
 
 Or re-run this script with --compile on such a host.
 EOF

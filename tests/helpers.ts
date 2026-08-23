@@ -79,7 +79,7 @@ export function makeTrial(options: MakeTrialOptions = {}): TrialRecord {
     targets: options.targets ?? [],
     shots: options.shots ?? [],
     focusInterruptions: options.focusInterruptions ?? [],
-    viewportResizes: [],
+    viewportResizes: options.viewportResizes ?? [],
     outcome: options.outcome ?? "hit",
     abortedMs: null,
     validity: { status: "valid", reasons: [] },

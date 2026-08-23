@@ -136,7 +136,13 @@ export class SyntheticExperimentRunner {
   }
 
   #fatigueOffset(indexInSession: number): number {
-    return Math.min(150, this.#player.fatiguePerTrialMs * indexInSession);
+    // Pass 6 numerical hardening: the offset is bounded so extreme session
+    // lengths or signed fatigue models can never drive an effective median
+    // (reaction/trigger delay) negative — a negative lognormal median
+    // produces NaN timings that would poison every downstream trial via the
+    // virtual clock.
+    const raw = this.#player.fatiguePerTrialMs * indexInSession;
+    return Math.min(150, Math.max(-100, raw));
   }
 
   #spawnPlannedTargets(
@@ -250,7 +256,10 @@ export class SyntheticExperimentRunner {
     const p = this.#player;
     const start = recorder.cursorPosition;
 
-    const reactionMedian = p.reactionMedianMs + fatigueMs;
+    // Effective medians stay in physically plausible ranges regardless of
+    // signed fatigue (Pass 6 numerical hardening; lognormal requires a
+    // strictly positive median).
+    const reactionMedian = Math.max(80, p.reactionMedianMs + fatigueMs);
     const reactionMs = clampNumber(
       rng.lognormal(reactionMedian, p.reactionLognormalSigma * p.trialNoiseScale),
       80,
@@ -370,8 +379,9 @@ export class SyntheticExperimentRunner {
     }
 
     const settleMs = rng.range(20, 60);
+    const triggerMedian = Math.max(30, p.triggerDelayMedianMs + fatigueMs * 0.5);
     const triggerMs = clampNumber(
-      rng.lognormal(p.triggerDelayMedianMs + fatigueMs * 0.5, p.triggerDelayLognormalSigma),
+      rng.lognormal(triggerMedian, p.triggerDelayLognormalSigma),
       30,
       400,
     );

@@ -36,6 +36,15 @@ export interface RetestDecisionContext {
   minRestBetweenSessionsMs?: number;
   /** Fresh deterministic seed for the next experiment (defaults to derived). */
   orderSeed?: number;
+  /**
+   * Pass 6 loop prevention: how many PLANNED retests already precede this
+   * decision in the current chain (default 0). When the depth reaches
+   * `maxChainDepth`, planNextTest stops proposing new sessions and defers to
+   * explicit human review instead of looping narrow→repeat forever.
+   */
+  chainDepth?: number;
+  /** Maximum planned-retest chain length before deferral (default 2). */
+  maxChainDepth?: number;
 }
 
 export type NextTestKind = "targeted-retest" | "repeat-session" | "none";
@@ -53,6 +62,9 @@ export interface NextTestPlan {
 }
 
 const DEFAULT_MIN_REST_MS = 30 * 60 * 1000;
+
+/** Pass 6: maximum planned-retest chain length before human deferral. */
+export const DEFAULT_MAX_CHAIN_DEPTH = 2;
 
 export interface RetestPlan {
   definition: ExperimentDefinition;
@@ -230,6 +242,27 @@ export function planNextTest(
 ): NextTestPlan | null {
   const triggers = detectRetestTriggers(priorRecommendation, context);
   if (triggers.length === 0) return null;
+
+  // Pass 6 loop prevention: after maxChainDepth planned retests in a chain
+  // that STILL ends with triggers, defer to explicit human review rather
+  // than proposing session after session.
+  const maxChainDepth = context.maxChainDepth ?? DEFAULT_MAX_CHAIN_DEPTH;
+  const chainDepth = context.chainDepth ?? 0;
+  if (chainDepth >= maxChainDepth) {
+    return {
+      kind: "none",
+      definition: null,
+      triggers,
+      uncertaintyToResolve: triggers.map((t) => UNCERTAINTY_BY_TRIGGER[t]).join("; "),
+      rationaleLines: [
+        `retest chain depth ${chainDepth} reached the limit of ${maxChainDepth} planned retests`,
+        "repeated automated testing has not resolved these uncertainties; manual review of the evidence is required before scheduling more sessions",
+        ...triggers.map((t) => `${t}: ${UNCERTAINTY_BY_TRIGGER[t]}`),
+      ],
+      canStartNow: true,
+      earliestStartIso: "",
+    };
+  }
 
   // Stale calibration ALONE is resolved by recalibrating, not re-testing.
   if (triggers.length === 1 && triggers[0] === "stale-calibration") {

@@ -55,7 +55,7 @@ jobs:
           npm ci
           npx vitest run tests/nativeProtocolConstants.test.ts
           bash scripts/build-native-windows.sh
-      - name: compile helper (MSVC)
+      - name: compile helper (MSVC, warnings are errors)
         shell: cmd
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat" || exit /b 1
@@ -65,3 +65,68 @@ jobs:
           name: aldo_capture_helper
           path: native/windows/aldo_capture_helper.exe
           retention-days: 30
+
+  # Pass 6: full downloadable V1 RC portable release artifact.
+  windows-release:
+    runs-on: windows-latest
+    needs: [native-windows]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - name: native protocol / version constant verification
+        shell: bash
+        run: |
+          npx vitest run tests/nativeProtocolConstants.test.ts
+          bash scripts/build-native-windows.sh
+      - name: engine test suite (Windows host)
+        shell: bash
+        run: npx vitest run
+      - name: lint + strict typecheck
+        shell: bash
+        run: |
+          npm run lint
+          npm run typecheck
+      - name: production build
+        run: npm run build
+      - name: release verification
+        run: node scripts/verify-release.mjs
+      - name: no-telemetry audit (sources + bundle)
+        run: node scripts/audit-no-telemetry.mjs
+      - name: npm audit
+        run: npm audit --audit-level=moderate
+      - name: download compiled helper
+        uses: actions/download-artifact@v4
+        with:
+          name: aldo_capture_helper
+          path: native/windows
+      - name: package portable release folder + checksums
+        shell: bash
+        run: |
+          node scripts/package-release.mjs \
+            --helper native/windows/aldo_capture_helper.exe \
+            --commit "${{ github.sha }}"
+      - name: verify packaged artifact contents
+        shell: pwsh
+        run: |
+          $manifest = Get-Content "release/AldoAimLab-*/manifest.json" -Raw | ConvertFrom-Json
+          if ($manifest.helperBinaryIsPlaceholder) { throw "release contains a placeholder helper" }
+          $required = @("aldo_capture_helper.exe","start-aldo-lab.ps1","stop-aldo-lab.ps1","FIRST-RUN.md","app/index.html")
+          foreach ($f in $required) {
+            $p = Join-Path "release/AldoAimLab-v$($manifest.appVersion)" $f
+            if (-not (Test-Path $p)) { throw "missing release file: $f" }
+          }
+          Write-Host "release artifact verified: $($manifest.files.Count) files"
+      - name: zip the portable folder
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "release/AldoAimLab-v*" -DestinationPath "release/AldoAimLab-portable.zip" -Force
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aldo-aim-lab-portable-release
+          path: |
+            release/AldoAimLab-portable.zip
+            release/AldoAimLab-*-SHA256SUMS.txt
+          retention-days: 90

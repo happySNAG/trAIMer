@@ -47,9 +47,17 @@ function runCampaign(options: {
     stoppingCriteria: { maxSearchRounds: 2 },
     yExploration: { enabled: options.hiddenEdpiY !== undefined },
   });
+  // Pass 6 fix: the HIDDEN OPTIMUM must actually reach the simulator. This
+  // campaign previously left the player preset untouched, so cases named
+  // "optimum at 3200" still simulated a 5600-optimum player and their
+  // honesty assertions were satisfied by unrelated conservatism.
   const runner = new SyntheticExperimentRunner(
     definition,
-    playerPreset(options.preset ?? "consistent-medium", options.overrides ?? {}),
+    playerPreset(options.preset ?? "consistent-medium", {
+      trueOptimalEdpi: options.hiddenEdpi,
+      ...(options.hiddenEdpiY !== undefined ? { trueOptimalEdpiY: options.hiddenEdpiY } : {}),
+      ...(options.overrides ?? {}),
+    }),
     { sampleHz: 240 },
   );
   const sessionId = `session-campaign-${options.seed}` as SessionId;

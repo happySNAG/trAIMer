@@ -27,10 +27,29 @@ export interface OptimizerRunMetadata {
 }
 
 function safeFileSegment(segment: string): string {
-  if (!/^[A-Za-z0-9._-]+$/.test(segment)) {
+  // Pass 6 security fix (S9): must start with an alphanumeric character —
+  // this excludes ".", "..", and hidden dotfiles in one rule while keeping
+  // the historical character whitelist for the remainder.
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(segment)) {
     throw new Error(`unsafe path segment: ${segment}`);
   }
   return segment;
+}
+
+/**
+ * Pass 6 security fix (S9): raw relative paths given to saveRaw/loadRaw/
+ * listByPrefix are now validated segment-by-segment. Previously only typed
+ * helper methods sanitized their own segments, so a hostile caller could
+ * hand `trials/../profiles/...` straight to the backend and escape the
+ * storage root on filesystem backends.
+ */
+function assertSafeRelPath(relPath: string): void {
+  if (typeof relPath !== "string" || relPath.length === 0) {
+    throw new Error(`unsafe store path: ${JSON.stringify(relPath)}`);
+  }
+  for (const segment of relPath.split("/")) {
+    safeFileSegment(segment);
+  }
 }
 
 export class LocalJsonStore {
@@ -41,12 +60,14 @@ export class LocalJsonStore {
   }
 
   async saveRaw(kind: PersistedKind, relPath: string, payload: unknown): Promise<void> {
+    assertSafeRelPath(relPath);
     const envelope = wrapEnvelope(kind, payload, new Date().toISOString());
     await this.#backend.writeFile(relPath, JSON.stringify(envelope, null, 2));
   }
 
   /** Lists full relative paths of JSON artifacts stored under a directory. */
   async listByPrefix(dir: string): Promise<string[]> {
+    assertSafeRelPath(dir);
     const files = await this.#backend.listFiles(dir);
     return files.map((f) => joinPath(dir, f)).sort();
   }
@@ -62,6 +83,7 @@ export class LocalJsonStore {
     kind: PersistedKind,
     relPath: string,
   ): Promise<{ payload: T; migratedFrom: number | null } | null> {
+    assertSafeRelPath(relPath);
     const raw = await this.#backend.readFile(relPath);
     if (raw === null) return null;
     return unwrapEnvelope<T>(kind, JSON.parse(raw));

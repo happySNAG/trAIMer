@@ -66,6 +66,24 @@ export function computeFlickMetrics(
   record: TrialRecord,
   options: FlickMetricOptions = DEFAULT_FLICK_OPTIONS,
 ): FlickTrialMetrics {
+  // Pass 6: memoize default-option analyses per record (records are
+  // immutable after TrialRecorder.finish()); custom options bypass cache.
+  if (options === DEFAULT_FLICK_OPTIONS) {
+    const cached = flickMetricsCache.get(record);
+    if (cached) return cached;
+    const computed = computeFlickMetricsUncached(record, options);
+    flickMetricsCache.set(record, computed);
+    return computed;
+  }
+  return computeFlickMetricsUncached(record, options);
+}
+
+const flickMetricsCache = new WeakMap<TrialRecord, FlickTrialMetrics>();
+
+function computeFlickMetricsUncached(
+  record: TrialRecord,
+  options: FlickMetricOptions,
+): FlickTrialMetrics {
   const target = primaryTargetSpan(record);
   const empty: FlickTrialMetrics = {
     reactionTimeMs: null,

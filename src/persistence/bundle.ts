@@ -80,6 +80,14 @@ export async function importExperimentBundle(
   ) {
     throw new Error("invalid session bundle envelope");
   }
+  // Pass 6: exportedAtIso, when present, must be a real ISO string.
+  if (
+    b.exportedAtIso !== undefined &&
+    (typeof b.exportedAtIso !== "string" ||
+      Number.isNaN(Date.parse(b.exportedAtIso)))
+  ) {
+    throw new Error("invalid session bundle exportedAtIso");
+  }
   if (b.schemaVersion > SCHEMA_VERSION) {
     throw new Error(
       `bundle schemaVersion ${b.schemaVersion} is newer than supported ${SCHEMA_VERSION}`,
@@ -99,11 +107,17 @@ export async function importExperimentBundle(
 
   // ---- FULL validation pass BEFORE any mutation (zero partial state) ----
   unwrapOrThrow("experiment-definition", b.payload.experimentDefinition);
+  const seenTrialIds = new Set<string>();
   for (const trial of (b.payload.trials ?? []) as unknown[]) {
     unwrapOrThrow("trial-record", trial);
     const t = trial as { id?: string };
     if (!t.id) throw new Error("bundle trial missing id");
-    void t;
+    // Pass 6: duplicated IDs inside one bundle are corrupt data — reject
+    // instead of silently overwriting (fail closed).
+    if (seenTrialIds.has(t.id)) {
+      throw new Error(`bundle contains duplicate trial id: ${t.id}`);
+    }
+    seenTrialIds.add(t.id);
   }
   if (b.payload.recommendation != null) unwrapOrThrow("recommendation", b.payload.recommendation);
   if (b.payload.humanSession != null) unwrapOrThrow("human-session", b.payload.humanSession);

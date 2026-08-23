@@ -191,7 +191,7 @@ export class TrialRecorder {
       }
     }
     const req = this.#request;
-    return {
+    const record: TrialRecord = {
       id: req.id,
       sessionId: req.sessionId,
       experimentId: req.experimentId,
@@ -220,6 +220,38 @@ export class TrialRecorder {
       scenarioRepIndex: req.scenarioRepIndex,
       abortedMs: this.#abortedMs,
     };
+    // Pass 6 birth validation: a record containing non-finite numbers can
+    // never be born "valid". Downstream pipelines that evaluate raw records
+    // without a later validateTrial pass (ground-truth estimation, replay
+    // harnesses) are thereby protected from NaN poisoning by construction.
+    const nonFinite =
+      !Number.isFinite(record.startedAtMonotonicMs) ||
+      !Number.isFinite(endedAtMonotonicMs) ||
+      record.samples.some(
+        (s) =>
+          !Number.isFinite(s.tMs) ||
+          !Number.isFinite(s.cursor.x) ||
+          !Number.isFinite(s.cursor.y) ||
+          !Number.isFinite(s.dx) ||
+          !Number.isFinite(s.dy),
+      ) ||
+      record.targets.some(
+        (t) => !Number.isFinite(t.appearedMs) || !Number.isFinite(t.radiusPx),
+      );
+    if (nonFinite && record.validity.status === "valid") {
+      record.validity = {
+        status: "invalid",
+        reasons: [
+          {
+            code: "IMPOSSIBLE_TIMESTAMPS",
+            severity: "fatal",
+            detail:
+              "record contains non-finite timestamps/positions at creation; fail-closed",
+          },
+        ],
+      };
+    }
+    return record;
   }
 
   #targetUnderCursor(tMs: number): TargetSpan["targetId"] | null {

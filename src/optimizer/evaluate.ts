@@ -73,7 +73,10 @@ export function computeScenarioCenters(
         sums.set(trial.scenarioId, perScenario);
       }
       for (const [dim, value] of Object.entries(dimensions)) {
-        if (value === undefined) continue;
+        // Pass 6 fail-closed aggregation: a non-finite dimension value must
+        // never poison a scenario center (one NaN trial previously turned
+        // the WHOLE scenario's center NaN for every candidate).
+        if (value === undefined || !Number.isFinite(value)) continue;
         const acc =
           perScenario.get(dim as AimDimension) ?? { total: 0, count: 0 };
         acc.total += value;
@@ -145,8 +148,10 @@ export function evaluateCandidate(
     const { dimensions } = scoreTrialDimensions(trial, scenario, scoring);
     const centered: Partial<Record<AimDimension, number>> = {};
     for (const [dim, value] of Object.entries(dimensions)) {
-      if (value === undefined) continue;
+      if (value === undefined || !Number.isFinite(value)) continue;
       const center = scenarioCenters?.get(trial.scenarioId)?.[dim as AimDimension];
+      // A non-finite center must not poison this trial's utility either.
+      if (center !== undefined && !Number.isFinite(center)) continue;
       const adjusted = center === undefined ? value : value - center;
       centered[dim as AimDimension] = Math.max(-1, Math.min(1, adjusted));
     }

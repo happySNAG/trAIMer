@@ -38,6 +38,20 @@ boundary is bypassed; nothing interacts with the game or its protection.
 | S7 | NaN/Infinity sample values bypassed all numeric validation comparisons | high (data integrity) | explicit non-finite guards in `validateTrial` (fatal `IMPOSSIBLE_TIMESTAMPS`); found BY the Pass 5 adversarial campaign; regression-tested |
 | S8 | DOM layer could inject markup via views | info | static test enforces textContent-only rendering (no innerHTML/outerHTML/document.write/insertAdjacentHTML anywhere in `app/src`) |
 
+## Findings (Pass 6 round two)
+
+All regression-tested in `tests/securityRoundTwo.test.ts` and
+`tests/schemaFuzz.test.ts`.
+
+| # | Finding | Severity | Resolution |
+|---|---|---|---|
+| S9 | `LocalJsonStore.saveRaw/loadRaw/listByPrefix` did not validate raw relative paths; a caller could hand `trials/../profiles/...` straight to the backend and escape the storage root on filesystem backends (segment regex allowed `..`) | high | every path segment now validated (`[A-Za-z0-9]` first char — rejects `.`/`..`/dotfiles in one rule) at the store boundary; tested incl. zero-files-written assertion |
+| S10 | Bundle import accepted duplicate trial IDs inside one bundle (silent overwrite) and non-string `exportedAtIso` | medium | duplicate-ID rejection + ISO-string type check added to the pre-mutation validation pass; tested |
+| S11 | Loopback allowlist vs numeric IP spellings | info (no action needed) | WHATWG URL normalization resolves decimal/hex aliases BEFORE the allowlist comparison, so `ws://2130706433` etc. are provably loopback; public-IP decimals still rejected — documented with tests |
+| S12 | Launcher hygiene contract was implicit | medium (hardening) | PowerShell scripts are statically contract-tested: no Invoke-Expression/iex/Invoke-Command, token passed as quoted argument array, RNG token shape validated, GetFullPath traversal guard, TryParse before PID kill |
+| S13 | Release archive member paths were unvalidated by construction | low | packager enforces safe archive members (no traversal/drive-letter/double-slash); verify-release recomputes all SHA-256s from disk against manifest.json |
+| S14 | Hostile strings in engine metadata | info | FinalResult carries HTML/script payloads verbatim as data (textContent-safe rendering unchanged); tested |
+
 ## Data safety
 
 - Whole-database backup (`exportBackupAll`) carries a SHA-256 integrity

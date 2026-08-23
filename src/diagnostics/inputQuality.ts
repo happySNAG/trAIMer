@@ -1,5 +1,5 @@
 import type { TrialRecord } from "../domain/trial.ts";
-import { mean, median, percentile } from "../metrics/stats.ts";
+import { median, percentile } from "../metrics/stats.ts";
 
 export interface InputQualityMetrics {
   sampleCount: number;
@@ -67,11 +67,28 @@ export function computeInputQuality(record: TrialRecord): InputQualityReport {
   void currentZeroRunStart;
 
   const activeMotionSteps: number[] = [];
-  for (let i = 1; i < samples.length; i++) {
-    const moved =
-      Math.abs(samples[i]!.dx) + Math.abs(samples[i]!.dy);
-    if (moved >= ACTIVE_MOTION_EPSILON_PX) {
-      activeMotionSteps.push(samples[i]!.tMs - samples[i - 1]!.tMs);
+  const movedFlags: boolean[] = samples.map(
+    (s) => Math.abs(s.dx) + Math.abs(s.dy) >= ACTIVE_MOTION_EPSILON_PX,
+  );
+  // Pass 6 fix: timing stability is a property of CONTINUOUS streaming while
+  // the hand is moving. Intervals are collected only inside maximal runs of
+  // consecutive moving samples, so deliberate micro-pauses between
+  // submovements (and post-reaction resumptions) cannot masquerade as timing
+  // instability, while a true stall inside a motion run still shows up as a
+  // large interval.
+  const MIN_RUN_LENGTH = 6;
+  let runStart = -1;
+  for (let i = 0; i <= samples.length; i++) {
+    const moving = i < samples.length && movedFlags[i] === true;
+    if (moving && runStart < 0) {
+      runStart = i;
+    } else if (!moving && runStart >= 0) {
+      if (i - runStart >= MIN_RUN_LENGTH) {
+        for (let j = runStart + 1; j < i; j++) {
+          activeMotionSteps.push(samples[j]!.tMs - samples[j - 1]!.tMs);
+        }
+      }
+      runStart = -1;
     }
   }
 
@@ -86,11 +103,17 @@ export function computeInputQuality(record: TrialRecord): InputQualityReport {
 
   let jitterCv: number | null = null;
   if (activeMotionSteps.length >= 5 && medianInterval > 0) {
-    const m = mean(activeMotionSteps);
-    const variance =
-      activeMotionSteps.reduce((acc, v) => acc + (v - m) ** 2, 0) /
-      activeMotionSteps.length;
-    jitterCv = Math.sqrt(variance) / m;
+    // Pass 6: ROBUST (median/MAD) coefficient of variation. The earlier
+    // mean/SD version let one or two natural micro-pauses inside an otherwise
+    // regular stream inflate CV past any threshold, capping honest sessions'
+    // confidence at 0.45. Isolated stalls remain covered by largeGapCount /
+    // largestGapMs and by trial-level validation.
+    const med = median(activeMotionSteps);
+    const absDeviations = activeMotionSteps
+      .map((v) => Math.abs(v - med))
+      .sort((a, b) => a - b);
+    const mad = percentile(absDeviations, 50);
+    jitterCv = med > 0 ? (1.4826 * mad) / med : null;
   }
 
   let largeGapCount = 0;
@@ -129,7 +152,7 @@ export function computeInputQuality(record: TrialRecord): InputQualityReport {
     lowEventRate:
       samples.length >= 20 &&
       observedRateHz < INPUT_QUALITY_THRESHOLDS.minActiveMotionRateHz &&
-      activeMotionSteps.length > 0,
+      movedFlags.some(Boolean),
     unstableTiming:
       jitterCv !== null && jitterCv > INPUT_QUALITY_THRESHOLDS.maxJitterCv,
     excessiveLockLoss: lockLossCount > INPUT_QUALITY_THRESHOLDS.maxLockLosses,

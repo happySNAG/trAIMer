@@ -40,6 +40,27 @@ export function computeTrackingMetrics(
   record: TrialRecord,
   options: TrackingMetricOptions = DEFAULT_TRACKING_OPTIONS,
 ): TrackingTrialMetrics {
+  // Pass 6: memoize default-option analyses per record. Trial records are
+  // immutable after TrialRecorder.finish(), and the optimizer re-derives
+  // trial metrics in several passes (evaluations, centers, change-point,
+  // explanation); recomputing a 6 s tracking stream each time dominated
+  // analysis runtime. Custom option objects bypass the cache.
+  if (options === DEFAULT_TRACKING_OPTIONS) {
+    const cached = trackingMetricsCache.get(record);
+    if (cached) return cached;
+    const computed = computeTrackingMetricsUncached(record, options);
+    trackingMetricsCache.set(record, computed);
+    return computed;
+  }
+  return computeTrackingMetricsUncached(record, options);
+}
+
+const trackingMetricsCache = new WeakMap<TrialRecord, TrackingTrialMetrics>();
+
+function computeTrackingMetricsUncached(
+  record: TrialRecord,
+  options: TrackingMetricOptions,
+): TrackingTrialMetrics {
   const target = record.targets[0] ?? null;
   const base: TrackingTrialMetrics = {
     sampleCount: record.samples.length,
@@ -177,10 +198,18 @@ function estimateDirectionalLag(
   target: NonNullable<TrialRecord["targets"][number]>,
   options: TrackingMetricOptions,
 ): number | null {
-  const refSamples = samples.filter((s) => {
+  // Target position depends ONLY on the sample timestamp, never on the
+  // candidate lag — compute it once per sample instead of once per lag
+  // (Pass 6 performance fix: this scan is O(lags × samples)).
+  const refSamples: PointerSample[] = [];
+  const targetPositions: { x: number; y: number }[] = [];
+  for (const s of samples) {
     const tc = targetPositionAt(target, s.tMs);
-    return tc !== null;
-  });
+    if (tc !== null) {
+      refSamples.push(s);
+      targetPositions.push(tc);
+    }
+  }
   if (refSamples.length < 10) return null;
   const stepMs = Math.max(
     4,
@@ -195,11 +224,10 @@ function estimateDirectionalLag(
   ) {
     let acc = 0;
     let n = 0;
-    for (const s of refSamples) {
-      const shifted = interpolateCursor(samples, s.tMs + lag);
-      const tc = targetPositionAt(target, s.tMs);
-      if (!shifted || !tc) continue;
-      acc += Math.hypot(shifted.x - tc.x, shifted.y - tc.y);
+    for (let i = 0; i < refSamples.length; i++) {
+      const shifted = interpolateCursor(samples, refSamples[i]!.tMs + lag);
+      if (!shifted) continue;
+      acc += Math.hypot(shifted.x - targetPositions[i]!.x, shifted.y - targetPositions[i]!.y);
       n++;
     }
     if (n === 0) continue;
