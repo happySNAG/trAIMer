@@ -10,6 +10,18 @@ import type { CaptureSink } from "../../src/capture/events.ts";
 import type { NativeFrame } from "../../src/capture/native.ts";
 import type { LocalJsonStore } from "../../src/persistence/store.ts";
 import { el, clear, downloadJson } from "./dom.ts";
+import {
+  button,
+  card,
+  detailsBlock,
+  field,
+  icon,
+  jsonBlock,
+  pageHeader,
+  sectionLabel,
+  type IconName,
+  type Tone,
+} from "./ui.ts";
 
 /** Adapts the platform WebSocket to the engine transport port (loopback only). */
 function browserSocketFactory(url: string): TransportSocket {
@@ -27,6 +39,29 @@ function browserSocketFactory(url: string): TransportSocket {
   };
 }
 
+/** Tone for one named engine check — the engine's status verbatim, no UI thresholds. */
+function checkTone(
+  checks: { name: string; status: string }[],
+  name: string,
+): Tone {
+  const check = checks.find((c) => c.name === name);
+  if (!check) return "neutral";
+  return check.status === "pass" ? "ok" : check.status === "warn" ? "warn" : "danger";
+}
+
+function diagTile(name: string, iconName: IconName, tone: Tone, value: string, sub?: string): HTMLElement {
+  const tile = el("div", { class: "diag-tile" });
+  tile.append(el("span", { class: `card-icon tone-${tone}` }, [icon(iconName, 15)]));
+  const text = el("div", { class: "diag-tile-text" });
+  text.append(
+    el("span", { class: "diag-tile-name", text: name }),
+    el("span", { class: "diag-tile-value", text: value }),
+  );
+  if (sub) text.append(el("span", { class: "diag-tile-sub", text: sub }));
+  tile.append(text);
+  return tile;
+}
+
 /**
  * Diagnostics view (requirements C/T): native capture probe with
  * pass/warn/fail checks, browser fallback capability display, and local
@@ -40,40 +75,75 @@ export function renderDiagnosticsView(
 ): void {
   clear(container);
   container.append(
-    el("h2", { text: "Diagnostics" }),
-    el("p", {
-      class: "note",
-      text:
-        "Everything here runs locally. The native probe connects to the Aldo capture helper on this machine only.",
-    }),
+    pageHeader(
+      "Diagnostics",
+      "Everything here runs on this machine only. The capture check talks to the local Aldo helper — nothing ever leaves your PC.",
+    ),
   );
 
-  // ---- browser fallback capabilities ----
+  // ---- player-level system status ----
   const caps = detectPointerEventCapabilities(
     typeof document !== "undefined" ? (document.createElement("div") as never) : ({} as never),
   );
-  const capBlock = el("div", {});
-  capBlock.append(el("h3", { text: "Browser capture fallback" }));
-  capBlock.append(
-    el("p", {
-      text: `capture path: ${caps.capturePath} · coalescing ${caps.coalescingSupported ? "supported" : "unavailable"}`,
-    }),
-  );
-  container.append(capBlock);
 
-  // ---- native helper probe ----
-  const urlInput = el("input", {
-    type: "text",
-    value: "ws://127.0.0.1:48765",
-    style: "width:340px",
-  }) as HTMLInputElement;
+  const statusGrid = el("div", { class: "diag-status-grid" });
+  statusGrid.append(
+    diagTile(
+      "Mouse input",
+      "mouse",
+      caps.coalescingSupported ? "ok" : "warn",
+      caps.coalescingSupported ? "High-rate browser capture" : "Standard browser capture",
+      `capture path: ${caps.capturePath} · coalescing ${caps.coalescingSupported ? "supported" : "unavailable"}`,
+    ),
+  );
+
+  const selfTestTile = diagTile("Capture check", "pulse", "neutral", "Not run yet", "Run the guided check below");
+  statusGrid.append(selfTestTile);
+  void store.then(async (s) => {
+    try {
+      const paths = await s.listByPrefix("self-tests");
+      const latestPath = paths[paths.length - 1];
+      if (!latestPath) return;
+      const loaded = await s.loadRawAt<{ verdict?: string; observedRateHz?: number; endedAtIso?: string }>(
+        "capture-self-test",
+        latestPath,
+      );
+      const st = loaded?.payload;
+      if (!st?.verdict) return;
+      const tone: Tone = st.verdict === "pass" ? "ok" : st.verdict === "warn" ? "warn" : "danger";
+      const fresh = diagTile(
+        "Capture check",
+        "pulse",
+        tone,
+        st.verdict === "pass" ? "Passed" : st.verdict === "warn" ? "Passed with warnings" : "Failed",
+        st.observedRateHz ? `~${st.observedRateHz.toFixed(0)} Hz observed on last run` : undefined,
+      );
+      selfTestTile.replaceWith(fresh);
+    } catch {
+      // leave the neutral tile
+    }
+  });
+
+  statusGrid.append(
+    diagTile("Storage", "storage", "neutral", "Local browser database", "Raw trials, sessions, and results never leave this machine"),
+  );
+  container.append(statusGrid);
+
+  // ---- guided native capture check ----
+  container.append(sectionLabel("Capture check"));
+
+  const urlInput = el("input", { type: "text", value: "ws://127.0.0.1:48765" }) as HTMLInputElement;
   const tokenInput = el("input", { type: "text", value: sessionToken }) as HTMLInputElement;
   const durationInput = el("input", { type: "number", value: 3, min: "1", max: "30" }) as HTMLInputElement;
-  const runButton = el("button", { class: "primary", text: "Run native capture probe" });
-  const output = el("pre", { class: "json" });
+
+  const runButton = button("Run capture check", { variant: "primary", icon: "play" });
+  const liveStatus = el("p", { class: "muted", text: "Checks the native high-rate helper. Start the helper first (see the packaged launcher), then run the check and move your mouse naturally while clicking a few times." });
+  const resultHolder = el("div", {});
 
   runButton.addEventListener("click", () => {
-    output.textContent = "connecting…";
+    clear(resultHolder);
+    runButton.disabled = true;
+    liveStatus.textContent = "Connecting to the capture helper…";
     const source = new NativeTransportCaptureSource({
       url: urlInput.value.trim(),
       sessionToken: tokenInput.value.trim(),
@@ -108,7 +178,16 @@ export function renderDiagnosticsView(
     };
     source.start(sink);
 
+    const liveTicker = setInterval(() => {
+      if (source.status === "streaming") {
+        const secondsLeft = Math.max(0, Math.ceil((durationMs - (performance.now() - startedAt)) / 1000));
+        liveStatus.textContent = `Move your mouse naturally and click several times — ${frames.length} samples captured · ${secondsLeft}s left`;
+      }
+    }, 150);
+
     const finish = (): void => {
+      clearInterval(liveTicker);
+      runButton.disabled = false;
       source.stop();
       const report = analyzeNativeStream(frames, {
         requestedRateHz: source.header?.nominalRateHz ?? null,
@@ -180,30 +259,88 @@ export function renderDiagnosticsView(
           )
           .catch((err) => log.error("SELF_TEST_PERSIST_FAILED", String(err)));
       }
-      output.textContent = JSON.stringify(
-        {
-          verdict: report.verdict,
-          header: source.header,
-          requestedRateHz: report.requestedRateHz,
-          observedRateHz: Number(report.observedRateHz.toFixed(1)),
-          throughputRateHz: Number(report.throughputRateHz.toFixed(1)),
-          intervalP10P50P90Ms: [
-            report.intervalP10Ms?.toFixed(2),
-            report.intervalP50Ms?.toFixed(2),
-            report.intervalP90Ms?.toFixed(2),
-          ],
-          jitterCv: report.jitterCv?.toFixed(3) ?? null,
-          droppedSequences: report.droppedSequences,
-          duplicateSequences: report.duplicateSequences,
-          nonMonotonicTimestamps: report.nonMonotonicTimestamps,
-          bursts: report.bursts,
-          longestGapMs: Number(report.longestGapMs.toFixed(1)),
-          durationTestedMs: Number(report.durationTestedMs.toFixed(0)),
-          counters: source.counters,
-          checks: report.checks,
-        },
-        null,
-        2,
+
+      // ---- player-level summary ----
+      liveStatus.textContent = "Check complete.";
+      const verdictTone: Tone =
+        report.verdict === "pass" ? "ok" : report.verdict === "warn" ? "warn" : "danger";
+      const summary = el("div", { class: "diag-status-grid" });
+      summary.append(
+        diagTile(
+          "Capture quality",
+          "shield",
+          verdictTone,
+          report.verdict === "pass" ? "Validated" : report.verdict === "warn" ? "Usable with warnings" : "Not validated",
+          source.header ? `${source.header.sourceKind} · ${source.header.deviceDescription ?? "unknown device"}` : undefined,
+        ),
+        diagTile(
+          "Polling rate",
+          "zap",
+          checkTone(report.checks, "effective-rate"),
+          `~${report.observedRateHz.toFixed(0)} Hz observed`,
+          report.requestedRateHz ? `device claims ${report.requestedRateHz} Hz` : undefined,
+        ),
+        diagTile(
+          "Timing stability",
+          "clock",
+          checkTone(report.checks, "timing-jitter"),
+          report.jitterCv !== null ? `jitter CV ${report.jitterCv.toFixed(3)}` : "—",
+          `longest gap ${report.longestGapMs.toFixed(1)} ms`,
+        ),
+        diagTile(
+          "Dropped samples",
+          "warn",
+          checkTone(report.checks, "sequence-integrity"),
+          String(report.droppedSequences),
+          `${report.duplicateSequences} duplicates · ${report.nonMonotonicTimestamps} out-of-order`,
+        ),
+      );
+      resultHolder.append(summary);
+
+      // Engine checks verbatim.
+      const checksList = el("div", { class: "preflight-checks" });
+      for (const check of report.checks) {
+        const tone: Tone = check.status === "pass" ? "ok" : check.status === "warn" ? "warn" : "danger";
+        const item = el("div", { class: "preflight-check" });
+        item.append(
+          el("span", { class: `tone-${tone}` }, [
+            icon(check.status === "pass" ? "check" : check.status === "warn" ? "warn" : "x", 13),
+          ]),
+        );
+        const text = el("div", {});
+        text.append(
+          el("span", { class: "preflight-check-name", text: check.name }),
+          el("p", { class: "preflight-check-detail", text: check.detail }),
+        );
+        item.append(text);
+        checksList.append(item);
+      }
+      resultHolder.append(
+        detailsBlock("Engine checks", checksList),
+        detailsBlock(
+          "Technical detail",
+          jsonBlock({
+            verdict: report.verdict,
+            header: source.header,
+            requestedRateHz: report.requestedRateHz,
+            observedRateHz: Number(report.observedRateHz.toFixed(1)),
+            throughputRateHz: Number(report.throughputRateHz.toFixed(1)),
+            intervalP10P50P90Ms: [
+              report.intervalP10Ms?.toFixed(2),
+              report.intervalP50Ms?.toFixed(2),
+              report.intervalP90Ms?.toFixed(2),
+            ],
+            jitterCv: report.jitterCv?.toFixed(3) ?? null,
+            droppedSequences: report.droppedSequences,
+            duplicateSequences: report.duplicateSequences,
+            nonMonotonicTimestamps: report.nonMonotonicTimestamps,
+            bursts: report.bursts,
+            longestGapMs: Number(report.longestGapMs.toFixed(1)),
+            durationTestedMs: Number(report.durationTestedMs.toFixed(0)),
+            counters: source.counters,
+            checks: report.checks,
+          }),
+        ),
       );
     };
     const wait = (): void => {
@@ -216,7 +353,17 @@ export function renderDiagnosticsView(
         return;
       }
       if (source.status === "failed") {
-        output.textContent = `probe failed: ${urlInput.value} unreachable or rejected.\nStart the helper (see native/windows/BUILD.md) and try again.`;
+        clearInterval(liveTicker);
+        runButton.disabled = false;
+        liveStatus.textContent = "";
+        clear(resultHolder);
+        resultHolder.append(
+          card(
+            { title: "Helper not reachable", icon: "warn", tone: "warn" },
+            el("p", { class: "muted", text: `No capture helper answered at ${urlInput.value}. Browser capture keeps working — native high-rate capture just stays unavailable until the helper runs.` }),
+            el("p", { class: "muted", text: "Start the helper with the packaged launcher (or see native/windows/BUILD.md) and run the check again." }),
+          ),
+        );
         return;
       }
       setTimeout(wait, 200);
@@ -225,22 +372,40 @@ export function renderDiagnosticsView(
   });
 
   container.append(
-    el("h3", { text: "Native high-rate capture probe" }),
-    el("label", { text: "Helper URL" }), urlInput,
-    el("label", { text: "Session token (must match --token)" }), tokenInput,
-    el("label", { text: "Probe duration (seconds)" }), durationInput,
-    runButton,
-    output,
+    card(
+      {
+        title: "Native capture check",
+        subtitle: "Validates the Windows high-rate helper against what your hardware actually delivers",
+        icon: "pulse",
+      },
+      liveStatus,
+      el("div", {}, [runButton]),
+      resultHolder,
+      detailsBlock(
+        "Connection settings",
+        el("div", { class: "form-grid" }, [
+          field("Helper URL", urlInput, { hint: "Loopback only — remote URLs are refused." }),
+          field("Session token (must match --token)", tokenInput),
+          field("Check duration (seconds)", durationInput),
+        ]),
+      ),
+    ),
   );
 
   // ---- diagnostic bundle export ----
-  const exportBtn = el("button", { text: "Export diagnostic bundle" });
+  container.append(sectionLabel("Bug report bundle"));
+  const exportBtn = button("Export diagnostic bundle", { variant: "secondary", icon: "download" });
   exportBtn.addEventListener("click", () => {
     downloadJson(`aldo-diagnostics-${Date.now()}.json`, log.exportBundle());
   });
-  container.append(el("h3", { text: "Bug report bundle" }), exportBtn,
-    el("p", {
-      class: "note",
-      text: "Contains app versions, capture mode, transitions and error codes only — never raw input data.",
-    }));
+  container.append(
+    card(
+      { title: "Local diagnostic bundle", icon: "shield" },
+      el("p", {
+        class: "muted",
+        text: "Contains app versions, capture mode, state transitions, and error codes only — never raw input data. Nothing is sent anywhere; you choose where the file goes.",
+      }),
+      el("div", {}, [exportBtn]),
+    ),
+  );
 }

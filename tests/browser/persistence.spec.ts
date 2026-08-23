@@ -9,7 +9,7 @@ test.describe("persistence failure states", () => {
 
     // Create a malformed bundle file and feed it through the import input.
     const fileChooserPromise = page.waitForEvent("filechooser");
-    await page.locator('#view-data input[type="file"]').click();
+    await page.locator('#view-data button', { hasText: "Choose bundle file" }).click();
     const chooser = await fileChooserPromise;
     await chooser.setFiles({
       name: "broken-bundle.json",
@@ -17,7 +17,7 @@ test.describe("persistence failure states", () => {
       buffer: Buffer.from(JSON.stringify({ kind: "not-a-bundle", payload: {} })),
     });
 
-    await expect(page.locator("#view-data")).toContainText("import failed", {
+    await expect(page.locator("#view-data")).toContainText("Import rejected", {
       timeout: 10_000,
     });
   });
@@ -26,7 +26,7 @@ test.describe("persistence failure states", () => {
     await page.goto("/");
     await page.click(`#tabs button[data-tab="data"]`);
     const fileChooserPromise = page.waitForEvent("filechooser");
-    await page.locator('#view-data input[type="file"]').click();
+    await page.locator('#view-data button', { hasText: "Choose bundle file" }).click();
     const chooser = await fileChooserPromise;
     await chooser.setFiles({
       name: "future-bundle.json",
@@ -35,7 +35,7 @@ test.describe("persistence failure states", () => {
         JSON.stringify({ kind: "session-bundle", schemaVersion: 99, payload: {} }),
       ),
     });
-    await expect(page.locator("#view-data")).toContainText("import failed", {
+    await expect(page.locator("#view-data")).toContainText("Import rejected", {
       timeout: 10_000,
     });
   });
@@ -140,17 +140,21 @@ test.describe("resume checkpoint UI", () => {
       });
     });
 
-    // Reload so the startup resume list picks it up.
+    // Reload so the startup resume list picks it up (Home shows it first-class).
     await page.reload();
-    const resumeList = page.locator(".resume-list");
-    await expect(resumeList.locator("table")).toBeVisible({ timeout: 15_000 });
+    const resumeList = page.locator("#view-home .resume-list");
+    await expect(resumeList.locator('[data-role="checkpoint"]')).toBeVisible({ timeout: 15_000 });
     await expect(resumeList).toContainText("E2EPlayer");
     await expect(resumeList).toContainText("Resume");
     await expect(resumeList).toContainText("Discard");
-    await expect(resumeList).toContainText("Export diagnostic bundle");
+    await expect(resumeList).toContainText("Export session bundle");
 
-    // Discard marks the checkpoint aborted and clears the list after reload.
+    // Discard (with confirmation) marks the checkpoint aborted and clears the
+    // list after the automatic reload.
     await resumeList.locator("button", { hasText: "Discard" }).first().click();
-    await expect(page.locator(".resume-list table")).toHaveCount(0, { timeout: 20_000 });
+    await page.locator(".dialog button", { hasText: "Discard session" }).click();
+    await expect(page.locator('#view-home .resume-list [data-role="checkpoint"]')).toHaveCount(0, {
+      timeout: 20_000,
+    });
   });
 });
