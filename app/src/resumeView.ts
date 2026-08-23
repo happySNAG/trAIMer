@@ -49,6 +49,17 @@ export async function renderResumeList(
   }
   if (entries.length === 0) return;
 
+  // One reassurance line for the whole list — not repeated per card.
+  const intro = el("p", { class: "resume-intro" });
+  intro.append(
+    icon("shield", 13),
+    el("span", {
+      text: "Unfinished sessions are safe: resuming restores blinding, completed trials, and search state exactly.",
+    }),
+  );
+  container.append(intro);
+
+  let first = true;
   for (const { checkpoint } of entries) {
     const summary = summarizeCheckpointForUi(
       checkpoint,
@@ -59,15 +70,18 @@ export async function renderResumeList(
       new Date().toISOString(),
     );
 
+    const hasName = summary.playerName && summary.playerName !== "unknown player";
     const metaBits: HTMLElement[] = [
       el("span", { text: `Started ${formatDateTime(summary.startedAtIso)}` }),
       el("span", {
         class: "mono",
-        text: `${summary.completedMeasuredTrials} trials completed · round ${summary.currentRound + 1}`,
+        text: `${summary.completedMeasuredTrials} trials · round ${summary.currentRound + 1}`,
       }),
-      el("span", { text: `Capture: ${checkpoint.captureSource?.kind ?? "not recorded"}` }),
       el("span", { text: formatAgo(summary.ageMs) }),
     ];
+    if (checkpoint.captureSource?.kind) {
+      metaBits.splice(2, 0, el("span", { text: `capture: ${checkpoint.captureSource.kind}` }));
+    }
     if (summary.hasInterruptedTrial) {
       metaBits.push(el("span", { class: "tone-warn", text: "one interrupted trial will be excluded" }));
     }
@@ -75,17 +89,16 @@ export async function renderResumeList(
     const main = el("div", { class: "checkpoint-main" });
     const titleRow = el("span", { class: "checkpoint-title" });
     titleRow.append(
-      el("span", { text: `Unfinished session — ${summary.playerName}` }),
+      el("span", { text: hasName ? `Unfinished session — ${summary.playerName}` : "Unfinished session" }),
     );
     const metaRow = el("span", { class: "checkpoint-meta" });
     metaRow.append(...metaBits);
-    main.append(titleRow, metaRow, el("span", {
-      class: "checkpoint-meta muted",
-      text: "Progress is saved. Resuming restores blinding, completed trials, and search state exactly.",
-    }));
+    main.append(titleRow, metaRow);
 
     const actions = el("div", { class: "checkpoint-actions" });
-    const resumeBtn = button("Resume", { variant: "primary", icon: "play" });
+    // Accent stays special: only the most recent checkpoint gets the primary
+    // treatment; older ones resume via a quieter control.
+    const resumeBtn = button("Resume", { variant: first ? "primary" : "secondary", icon: "play" });
     resumeBtn.addEventListener("click", () => callbacks.onResume(checkpoint));
     const exportBtn = button("Export diagnostic bundle", { variant: "ghost", icon: "download" });
     exportBtn.addEventListener("click", () => callbacks.onExport(checkpoint));
@@ -97,9 +110,10 @@ export async function renderResumeList(
     cardEl.append(
       el("span", { class: "tone-info" }, [icon("clock", 22)]),
       main,
-      badge(checkpoint.status === "interrupted" ? "warn" : "info", checkpoint.status),
+      badge(checkpoint.status === "interrupted" ? "warn" : "info", checkpoint.status, { dot: true }),
       actions,
     );
     container.append(cardEl);
+    first = false;
   }
 }

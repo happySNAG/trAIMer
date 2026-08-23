@@ -385,6 +385,9 @@ export class BrowserRunController {
           reason: "hit",
         });
         active.director.observeRemoval(latest.tMs + 1);
+        // Presentation-only hit confirmation: a brief ring at the reticle.
+        const pos = this.#capture?.reticle.position;
+        if (pos) this.#hitFx.push({ x: pos.x, y: pos.y, t0: performance.now() });
       }
     }
 
@@ -451,6 +454,10 @@ export class BrowserRunController {
 
   #stageGradient: CanvasGradient | null = null;
 
+  /** Short-lived hit-confirmation rings (visual only, never measured). */
+  #hitFx: { x: number; y: number; t0: number }[] = [];
+  static readonly #HIT_FX_MS = 160;
+
   #drawFrame(
     ctx: CanvasRenderingContext2D,
     targets: { x: number; y: number; radius: number }[],
@@ -480,6 +487,21 @@ export class BrowserRunController {
       ctx.arc(target.x, target.y, core, 0, Math.PI * 2);
       ctx.fillStyle = "rgba(10, 13, 18, 0.55)";
       ctx.fill();
+    }
+
+    // Hit confirmation: an expanding ring that fades within ~160 ms. It draws
+    // where the shot landed and never moves, so it cannot suggest motion.
+    if (this.#hitFx.length > 0) {
+      const now = performance.now();
+      this.#hitFx = this.#hitFx.filter((fx) => now - fx.t0 < BrowserRunController.#HIT_FX_MS);
+      for (const fx of this.#hitFx) {
+        const p = (now - fx.t0) / BrowserRunController.#HIT_FX_MS;
+        ctx.beginPath();
+        ctx.arc(fx.x, fx.y, 10 + p * 14, 0, Math.PI * 2);
+        ctx.strokeStyle = `rgba(233, 255, 168, ${(0.7 * (1 - p)).toFixed(3)})`;
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
     }
 
     // Reticle: white cross with a dark halo for readability on any target.

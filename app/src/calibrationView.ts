@@ -21,6 +21,7 @@ import {
   field,
   formatDate,
   grid,
+  inlineAlert,
   pageHeader,
   sectionLabel,
   table,
@@ -129,7 +130,7 @@ export function renderCalibrationView(container: HTMLElement): void {
   const computeButton = button("Compute & save calibration", { variant: "primary", icon: "check" });
 
   const measurementsTableHolder = el("div", {});
-  const status = el("p", { class: "note", text: "" });
+  const status = el("div", {});
 
   let capture: PointerLockCaptureSource | null = null;
   let accumulating = false;
@@ -211,10 +212,20 @@ export function renderCalibrationView(container: HTMLElement): void {
       `calibrations/x-${Date.now()}.json`,
       record,
     );
-    status.className = record.adequate ? "tone-ok" : "tone-danger";
-    status.textContent = record.adequate
-      ? `Saved. degreesPerCountAt100 = ${record.degreesPerCountAt100?.toExponential(4)} ± ${record.standardErrorDegreesPerCountAt100?.toExponential(2)} (95% CI ${record.ci95DegreesPerCountAt100?.min.toExponential(3)}–${record.ci95DegreesPerCountAt100?.max.toExponential(3)})`
-      : `Not adequate — not saved as calibrated. Reasons: ${record.inadequacyReasons.join("; ")}. Raw measurements still stored.`;
+    clear(status);
+    status.append(
+      record.adequate
+        ? inlineAlert(
+            "ok",
+            "Calibration saved and judged adequate by the engine.",
+            `degreesPerCountAt100 = ${record.degreesPerCountAt100?.toExponential(4)} ± ${record.standardErrorDegreesPerCountAt100?.toExponential(2)} (95% CI ${record.ci95DegreesPerCountAt100?.min.toExponential(3)} – ${record.ci95DegreesPerCountAt100?.max.toExponential(3)})`,
+          )
+        : inlineAlert(
+            "danger",
+            "Not adequate — the engine will not trust this calibration.",
+            `${record.inadequacyReasons.join("; ")}. Your raw measurements are stored; add more consistent reps and compute again.`,
+          ),
+    );
   });
 
   container.append(sectionLabel("Guided procedure — external, manual"));

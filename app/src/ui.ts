@@ -53,7 +53,8 @@ export type IconName =
   | "pulse"
   | "settings"
   | "crosshair"
-  | "flag";
+  | "flag"
+  | "chevron-down";
 
 const ICON_PATHS: Record<IconName, string[]> = {
   home: ["M3 10.5 12 3l9 7.5", "M5 9.6V21h14V9.6"],
@@ -94,13 +95,19 @@ const ICON_PATHS: Record<IconName, string[]> = {
   download: ["M12 3.5v11", "M7.5 10 12 14.5 16.5 10", "M4 20.5h16"],
   upload: ["M12 14.5v-11", "M7.5 8 12 3.5 16.5 8", "M4 20.5h16"],
   "arrow-right": ["M4 12h15", "M13 6l6 6-6 6"],
-  shield: ["M12 2.8 20 6v6.2c0 5-3.3 8-8 9.2-4.7-1.2-8-4.2-8-9.2V6Z"],
+  shield: [
+    "M12 3 4.8 5.7v5.5c0 4.6 3 7.6 7.2 8.8 4.2-1.2 7.2-4.2 7.2-8.8V5.7Z",
+    "M9 11.8l2.2 2.2 3.8-4.2",
+  ],
   clock: ["M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z", "M12 7v5l3.2 2"],
   settings: [
-    "M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6Z",
-    "M19.4 13.5a7.6 7.6 0 0 0 0-3l2-1.5-2-3.4-2.4.9a7.6 7.6 0 0 0-2.6-1.5L14 2.5h-4l-.4 2.5A7.6 7.6 0 0 0 7 6.5l-2.4-.9-2 3.4 2 1.5a7.6 7.6 0 0 0 0 3l-2 1.5 2 3.4 2.4-.9a7.6 7.6 0 0 0 2.6 1.5l.4 2.5h4l.4-2.5a7.6 7.6 0 0 0 2.6-1.5l2.4.9 2-3.4Z",
+    "M12 4.2a7.8 7.8 0 1 0 0 15.6 7.8 7.8 0 0 0 0-15.6Z",
+    "M12 12l2.8-2.8",
+    "M12 12h.01",
+    "M6.8 15.5h10.4",
   ],
-  flag: ["M5 21V4", "M5 4c4-2.4 8 2.4 12 0v9c-4 2.4-8-2.4-12 0"],
+  flag: ["M5.5 20.5V4.2", "M5.5 4.8h12l-2.7 3.5 2.7 3.5h-12"],
+  "chevron-down": ["M6.5 9.5 12 15l5.5-5.5"],
 };
 
 /** Fill-style (rather than stroke) icons. */
@@ -177,7 +184,7 @@ export function card(opts: CardOptions, ...body: (Node | string)[]): HTMLElement
       );
     }
     const titleCol = el("div", {});
-    titleCol.append(el("h3", { class: "card-title", text: opts.title }));
+    titleCol.append(el("h4", { class: "card-title", text: opts.title }));
     if (opts.subtitle) titleCol.append(el("p", { class: "card-subtitle", text: opts.subtitle }));
     titleWrap.append(titleCol);
     head.append(titleWrap);
@@ -209,7 +216,23 @@ export function pageHeader(title: string, subtitle?: string, ...trailing: HTMLEl
 }
 
 export function sectionLabel(text: string): HTMLElement {
-  return el("h4", { class: "section-label", text });
+  return el("h3", { class: "section-label", text });
+}
+
+/** Inline status/alert line: icon + message, answering outcome + data safety. */
+export function inlineAlert(tone: Tone, message: string, detail?: string): HTMLElement {
+  const node = el("div", { class: `inline-alert tone-bg-${tone}`, role: "status" });
+  node.append(el("span", { class: `tone-${tone}` }, [icon(TONE_ICONS[tone], 15)]));
+  const text = el("div", { class: "inline-alert-text" });
+  text.append(el("p", { text: message }));
+  if (detail) text.append(el("p", { class: "inline-alert-detail", text: detail }));
+  node.append(text);
+  return node;
+}
+
+/** Machine code (reason codes, ids) rendered as a quiet mono chip. */
+export function codeChip(text: string): HTMLElement {
+  return el("span", { class: "code-chip", text });
 }
 
 export function grid(cols: number, ...children: (Node | string)[]): HTMLElement {
@@ -488,6 +511,19 @@ export function trendChart(
     return wrap;
   }
 
+  // A single measurement is a starting point, not a trend — show it compactly
+  // instead of stretching one dot across an empty plot.
+  if (usable.length === 1) {
+    const only = usable[0]!;
+    const single = el("div", { class: "trend-single" });
+    single.append(
+      el("span", { class: "trend-single-value mono", text: fmt(only.value) }),
+      el("span", { class: "muted", text: `${formatDate(only.atIso)} · trend line starts with your second session` }),
+    );
+    wrap.append(single);
+    return wrap;
+  }
+
   const times = usable.map((p) => Date.parse(p.atIso));
   const t0 = Math.min(...times);
   const t1 = Math.max(...times);
@@ -527,24 +563,38 @@ export function trendChart(
     svg.append(svgEl("path", { d: area, class: "trend-area" }));
   }
   for (const p of usable) {
-    svg.append(
-      svgEl("circle", {
-        cx: x(Date.parse(p.atIso)).toFixed(1),
-        cy: y(p.value).toFixed(1),
-        r: 3,
-        class: "trend-dot",
-      }),
-    );
+    const dot = svgEl("circle", {
+      cx: x(Date.parse(p.atIso)).toFixed(1),
+      cy: y(p.value).toFixed(1),
+      r: 3.2,
+      class: "trend-dot",
+    });
+    // Native hover tooltip: date + value, no library needed.
+    const tip = svgEl("title", {});
+    tip.textContent = `${formatDate(p.atIso)} · ${fmt(p.value)}`;
+    dot.append(tip);
+    svg.append(dot);
   }
   wrap.append(svg);
 
   const latest = usable[usable.length - 1]!;
   const legend = el("div", { class: "trend-legend" });
   legend.append(
-    el("span", { class: "trend-range", text: `${fmt(vLo)} – ${fmt(vHi)}` }),
+    el("span", {
+      class: "trend-range",
+      text:
+        usable.length > 1
+          ? `${formatDate(usable[0]!.atIso)} → ${formatDate(latest.atIso)}`
+          : formatDate(latest.atIso),
+    }),
     el("span", { class: "trend-latest", text: `latest ${fmt(latest.value)}` }),
   );
   wrap.append(legend);
+  if (usable.length > 1) {
+    wrap.append(
+      el("div", { class: "trend-minmax mono", text: `range ${fmt(vLo)} – ${fmt(vHi)}` }),
+    );
+  }
   return wrap;
 }
 

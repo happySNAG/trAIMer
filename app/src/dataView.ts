@@ -12,10 +12,16 @@ import {
   card,
   confirmDialog,
   grid,
+  inlineAlert,
   pageHeader,
   sectionLabel,
   table,
 } from "./ui.ts";
+
+/** Strips the runtime error-class prefix from surfaced error text. */
+function errorMessage(err: unknown): string {
+  return String(err).replace(/^Error:\s*/, "");
+}
 
 export async function renderDataView(container: HTMLElement): Promise<void> {
   clear(container);
@@ -30,18 +36,23 @@ export async function renderDataView(container: HTMLElement): Promise<void> {
   const store = new LocalJsonStore(backend);
 
   // ---- whole-store backup ----
-  const backupStatus = el("p", { class: "note", text: "" });
+  const backupStatus = el("div", {});
   const backupBtn = button("Back up all data", { variant: "primary", icon: "download" });
   backupBtn.addEventListener("click", async () => {
-    backupStatus.textContent = "Building backup…";
+    clear(backupStatus);
+    backupStatus.append(el("p", { class: "muted", text: "Building backup…" }));
     try {
       const backup = await exportBackupAll(backend);
       downloadJson(`aldo-aim-lab-backup-${new Date().toISOString().slice(0, 10)}.json`, backup);
-      backupStatus.className = "tone-ok";
-      backupStatus.textContent = `Backup created — ${backup.entryPaths.length} artifacts with SHA-256 integrity.`;
+      clear(backupStatus);
+      backupStatus.append(
+        inlineAlert("ok", `Backup created — ${backup.entryPaths.length} artifacts, SHA-256 verified.`),
+      );
     } catch (err) {
-      backupStatus.className = "tone-danger";
-      backupStatus.textContent = `Backup failed: ${String(err)}`;
+      clear(backupStatus);
+      backupStatus.append(
+        inlineAlert("danger", "Backup could not be created.", errorMessage(err)),
+      );
     }
   });
 
@@ -67,19 +78,26 @@ export async function renderDataView(container: HTMLElement): Promise<void> {
 
   // ---- import session bundle ----
   container.append(sectionLabel("Import"));
-  const importStatus = el("p", { class: "note", text: "" });
+  const importStatus = el("div", {});
   const fileInput = el("input", { type: "file", accept: "application/json" });
   fileInput.addEventListener("change", async () => {
     const file = (fileInput as HTMLInputElement).files?.[0];
     if (!file) return;
+    clear(importStatus);
     try {
       const text = await file.text();
       const result = await importExperimentBundle(store, JSON.parse(text));
-      importStatus.className = "tone-ok";
-      importStatus.textContent = `Imported ${result.trialsImported} trials into ${result.experimentId}.`;
+      importStatus.append(
+        inlineAlert("ok", `Imported ${result.trialsImported} trials into ${result.experimentId}.`),
+      );
     } catch (err) {
-      importStatus.className = "tone-danger";
-      importStatus.textContent = `import failed: ${String(err)}`;
+      importStatus.append(
+        inlineAlert(
+          "danger",
+          `import failed: ${errorMessage(err)}`,
+          "Nothing was written — your existing data is untouched.",
+        ),
+      );
     }
   });
   container.append(
@@ -96,7 +114,7 @@ export async function renderDataView(container: HTMLElement): Promise<void> {
 
   // ---- danger zone: full restore ----
   container.append(sectionLabel("Danger zone"));
-  const restoreStatus = el("p", { class: "note", text: "" });
+  const restoreStatus = el("div", {});
   const restoreInput = el("input", { type: "file", accept: "application/json", class: "hidden" }) as HTMLInputElement;
   restoreInput.addEventListener("change", async () => {
     const file = restoreInput.files?.[0];
@@ -109,15 +127,27 @@ export async function renderDataView(container: HTMLElement): Promise<void> {
       danger: true,
     });
     if (!confirmed) return;
-    restoreStatus.textContent = "Validating backup…";
+    clear(restoreStatus);
+    restoreStatus.append(el("p", { class: "muted", text: "Validating backup…" }));
     try {
       const text = await file.text();
       const result = await importBackupAll(backend, JSON.parse(text));
-      restoreStatus.className = "tone-ok";
-      restoreStatus.textContent = `Restored ${result.restoredCount} artifacts${result.skippedPaths.length > 0 ? ` · ${result.skippedPaths.length} skipped` : ""}.`;
+      clear(restoreStatus);
+      restoreStatus.append(
+        inlineAlert(
+          "ok",
+          `Restored ${result.restoredCount} artifacts${result.skippedPaths.length > 0 ? ` · ${result.skippedPaths.length} skipped` : ""}.`,
+        ),
+      );
     } catch (err) {
-      restoreStatus.className = "tone-danger";
-      restoreStatus.textContent = `Restore failed — nothing was written: ${String(err)}`;
+      clear(restoreStatus);
+      restoreStatus.append(
+        inlineAlert(
+          "danger",
+          "Restore rejected — nothing was written.",
+          errorMessage(err),
+        ),
+      );
     }
   });
   const restoreBtn = button("Restore from backup…", { variant: "danger", icon: "upload" });
@@ -153,7 +183,11 @@ function buildSessionExportCard(store: LocalJsonStore, backend: IndexedDbBackend
   );
   const body = holder.querySelector<HTMLElement>(".card-body");
   void (async () => {
-    const sessionIds = await store.listSessionIds();
+    // listSessionIds also surfaces checkpoint files stored under
+    // sessions/checkpoints/ — those are resume state, not exportable sessions.
+    const sessionIds = (await store.listSessionIds()).filter(
+      (id) => !id.startsWith("checkpoints/"),
+    );
     if (!body) return;
     body.append(
       table({
@@ -172,8 +206,9 @@ function buildSessionExportCard(store: LocalJsonStore, backend: IndexedDbBackend
               const bundle = await exportExperimentBundle(store, experimentId);
               downloadJson(`${experimentId}-bundle.json`, bundle);
             } catch (err) {
-              const note = el("p", { class: "tone-danger note", text: String(err) });
-              body.append(note);
+              body.append(
+                inlineAlert("danger", "Export failed for this session.", errorMessage(err)),
+              );
             }
           });
           return [el("span", { class: "mono", text: sessionId }), exportButton];

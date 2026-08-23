@@ -115,7 +115,10 @@ const NAV_ICONS: Record<string, IconName> = {
 
 function activate(tab: string): void {
   for (const b of document.querySelectorAll<HTMLButtonElement>("#tabs button")) {
-    b.classList.toggle("active", b.dataset.tab === tab);
+    const isActive = b.dataset.tab === tab;
+    b.classList.toggle("active", isActive);
+    if (isActive) b.setAttribute("aria-current", "page");
+    else b.removeAttribute("aria-current");
   }
   const nodes: [string, HTMLElement][] = [
     ["home", views.home],
@@ -257,6 +260,10 @@ interface RunView {
   setState(state: SessionStateName, label: string, tone: Tone, detail: string): void;
   setProgress(measured: number, upperBound: number | null): void;
   setPendingStart(fn: () => void): void;
+  /** Reflects the engine's paused/running state on the pause control. */
+  setPaused(paused: boolean): void;
+  /** Optimistic hint while the engine finishes the current safe boundary. */
+  setIntentHint(hint: string | null): void;
 }
 
 const STATE_PRESENTATION: Record<
@@ -320,15 +327,16 @@ function buildRunView(): RunView {
   ]);
 
   const pauseButton = button("Pause", { icon: "pause", variant: "secondary" });
+  let engingPaused = false;
   pauseButton.addEventListener("click", () => {
     if (!controller) return;
-    const labelSpan = pauseButton.querySelector("span:last-child");
-    if (labelSpan?.textContent === "Pause") {
-      controller.pause();
-      if (labelSpan) labelSpan.textContent = "Resume";
-    } else {
+    if (engingPaused) {
       controller.resume();
-      if (labelSpan) labelSpan.textContent = "Pause";
+      hintEl.textContent = "";
+    } else {
+      controller.pause();
+      // The engine pauses at the next safe boundary; say so immediately.
+      hintEl.textContent = "Pausing after this trial…";
     }
   });
   const cancelButton = button("End session", { variant: "danger" });
@@ -339,11 +347,16 @@ function buildRunView(): RunView {
       confirmLabel: "End session",
       danger: true,
     }).then((confirmed) => {
-      if (confirmed) controller?.cancel();
+      if (!confirmed) return;
+      controller?.cancel();
+      hintEl.textContent = "Ending after this trial…";
     });
   });
-  const controls = el("div", { class: "run-controls" }, [pauseButton, cancelButton]);
-  const bottombar = el("div", { class: "run-bottombar" }, [progressWrap, controls]);
+  const captureNote = el("span", { class: "run-capture-note" });
+  captureNote.append(icon("mouse", 13), el("span", { text: "browser capture · pointer lock" }));
+  const hintEl = el("span", { class: "run-capture-note", text: "" });
+  const controls = el("div", { class: "run-controls" }, [hintEl, pauseButton, cancelButton]);
+  const bottombar = el("div", { class: "run-bottombar" }, [progressWrap, captureNote, controls]);
 
   screen.append(topbar, stage, bottombar);
   views.run.append(screen);
@@ -388,6 +401,14 @@ function buildRunView(): RunView {
     setPendingStart(fn) {
       pendingStart = fn;
     },
+    setPaused(paused) {
+      engingPaused = paused;
+      const labelSpan = pauseButton.querySelector("span:last-child");
+      if (labelSpan) labelSpan.textContent = paused ? "Resume" : "Pause";
+    },
+    setIntentHint(hint) {
+      hintEl.textContent = hint ?? "";
+    },
   };
 }
 
@@ -421,6 +442,10 @@ function makeCallbacks(run: RunView): RunControllerCallbacks {
       const shownDetail =
         state === "trial-active" || state === "inter-trial" ? detail || stickyDetail : detail;
       run.setState(state, pres.label, pres.tone, shownDetail);
+      run.setPaused(state === "paused");
+      if (state === "paused" || state === "analyzing" || state === "complete" || state === "aborted") {
+        run.setIntentHint(null);
+      }
       diagnosticLog.sessionTransition(diagnosticLog.entries().at(-1)?.event ?? "", state);
       if (state === "awaiting-lock") {
         run.showOverlay(
@@ -513,6 +538,7 @@ function makeCallbacks(run: RunView): RunControllerCallbacks {
 renderSetupView(views.setup, {
   onStart(settings) {
     clear(views.run);
+    lastTrialsAnalyzed.count = 0; // per-session counter (progress + results)
     const run = buildRunView();
     activate("run");
     run.showOverlay(

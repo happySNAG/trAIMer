@@ -125,7 +125,7 @@ export function renderDiagnosticsView(
   });
 
   statusGrid.append(
-    diagTile("Storage", "storage", "ok", "Local browser database", "Raw trials, sessions, and results never leave this machine"),
+    diagTile("Storage", "storage", "neutral", "Local browser database", "Raw trials, sessions, and results never leave this machine"),
   );
   container.append(statusGrid);
 

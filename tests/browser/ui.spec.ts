@@ -11,6 +11,7 @@ test.describe("app shell", () => {
     await expect(page.locator("#tabs button.active")).toHaveAttribute("data-tab", "home");
     await page.click(`#tabs button[data-tab="history"]`);
     await expect(page.locator("#tabs button.active")).toHaveAttribute("data-tab", "history");
+    await expect(page.locator("#tabs button.active")).toHaveAttribute("aria-current", "page");
     await expect(page.locator("#view-home")).toBeHidden();
     await expect(page.locator("#view-history")).toBeVisible();
   });
@@ -33,6 +34,8 @@ test.describe("run screen", () => {
     await expect(page.locator(".run-topbar")).toBeVisible();
     await expect(page.locator("#run-canvas")).toBeVisible();
     await expect(page.locator(".run-bottombar")).toContainText("measured trials");
+    // Capture-source transparency is always visible during a session.
+    await expect(page.locator(".run-bottombar")).toContainText("browser capture");
     await expect(page.locator(".overlay-title")).toContainText("Click to lock in");
 
     // Ending the session asks for confirmation; cancel keeps the session.

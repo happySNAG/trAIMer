@@ -51,6 +51,26 @@ const DIMENSION_LABELS: Record<AimDimension, string> = {
   consistency: "Consistency",
 };
 
+/** Player-facing labels for engine exclusion reason codes (codes stay visible). */
+const EXCLUSION_LABELS: Record<string, string> = {
+  IMPOSSIBLE_MOVEMENT: "Impossible movement",
+  LARGE_SAMPLE_GAP: "Sample gaps",
+  INSUFFICIENT_SAMPLES: "Too few samples",
+  PRE_APPEARANCE_CLICK: "Click before target",
+  FOCUS_LOST: "Focus lost",
+  POINTER_LOCK_LOST: "Pointer lock lost",
+  TIMEOUT_NO_SHOT: "No shot before timeout",
+  IMPOSSIBLE_TIMESTAMPS: "Broken timestamps",
+  CONFIG_MISMATCH: "Configuration mismatch",
+};
+
+function exclusionLabel(code: string): string {
+  const known = EXCLUSION_LABELS[code];
+  if (known) return known;
+  const words = code.toLowerCase().replaceAll("_", " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
 function confidenceTone(confidence: number): Tone {
   if (confidence >= 0.7) return "ok";
   if (confidence >= 0.4) return "warn";
@@ -115,28 +135,52 @@ function sensBlock(
 }
 
 function renderFinalResult(
-  container: HTMLElement,
+  outerContainer: HTMLElement,
   fr: FinalResult,
   rec: Recommendation,
   input: ResultsInput,
 ): void {
+  // The engine's own refusal flag drives the tentative treatment: a result
+  // the engine declined to back must not look like a confident verdict.
+  const tentative = fr.refusedHighConfidence;
+  const container = el("div", {
+    class: `result-reveal${tentative ? " results-tentative" : ""}`,
+  });
+  outerContainer.append(container);
+
   // ---- hero ----
   const compare = el("div", { class: "sens-compare" });
   compare.append(
     sensBlock("Current", fr.currentSensitivity, false),
     el("span", { class: "sens-arrow" }, [icon("arrow-right", 20)]),
-    sensBlock("Use now", fr.immediateRecommended, true),
+    sensBlock(tentative ? "Preliminary" : "Use now", fr.immediateRecommended, true),
   );
+  if (fr.fullInferredSensitivity) {
+    compare.append(
+      el("span", { class: "sens-arrow" }, [icon("arrow-right", 20)]),
+      sensBlock("Full target", fr.fullInferredSensitivity, false),
+    );
+  }
 
   const heroBody: (Node | string)[] = [compare];
+
+  if (tentative) {
+    const note = el("p", { class: "tentative-note" });
+    note.append(
+      icon("warn", 14),
+      el("span", {
+        text: "Preliminary — the engine wants more evidence before you commit. Treat the range below, not the point, as the result.",
+      }),
+    );
+    heroBody.push(note);
+  }
 
   if (fr.fullInferredSensitivity) {
     const staged = el("div", {}, [
       el("p", { class: "muted" }, [
-        el("strong", { text: "Staged change: " }),
-        `the full estimated target is ${fr.fullInferredSensitivity.sensXPercent.toFixed(2)}% X ` +
-          `(${fr.fullInferredSensitivity.edpi.toFixed(0)} eDPI). Large jumps disrupt trained aim, ` +
-          `so the recommendation moves you there in bounded steps — play on the "use now" value and retest before moving further.`,
+        el("strong", { text: "Why two numbers? " }),
+        "Large sensitivity jumps disrupt trained aim, so the change is staged: " +
+          `play on the "use now" value, retest, and step toward the full target only as the evidence holds up.`,
       ]),
     ]);
     heroBody.push(staged);
@@ -147,7 +191,11 @@ function renderFinalResult(
       fr.plausibleEdpiRange,
       [
         { value: fr.currentSensitivity.edpi, label: "current", tone: "neutral" },
-        { value: fr.immediateRecommended.edpi, label: "use now", tone: "accent" },
+        {
+          value: fr.immediateRecommended.edpi,
+          label: tentative ? "preliminary" : "use now",
+          tone: tentative ? "warn" : "accent",
+        },
         ...(fr.fullInferredSensitivity
           ? [{ value: fr.fullInferredSensitivity.edpi, label: "full target", tone: "info" as Tone }]
           : []),
@@ -172,11 +220,51 @@ function renderFinalResult(
   const conf = fr.confidence;
   const confTone = confidenceTone(conf);
 
+  // Retest plan folds into the action card — one place answers "what next,
+  // why, and when can I start".
+  const plan = fr.retestProtocol && fr.retestProtocol.kind !== "none" ? fr.retestProtocol : null;
+  const planBlock: HTMLElement[] = [];
+  if (plan) {
+    const restLine = el("div", { class: `inline-alert ${plan.canStartNow ? "tone-bg-ok" : "tone-bg-info"}` });
+    restLine.append(
+      el("span", { class: plan.canStartNow ? "tone-ok" : "tone-info" }, [
+        icon(plan.canStartNow ? "check" : "clock", 14),
+      ]),
+      el("div", { class: "inline-alert-text" }, [
+        el("p", {
+          text: plan.canStartNow
+            ? "Rest requirement met — the next session is ready whenever you are."
+            : `Rest first: the next session unlocks at ${formatDateTime(plan.earliestStartIso)}.`,
+        }),
+        el("p", {
+          class: "inline-alert-detail",
+          text:
+            plan.kind === "targeted-retest"
+              ? `A shorter, focused session is already designed to resolve: ${plan.uncertaintyToResolve}`
+              : `A clean repeat with fresh randomization will confirm what this session saw.`,
+        }),
+      ]),
+    );
+    planBlock.push(restLine);
+  }
+
+  // Lead with the most useful rationale; the full engine narrative stays one
+  // click away rather than dominating the card.
+  const leadRationale = fr.nextActionRationale.slice(0, 3);
+  const moreRationale = fr.nextActionRationale.slice(3);
   const actionCard = card(
     { title: "What to do next", icon: "flag", tone: "info" },
     el("p", { style: "font-size:16px;font-weight:700", text: actionLabel }),
     el("ul", { class: "next-action-list" },
-      fr.nextActionRationale.map((l) => el("li", { text: l }))),
+      leadRationale.map((l) => el("li", { text: l }))),
+    ...(moreRationale.length > 0
+      ? [detailsBlock(
+          `Full reasoning (${fr.nextActionRationale.length} points)`,
+          el("ul", { class: "next-action-list" },
+            moreRationale.map((l) => el("li", { text: l }))),
+        )]
+      : []),
+    ...planBlock,
     el("div", {}, [
       sectionLabel("Evidence strength"),
       el("div", { class: "confidence-row" }, [
@@ -184,43 +272,12 @@ function renderFinalResult(
         el("span", { class: `confidence-pct tone-${confTone}`, text: `${(conf * 100).toFixed(0)}%` }),
       ]),
       el("p", { class: "muted", text: `${fr.confidenceLabel} · ${fr.confidenceBasis}` }),
-      ...(fr.refusedHighConfidence
-        ? [el("p", { class: "tone-warn", style: "font-size:12.5px", text: "The engine declined to claim high confidence for this session — treat the range, not the point, as the result." })]
-        : []),
     ]),
   );
 
   container.append(el("div", { class: "result-hero" }, [heroCard, actionCard]));
 
-  // ---- retest plan (when the next test is already designed) ----
-  // Rationale lines already appear in "What to do next"; this card carries
-  // the plan itself: what it resolves and when it can start.
-  if (fr.retestProtocol && fr.retestProtocol.kind !== "none") {
-    const plan = fr.retestProtocol;
-    container.append(
-      card(
-        {
-          title: plan.kind === "targeted-retest" ? "Your next session is ready" : "A clean repeat session is recommended",
-          subtitle: plan.kind === "targeted-retest"
-            ? "A shorter, focused session designed by the engine from this result"
-            : "Same protocol, fresh randomization — to confirm what this session saw",
-          icon: "clock",
-          tone: "info",
-        },
-        el("p", { class: "muted", text: `Designed to resolve: ${plan.uncertaintyToResolve}` }),
-        el("p", {
-          class: plan.canStartNow ? "tone-ok" : "muted",
-          text: plan.canStartNow
-            ? "Rest requirement met — you can start whenever you're ready."
-            : `Enforced rest between sessions: you can start from ${formatDateTime(plan.earliestStartIso)}.`,
-        }),
-      ),
-    );
-  }
-
   // ---- evidence ----
-  container.append(sectionLabel("Evidence"));
-
   const evidenceGrid = grid(2);
 
   // Candidate comparison.
@@ -289,7 +346,10 @@ function renderFinalResult(
     );
   }
 
-  container.append(evidenceGrid);
+  if (evidenceGrid.childElementCount > 0 || fr.scenarioContributions.length > 0) {
+    container.append(sectionLabel("Evidence"));
+  }
+  if (evidenceGrid.childElementCount > 0) container.append(evidenceGrid);
 
   // Scenario contributions.
   if (fr.scenarioContributions.length > 0) {
@@ -310,40 +370,67 @@ function renderFinalResult(
     );
   }
 
-  // ---- session quality ----
+  // ---- session quality (one surface, three zones) ----
   container.append(sectionLabel("Session quality"));
-  const qualityGrid = grid(3);
+  const qualityCard = card({});
+  const qualityBody = qualityCard.querySelector<HTMLElement>(".card-body");
+  if (qualityBody) {
+    qualityBody.style.padding = "0";
+    const cells = el("div", { class: "cell-grid-3" });
 
-  qualityGrid.append(
-    card(
-      { title: "Capture quality", icon: "mouse" },
+    const captureCell = el("div", {});
+    captureCell.append(
+      el("div", { class: "home-cell-head" }, [
+        el("span", { class: "home-cell-title", text: "Capture quality" }),
+      ]),
       fr.captureQualityGrade
         ? statTile("Grade", fr.captureQualityGrade, {
             sub: fr.captureQualityScore !== null ? `score ${fr.captureQualityScore.toFixed(2)}` : "",
             tone: fr.captureQualityGrade === "A" || fr.captureQualityGrade === "B" ? "ok" : "warn",
           })
-        : el("p", { class: "muted", text: "No capture-quality summary for this session." }),
-    ),
-    card(
-      { title: "Search coverage", icon: "results" },
+        : el("p", { class: "muted", text: "Not graded for this session — run the capture check in Diagnostics before your next test." }),
+    );
+
+    const searchCell = el("div", {});
+    searchCell.append(
+      el("div", { class: "home-cell-head" }, [
+        el("span", { class: "home-cell-title", text: "Search coverage" }),
+      ]),
       kvList([
         ["Curve shape", fr.searchAdequacyClassification ?? "—"],
         ["Boundary", fr.boundaryStatus],
         ["Adaptation detected", fr.adaptationContamination ? "yes" : "no"],
       ]),
-    ),
-    card(
-      { title: "Trials", icon: "shield" },
+    );
+
+    const trialsCell = el("div", {});
+    trialsCell.append(
+      el("div", { class: "home-cell-head" }, [
+        el("span", { class: "home-cell-title", text: "Trials" }),
+      ]),
       kvList([
         ["Analyzed", String(input.trialsAnalyzed)],
         ["Excluded", String(fr.excludedTrials.count)],
-        ...Object.entries(fr.excludedTrials.reasonsByCode).map(
-          ([code, n]) => [code, String(n)] as [string, string],
-        ),
       ]),
-    ),
-  );
-  container.append(qualityGrid);
+    );
+    if (Object.keys(fr.excludedTrials.reasonsByCode).length > 0) {
+      const reasons = el("div", { class: "dim-chips" });
+      for (const [code, n] of Object.entries(fr.excludedTrials.reasonsByCode)) {
+        const chip = el("div", { class: "dim-chip" });
+        chip.append(
+          el("span", { class: "dim-chip-name", text: exclusionLabel(code) }),
+          el("span", { class: "dim-chip-value", text: String(n) }),
+        );
+        chip.title = code;
+        reasons.append(chip);
+      }
+      trialsCell.append(reasons);
+    }
+
+    cells.append(captureCell, searchCell, trialsCell);
+    qualityBody.append(cells);
+  }
+  container.append(qualityCard);
 
   // Warnings / open uncertainty.
   if (fr.uncertaintyRemaining.length > 0 || fr.warnings.length > 0) {

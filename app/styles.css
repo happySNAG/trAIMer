@@ -296,12 +296,21 @@ body.session-active main > section {
 }
 
 .section-label {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--text-3);
-  margin: 26px 0 10px;
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: 0;
+  color: var(--text-2);
+  margin: 30px 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.section-label::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line-1);
 }
 
 .muted {
@@ -346,7 +355,9 @@ body.session-active main > section {
   background: linear-gradient(180deg, var(--bg-2), var(--bg-1) 120%);
   border: 1px solid var(--line-1);
   border-radius: var(--radius-m);
-  box-shadow: var(--shadow-1);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.025),
+    var(--shadow-1);
 }
 
 .card-head {
@@ -804,12 +815,17 @@ table.table {
 
 .range-marker {
   position: absolute;
-  top: -3px;
-  bottom: -3px;
+  top: -4px;
+  bottom: -4px;
   width: 3px;
   border-radius: 2px;
   transform: translateX(-50%);
   background: currentColor;
+  box-shadow: 0 0 0 1.5px rgba(5, 7, 10, 0.8);
+}
+
+.range-marker.tone-neutral {
+  color: #b9c2cf;
 }
 
 .range-legend {
@@ -823,9 +839,7 @@ table.table {
 
 .range-caption {
   font-family: var(--font-sans);
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  font-size: 11.5px;
   color: var(--text-3);
 }
 
@@ -974,6 +988,30 @@ table.table {
   color: var(--text-2);
 }
 
+.trend-minmax {
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.trend-single {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 6px 0 2px;
+  flex-wrap: wrap;
+}
+
+.trend-single-value {
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.trend-dot:hover {
+  r: 4.5;
+  stroke-width: 2.5;
+}
+
 /* ==========================================================================
    Details, dialogs, JSON, empty states
    ========================================================================== */
@@ -1045,9 +1083,30 @@ pre.json {
   width: calc(100vw - 48px);
 }
 
+.dialog[open] {
+  animation: dialog-in 160ms var(--ease);
+}
+
+@keyframes dialog-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
 .dialog::backdrop {
   background: rgba(0, 0, 0, 0.6);
   backdrop-filter: blur(2px);
+  animation: backdrop-in 160ms var(--ease);
+}
+
+@keyframes backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 .dialog-head {
@@ -1117,6 +1176,59 @@ pre.json {
 }
 
 /* ==========================================================================
+   Inline alerts & code chips
+   ========================================================================== */
+
+.inline-alert {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 10px 13px;
+  border-radius: var(--radius-s);
+  border: 1px solid var(--line-1);
+  background: var(--bg-1);
+  font-size: 13px;
+}
+
+.inline-alert .icon {
+  flex: none;
+  margin-top: 1px;
+}
+
+.inline-alert-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.inline-alert-text p {
+  color: var(--text-1);
+}
+
+.inline-alert-detail {
+  color: var(--text-2) !important;
+  font-size: 12.5px;
+}
+
+.tone-bg-ok { border-color: rgba(63, 214, 143, 0.25); background: rgba(63, 214, 143, 0.05); }
+.tone-bg-warn { border-color: rgba(240, 177, 63, 0.25); background: rgba(240, 177, 63, 0.05); }
+.tone-bg-danger { border-color: rgba(240, 86, 79, 0.3); background: rgba(240, 86, 79, 0.05); }
+.tone-bg-info { border-color: rgba(86, 164, 255, 0.25); background: rgba(86, 164, 255, 0.05); }
+.tone-bg-neutral { border-color: var(--line-2); }
+
+.code-chip {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-3);
+  background: var(--bg-0);
+  border: 1px solid var(--line-1);
+  border-radius: 4px;
+  padding: 1px 6px;
+  letter-spacing: 0.02em;
+}
+
+/* ==========================================================================
    Preflight / readiness
    ========================================================================== */
 
@@ -1131,6 +1243,7 @@ pre.json {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 10px;
+  align-items: start;
 }
 
 @media (max-width: 1160px) {
@@ -1268,6 +1381,28 @@ pre.json {
   font-weight: 600;
   color: var(--text-1);
   white-space: nowrap;
+  transition: border-color var(--t-med) var(--ease);
+}
+
+/* "Get ready" beat: the chip breathes once between trials. */
+.run-screen[data-session-state="trial-ready"] .run-state-chip {
+  border-color: rgba(200, 242, 78, 0.5);
+  animation: chip-breathe 900ms var(--ease);
+}
+
+@keyframes chip-breathe {
+  0% { transform: scale(1); }
+  30% { transform: scale(1.05); }
+  100% { transform: scale(1); }
+}
+
+.run-capture-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text-3);
+  font-size: 12px;
+  white-space: nowrap;
 }
 
 .run-detail {
@@ -1382,11 +1517,24 @@ pre.json {
   margin-bottom: 18px;
 }
 
+.resume-intro {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-2);
+  font-size: 12.5px;
+  margin: 0 2px 8px;
+}
+
+.resume-list .checkpoint-card + .checkpoint-card {
+  margin-top: 8px;
+}
+
 .checkpoint-card {
   display: flex;
   align-items: center;
   gap: 18px;
-  padding: 16px 18px;
+  padding: 14px 18px;
   border: 1px solid rgba(86, 164, 255, 0.3);
   border-radius: var(--radius-m);
   background:
@@ -1429,6 +1577,82 @@ pre.json {
 }
 
 /* ==========================================================================
+   Home command center
+   ========================================================================== */
+
+.home-hero-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: 0;
+}
+
+.home-hero-main {
+  padding: 22px 26px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  justify-content: center;
+}
+
+.home-hero-side {
+  border-left: 1px solid var(--line-1);
+  padding: 22px 26px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  justify-content: center;
+}
+
+.home-hero-side .kv-row {
+  padding: 8px 0;
+}
+
+.home-hero-side .kv-row:first-child {
+  padding-top: 0;
+}
+
+@media (max-width: 1000px) {
+  .home-hero-grid { grid-template-columns: 1fr; }
+  .home-hero-side { border-left: none; border-top: 1px solid var(--line-1); }
+}
+
+.cell-grid-3 {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.1fr);
+  gap: 0;
+}
+
+.cell-grid-3 > div {
+  padding: 18px 22px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.cell-grid-3 > div + div {
+  border-left: 1px solid var(--line-1);
+}
+
+@media (max-width: 1100px) {
+  .cell-grid-3 { grid-template-columns: 1fr; }
+  .cell-grid-3 > div + div { border-left: none; border-top: 1px solid var(--line-1); }
+}
+
+.home-cell-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.home-cell-title {
+  font-size: 12.5px;
+  font-weight: 650;
+  color: var(--text-2);
+}
+
+/* ==========================================================================
    Results screen
    ========================================================================== */
 
@@ -1467,6 +1691,41 @@ pre.json {
     radial-gradient(400px 120px at 50% 0%, rgba(200, 242, 78, 0.06), transparent 70%),
     var(--bg-0);
 }
+
+/* Tentative mode: the engine refused high confidence — the point estimate is
+   deliberately de-emphasized and the range carries the message. */
+.results-tentative .sens-block.recommended {
+  border-style: dashed;
+  border-color: rgba(240, 177, 63, 0.45);
+  background: var(--bg-0);
+}
+
+.results-tentative .sens-block.recommended .sens-block-label {
+  color: var(--warn);
+}
+
+.results-tentative .sens-block.recommended .sens-big {
+  color: var(--text-1);
+}
+
+.tentative-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--warn);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+/* Result reveal: sections rise in sequence when a result is rendered. */
+.result-reveal > * {
+  animation: view-in 260ms var(--ease) backwards;
+}
+
+.result-reveal > *:nth-child(2) { animation-delay: 40ms; }
+.result-reveal > *:nth-child(3) { animation-delay: 80ms; }
+.result-reveal > *:nth-child(4) { animation-delay: 120ms; }
+.result-reveal > *:nth-child(n + 5) { animation-delay: 160ms; }
 
 .sens-block-label {
   font-size: 10.5px;
@@ -1548,6 +1807,98 @@ pre.json {
   gap: 5px;
   color: var(--text-2);
   font-size: 13px;
+}
+
+/* ==========================================================================
+   Stat strip (one surface, hairline-divided — no card soup)
+   ========================================================================== */
+
+.stat-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.stat-strip > .stat {
+  padding: 16px 22px;
+  min-width: 0;
+}
+
+.stat-strip > .stat + .stat {
+  border-left: 1px solid var(--line-1);
+}
+
+@media (max-width: 900px) {
+  .stat-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .stat-strip > .stat { border-left: none !important; border-top: 1px solid var(--line-1); }
+  .stat-strip > .stat:nth-child(-n + 2) { border-top: none; }
+  .stat-strip > .stat:nth-child(2n) { border-left: 1px solid var(--line-1) !important; }
+}
+
+/* ==========================================================================
+   History session detail
+   ========================================================================== */
+
+.session-row {
+  cursor: pointer;
+}
+
+.session-row .row-chevron {
+  color: var(--text-3);
+  transition: transform var(--t-fast) var(--ease);
+  display: inline-flex;
+}
+
+.session-row[aria-expanded="true"] .row-chevron {
+  transform: rotate(180deg);
+}
+
+.session-detail td {
+  background: var(--bg-1);
+  padding: 16px 18px;
+}
+
+.session-detail-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 22px;
+}
+
+@media (max-width: 1000px) {
+  .session-detail-grid { grid-template-columns: 1fr; }
+}
+
+.session-detail-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-3);
+  margin-bottom: 8px;
+}
+
+.dim-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.dim-chip {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 7px 12px;
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-s);
+  background: var(--bg-0);
+}
+
+.dim-chip-name {
+  font-size: 11px;
+  color: var(--text-3);
+}
+
+.dim-chip-value {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 650;
 }
 
 /* ==========================================================================
