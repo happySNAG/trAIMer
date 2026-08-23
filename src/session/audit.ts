@@ -8,8 +8,11 @@ export const AUDIT_CATEGORIES = [
   "rest-ended",
   "paused",
   "resumed",
+  "session-resumed",
+  "capture-source-changed",
   "boundary-expansion-proposed",
   "adaptive-allocation-decision",
+  "extra-block-requested",
   "retest-linked",
   "recommendation-created",
 ] as const;
@@ -37,6 +40,19 @@ export class AuditLog {
       category,
       detail,
     });
+  }
+
+  /**
+   * Restores a previously persisted entry (resume support). Sequence numbers
+   * must continue monotonically; a mismatch is corruption and fails loudly.
+   */
+  restore(entry: AuditEntry): void {
+    if (entry.seq !== this.#entries.length) {
+      throw new Error(
+        `corrupted audit trail: expected seq ${this.#entries.length}, got ${entry.seq}`,
+      );
+    }
+    this.#entries.push({ ...entry, detail: { ...entry.detail } });
   }
 
   entries(): readonly AuditEntry[] {

@@ -196,3 +196,43 @@ plugged in later without touching any call site (`rotationDegreesForCounts`,
 - **Persistence ports** (`StoreBackend`): Node fs backend (CLI/tests), in-memory
   backend (tests), IndexedDB backend (browser); envelope/migration guarantees
   unchanged; versioned session-bundle export/import.
+
+## Pass 4 additions
+
+- **Native capture** (`src/capture/nativeClient.ts`, `native/windows/`):
+  loopback-WebSocket transport to a Raw Input helper with versioned
+  handshake, session-token cross-talk protection, sequence continuity,
+  fail-closed frame validation, reconnect with backoff (docs/NATIVE-CAPTURE.md).
+- **Capture-source negotiation** (`src/capture/negotiation.ts`): validated
+  native > coalesced browser > basic mouse; explicit transitions; mid-trial
+  disconnect invalidates the affected trial; silent downgrades impossible.
+- **Session capture quality** (`src/diagnostics/captureQuality.ts`): robust
+  session-level aggregation feeding confidence gating.
+- **Fully paired statistics** (`src/optimizer/pairedFit.ts`): contrast
+  regression over pair differences replaces scenario-centering in the
+  surrogate path entirely.
+- **Model adequacy** (`src/optimizer/adequacy.ts`): five curve shapes;
+  quadratic vertices only when earned; plateau/boundary/inconsistent result
+  types.
+- **Change-point analysis** (`src/optimizer/changepoint.ts`): formal
+  segmented adaptation/fatigue/collapse detection with contamination flags.
+- **Joint X/Y search** (`src/optimizer/jointXY.ts`): sparse 2D neighborhood,
+  4-parameter weighted surface fit, conservative asymmetric-outcome policy
+  with separate X/Y ranges.
+- **Information-driven allocation** (`src/session/informationAllocation.ts`):
+  extra blocks follow decision value; reasons audited; deterministic.
+- **Resume/recovery** (`src/session/resume.ts`, runner): v2 checkpoints with
+  pre-trial pending markers; resume never repeats completed trials and
+  invalidates interrupted ones explicitly.
+- **History API** (`src/history/api.ts`): typed view models for sessions,
+  trends, rankings, dimensions, calibration history, retest lineage, device
+  history, optimizer versions.
+- **Budget policy** (`src/experiments/budget.ts`): early stop / continue /
+  defer-to-next-session decisions from evidence + caps.
+- **Error model & observability** (`src/errors/types.ts`,
+  `src/diagnostics/localLog.ts`): typed categories, safe user messages,
+  local-only diagnostic bundles.
+- **Versioning** (`src/version.ts`): app/engine/optimizer versions persisted
+  across artifacts with compatibility checks.
+- **Browser automation** (`tests/browser/`, Playwright) with a test-only
+  pointer-lock adapter (`?e2e=1`).

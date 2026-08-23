@@ -1,61 +1,76 @@
-# Statistics: paired-instance inference
+# Statistics: paired repeated-measures inference (Pass 4)
 
 ## Model
 
-For candidate `i`, scenario `c`, shared instance `r` (the r-th measured trial
-of scenario `c`, identical geometry for every candidate), the observed utility
-decomposes as:
+For candidate `i`, scenario `c`, shared instance cell `(c, r)`:
 
 ```
-u_ire = μ_i + s_c + b_r + ε_ire
+u_ire = μ_i + s_c + b_(c,r) + ε_ire
 ```
 
-- `μ_i` — the between-candidate effect we want to rank,
-- `s_c` — scenario difficulty (static vs small vs tracking …),
-- `b_r` — the *shared instance* effect (that particular target placement was
-  hard), identical across candidates by construction of the paired planner,
-- `ε_ire` — within-player trial noise.
+- `μ_i` candidate effect (ranked),
+- `s_c` scenario difficulty,
+- `b_(c,r)` shared-instance effect per cell — identical across candidates by
+  construction of the paired planner,
+- `ε` within-cell noise.
 
-## Estimator: paired differences over cells
+## Estimator
 
-A *cell* is `(scenarioId, scenarioRepIndex)`. For candidates `i` and `j`,
-every shared cell contributes one difference:
+1. **Pair contrasts.** For every candidate pair `(i, j)`, each shared cell
+   contributes `d_k = ū_ik − ū_jk`; pooled as `d̂_ij` with variance
+   `v_ij = s²_d / K` (`src/optimizer/paired.ts`). Scenario and instance
+   effects cancel EXACTLY inside every difference.
 
-```
-d_cell = ū_i(cell) − ū_j(cell)
-```
+2. **Contrast regression.** Candidate effects are recovered from the weighted
+   system (`src/optimizer/pairedFit.ts`)
 
-(averaging across search rounds within a cell first). Under the model above,
-`s_c` and `b_r` cancel exactly; the mean and standard error of `d` identify
-`μ_i − μ_j` uncontaminated by instance or scenario effects.
+   ```
+   minimize Σ_{i<j} w_ij · ( (α_i − α_j) − d̂_ij )²     s.t. α_ref = 0,
+   w_ij = 1/v_ij        (heteroskedastic)
+   ```
 
-This replaces Pass 1's additive scenario-centering as the primary comparison
-device (`src/optimizer/paired.ts`). Centering remains only as a fallback for
-candidate pairs with fewer than 3 shared cells, where pairing is undefined.
+   solved by coordinate descent on the pinned Laplacian system. This replaces
+   ALL remaining scenario-centering approximations in the surrogate path:
+   `fitQuadraticWeighted` now consumes paired effects with weights
+   `1/SE(α̂)²` whenever the paired system is solvable (≥3 connected
+   candidates). Sparse data falls back to pooled means explicitly
+   (`basis: "pooled"` in diagnostics).
+
+3. **Uncertainty.** `Var(α̂) ≈ cycleFactor · (AᵀWA)⁻¹_diag`; exact for tree
+   graphs, mildly optimistic on dense cycles (documented approximation).
+   SEs of pair differences remain normal-approximation based (adequate for
+   K ≥ 3 cells).
+
+4. **Scenario effects** `s_c` are reported separately for explanations only;
+   they cannot re-enter rankings because effects are estimated purely from
+   within-pair differences.
 
 ## Multiplicity control
 
-Pairwise "significantly worse than best" decisions are made with a
-Dunnett-style adjusted threshold: exclude a candidate from the tied set only
-when `z > z*` with `z* = Φ⁻¹(1 − α/(K−1))`, `α = 0.05`, `K` = number of
-evaluated candidates. Without this, high-powered paired comparisons produced
-false exclusions on flat plateaus in development (a Pass 1 blind case began
-failing when raw `z > −1.96` was used).
-
-## Composite utility
-
-Unchanged from Pass 1 (`docs/METRICS.md`): weighted mean of dimension scores
-present, weights shipped in every recommendation. The surrogate fit (weighted
-quadratic in log2-eDPI space) still consumes the centered per-candidate means;
-pairing governs pairwise gap/tie decisions.
+Unchanged: Dunnett-adjusted exclusion threshold `z* = Φ⁻¹(1 − α/(K−1))`
+governs tied-set membership.
 
 ## Assumptions and limits
 
-- Pairing assumes instances are truly shared — guaranteed by construction for
-  measured trials seeded identically across candidates.
-- Cell averaging treats rounds as exchangeable; fatigue drift within a session
-  can bias later rounds equally for all candidates (they are interleaved), so
-  the paired contrast stays fair even when absolute utilities drift.
-- SEs are normal-approximation based; with ≥6 paired cells this is adequate
-  for the ranking decisions made. No precision beyond the reported CIs is
-  claimed anywhere.
+- Instances truly shared across candidates (guaranteed by planner seeds).
+- Cell averaging treats rounds as exchangeable; interleaving keeps fatigue
+  drift common-mode so contrasts stay fair.
+- The covariance approximation is exact on trees; dense candidate graphs get
+  a documented safety inflation.
+- With < 3 connectable candidates the paired system is refused (explicit
+  null), never silently replaced by an inferior estimator without labeling.
+
+## Joint X/Y model
+
+The sparse joint search adds a small surface fit over ALL measured candidates
+(`src/optimizer/jointXY.ts`):
+
+```
+u = β0 + βx·x + βy·y + βxy·x·y      x = log2 eDPI offset, y = log2(Y/X)
+```
+
+weighted by per-candidate SEs; the interaction column is ridge-regularized
+because the design is deliberately sparse (never a grid). Decision policy:
+unequal Y is recommended ONLY at paired |z| ≥ minImprovementZ (default 2);
+noisy false asymmetry therefore resolves to equality/unresolved. Separate
+plausible ranges are returned for X and Y.

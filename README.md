@@ -11,13 +11,32 @@ be owned separately; everything here runs without it.
 
 ```bash
 npm install
-npm test        # full suite (163 tests; includes blind-recovery campaigns)
-npm run lint    # eslint
+npm test            # engine suite (300+ tests incl. blind-recovery campaigns)
+npm run lint        # eslint
 npm run typecheck
-npm run demo    # simulate a player, optimize, then reveal the hidden optimum
-npm run app     # real-input browser aim lab → http://localhost:5173
-npm run build   # production browser bundle → dist-app/
+npm run bench       # performance benchmark (1000 Hz ingest, optimizer)
+npm run demo        # simulate a player, optimize, then reveal the hidden optimum
+npm run app         # real-input browser aim lab → http://localhost:5173
+npm run build       # production browser bundle → dist-app/
+npm run test:browser  # Playwright end-to-end suite (starts vite automatically)
 ```
+
+## Pass 4 headline capabilities
+
+- **Native high-rate capture (Windows)**: Raw Input helper over a local-only
+  versioned transport — 125–1000+ Hz raw counts, buttons, device metadata,
+  drop/jitter diagnostics (`docs/NATIVE-CAPTURE.md`). Browser coalesced
+  capture remains an explicit, negotiated fallback.
+- **Production recovery**: every trial is checkpointed with a pending marker;
+  sessions resume exactly, interrupted trials invalidate with audit metadata
+  (`docs/RESUME.md`).
+- **Honest statistics**: fully paired repeated-measures fit, curve-shape
+  adequacy gating (plateaus/boundaries/multimodal refuse precise optima),
+  formal change-point adaptation detection, restrained joint X/Y search
+  (`docs/OPTIMIZER.md`, `docs/STATISTICS.md`).
+- **History, calibration staleness, typed errors, local diagnostic bundles**:
+  see `docs/HISTORY.md` pointers in the History tab, `docs/CALIBRATION.md`,
+  `docs/FAILURE-MODEL.md`.
 
 See `docs/MANUAL-TEST.md` for the human smoke-test checklist for the browser app,
 and `docs/HUMAN-VALIDATION.md` for the repeated-session protocol used to

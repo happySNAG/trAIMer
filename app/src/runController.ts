@@ -53,11 +53,23 @@ interface ActiveTrial {
   fatalSeen: boolean;
 }
 
+export interface BrowserRunControllerOptions {
+  /** Test-only override for candidate-block rest duration (ms). */
+  restBetweenCandidatesMs?: number | undefined;
+  /**
+   * E2E adapter mode (?e2e=1): pointer-lock acquisition succeeds virtually
+   * without a user gesture; scripted events flow through the production
+   * recorder. Never enabled outside automated tests.
+   */
+  virtualLock?: boolean;
+}
+
 export class BrowserRunController {
   readonly #canvas: HTMLCanvasElement;
   readonly #settings: AppSettings;
   readonly #callbacks: RunControllerCallbacks;
   readonly #definition;
+  readonly #virtualLock: boolean;
   #capture: PointerLockCaptureSource | null = null;
   #store: LocalJsonStore | null = null;
   #runner: SessionRunner | null = null;
@@ -74,10 +86,12 @@ export class BrowserRunController {
     canvas: HTMLCanvasElement,
     settings: AppSettings,
     callbacks: RunControllerCallbacks,
+    options: BrowserRunControllerOptions = {},
   ) {
     this.#canvas = canvas;
     this.#settings = settings;
     this.#callbacks = callbacks;
+    this.#virtualLock = options.virtualLock ?? false;
     canvas.width = LOGICAL_VIEWPORT.widthPx;
     canvas.height = LOGICAL_VIEWPORT.heightPx;
 
@@ -91,6 +105,9 @@ export class BrowserRunController {
       warmupTrialsPerCandidateBlock: settings.warmupTrials,
       stoppingCriteria: { maxSearchRounds: Math.max(1, settings.rounds) },
       yExploration: { enabled: settings.yExploration },
+      ...(options.restBetweenCandidatesMs !== undefined
+        ? { restBetweenCandidatesMs: options.restBetweenCandidatesMs }
+        : {}),
       notes: "browser live session",
     });
   }
@@ -99,8 +116,9 @@ export class BrowserRunController {
     canvas: HTMLCanvasElement,
     settings: AppSettings,
     callbacks: RunControllerCallbacks,
+    options: BrowserRunControllerOptions = {},
   ): Promise<BrowserRunController> {
-    const controller = new BrowserRunController(canvas, settings, callbacks);
+    const controller = new BrowserRunController(canvas, settings, callbacks, options);
     const backend = new IndexedDbBackend(await openAimLabDb());
     controller.#store = new LocalJsonStore(backend);
     return controller;
@@ -129,10 +147,14 @@ export class BrowserRunController {
       nowIso: () => new Date().toISOString(),
       store: this.#store,
       execution: {
-        requestLock: () => capture.requestLock(),
+        requestLock: () =>
+          this.#virtualLock ? Promise.resolve(true) : capture.requestLock(),
         executeTrial: (spec, round, repIndex) =>
           this.#executeTrial(spec, round, repIndex),
-        releaseCapture: async () => capture.releaseLock(),
+        releaseCapture: async () => {
+          if (this.#virtualLock) return;
+          capture.releaseLock();
+        },
       },
       onStateChange: (state, detail) => this.#callbacks.onHud(state, detail ?? ""),
       onTrialPersisted: (trial) => {
@@ -225,6 +247,40 @@ export class BrowserRunController {
 
   cancel(): void {
     this.#runner?.cancel();
+  }
+
+  /** E2E adapter seam: feed a capture event through the production recorder. */
+  emitForTesting(event: CaptureEvent): void {
+    this.#capture?.emitForTesting(event);
+  }
+
+  /** E2E adapter seam: simulate a granted pointer lock without user gesture. */
+  simulateLockAcquired(): void {
+    this.#capture?.simulateLockAcquiredForTesting();
+  }
+
+  releaseCaptureForTesting(): void {
+    void this.#capture?.releaseLock();
+  }
+
+  /** E2E diagnostics: current trial progress without touching internals. */
+  get activeTrialDebug(): {
+    phase: string;
+    spawned: number;
+    finished: boolean;
+    shots: number;
+    elapsedMs: number;
+  } | null {
+    if (!this.#active) return null;
+    const status = this.#active.director.tick(0);
+    void status;
+    return {
+      phase: "active",
+      spawned: this.#active.recorder.state.spawnedTargets.length,
+      finished: this.#active.director.finished,
+      shots: this.#active.recorder.state.shotCount,
+      elapsedMs: performance.now() - this.#active.startedAtMonotonicMs,
+    };
   }
 
   instructionFor(scenarioId: string): string {

@@ -38,6 +38,19 @@ export class LocalJsonStore {
     await this.#backend.writeFile(relPath, JSON.stringify(envelope, null, 2));
   }
 
+  /** Lists full relative paths of JSON artifacts stored under a directory. */
+  async listByPrefix(dir: string): Promise<string[]> {
+    const files = await this.#backend.listFiles(dir);
+    return files.map((f) => joinPath(dir, f)).sort();
+  }
+
+  async loadRawAt<T>(
+    kind: PersistedKind,
+    relPath: string,
+  ): Promise<{ payload: T; migratedFrom: number | null } | null> {
+    return this.loadRaw<T>(kind, relPath);
+  }
+
   async loadRaw<T>(
     kind: PersistedKind,
     relPath: string,

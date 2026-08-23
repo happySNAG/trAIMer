@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import type { TrialRecord } from "../src/domain/trial.ts";
 import {
   makeNativeFixture,
   parseNativeFixture,
@@ -116,8 +117,7 @@ describe("native capture transport", () => {
     const liveRecord = liveRecorder.finish("hit", 260);
 
     // replayed feed through the CaptureSource boundary
-    type Stored = import("../src/domain/trial.ts").TrialRecord;
-    let record: Stored | null = null;
+    let record: TrialRecord | null = null;
     let spawned = false;
     const recorder = new TrialRecorder(request);
     spawnTarget(recorder);

@@ -28,6 +28,8 @@ export interface PairedComparison {
   z: number;
 }
 
+export type TrialUtilityFn = (trial: TrialRecord) => number | null;
+
 function isIncluded(trial: TrialRecord, policy: ExclusionPolicy): boolean {
   if (trial.phase !== "measured") return false;
   if (trial.validity.status === "invalid") return false;
@@ -42,17 +44,24 @@ export function computeCellUtilities(
   trialsByCandidate: ReadonlyMap<string, readonly TrialRecord[]>,
   policy: ExclusionPolicy,
   scoring: DimensionScoringConfig = DEFAULT_DIMENSION_SCORING,
+  /** Deterministic injection seam for replay/synthetic analysis. */
+  utilityOverride?: TrialUtilityFn,
 ): Map<string, Map<string, number>> {
   const out = new Map<string, Map<string, number>>();
   for (const [candidateId, trials] of trialsByCandidate) {
     const cellAccum = new Map<string, number[]>();
     for (const trial of trials) {
       if (!isIncluded(trial, policy)) continue;
-      const scenario =
-        definition.scenarioCatalog.find((sc) => sc.id === trial.scenarioId) ??
-        undefined;
-      const { dimensions } = scoreTrialDimensions(trial, scenario, scoring);
-      const utility = trialUtilityFromDimensions(dimensions, DEFAULT_UTILITY_WEIGHTS);
+      let utility: number | null;
+      if (utilityOverride) {
+        utility = utilityOverride(trial);
+      } else {
+        const scenario =
+          definition.scenarioCatalog.find((sc) => sc.id === trial.scenarioId) ??
+          undefined;
+        const { dimensions } = scoreTrialDimensions(trial, scenario, scoring);
+        utility = trialUtilityFromDimensions(dimensions, DEFAULT_UTILITY_WEIGHTS);
+      }
       if (utility === null) continue;
       const key = cellKeyOf(trial);
       const list = cellAccum.get(key) ?? [];

@@ -15,10 +15,16 @@ import { assessFatigue } from "./fatigue.ts";
 import { AuditLog, type AuditEntry } from "./audit.ts";
 import { allocateReps, type AllocationDecision } from "./allocation.ts";
 import type {
-  SessionCheckpoint,
   SessionRunnerPorts,
   SessionProgressSnapshot,
 } from "./types.ts";
+import {
+  RESUME_CHECKPOINT_SCHEMA_VERSION,
+  buildResumePlan,
+  parseResumeCheckpoint,
+  type ResumeCheckpoint,
+} from "./resume.ts";
+import { APP_VERSION, ENGINE_VERSION, OPTIMIZER_VERSION_V4 } from "../version.ts";
 
 const SEQUENCE_KEY = (round: number, seq: number): string => `${round}:${seq}`;
 
@@ -38,12 +44,79 @@ export class SessionRunner {
   #pauseRequested = false;
   #cancelRequested = false;
   readonly #audit = new AuditLog();
+  #resumedFrom: ResumeCheckpoint | null = null;
+  #startedAtIso = new Date().toISOString();
+  #currentRound = -1;
+  #pendingTrial: NonNullable<ResumeCheckpoint["interruptedTrial"]> | null = null;
 
   constructor(definition: ExperimentDefinition, ports: SessionRunnerPorts) {
     this.#definition = definition;
     this.#ports = ports;
   }
 
+  /**
+   * Restores a runner from a persisted checkpoint. Throws (fail closed) on
+   * corrupted or incompatible checkpoints. Completed trials are never
+   * repeated; an interrupted in-progress trial is invalidated and repeated
+   * with explicit audit metadata.
+   */
+  static resumeFrom(
+    rawCheckpoint: unknown,
+    definition: ExperimentDefinition,
+    ports: SessionRunnerPorts,
+    restoredTrials: readonly TrialRecord[],
+  ): SessionRunner {
+    const checkpoint = parseResumeCheckpoint(rawCheckpoint);
+    const plan = buildResumePlan(checkpoint, definition);
+    const runner = new SessionRunner(definition, ports);
+    runner.#resumedFrom = checkpoint;
+    runner.#sessionId = makeSessionId(checkpoint.sessionId.replace(/^session-/, ""));
+    runner.#completedKeys = plan.completedKeys;
+    runner.#phaseLog = checkpoint.phaseLog.map((e) => ({ ...e }));
+    runner.#activeTestingMs = checkpoint.activeTestingMs;
+    runner.#continuousTestingMs = checkpoint.continuousTestingMs;
+    runner.#currentRound = Math.max(0, checkpoint.currentRound);
+    runner.#startedAtIso = checkpoint.createdAtIso;
+    runner.#setState("setup");
+    for (const [candidateId, label] of Object.entries(checkpoint.blindedLabels)) {
+      runner.#blindedLabels.set(candidateId, label);
+    }
+    for (const [candidateId, count] of Object.entries(checkpoint.repCounterByCandidate)) {
+      runner.#repCounterByCandidate.set(candidateId, count);
+    }
+    for (const entry of checkpoint.auditTrail) {
+      runner.#audit.restore(entry);
+    }
+    for (const trial of restoredTrials) {
+      runner.#allTrials.push(trial);
+      if (trial.phase === "measured") runner.#measuredTrialsSinceRest.push(trial);
+    }
+
+    // Prefer the EXPLICIT pre-trial pending marker written into the
+    // checkpoint; fall back to audit-trail inference for older checkpoints
+    // that lack it.
+    const interrupted =
+      checkpoint.interruptedTrial ??
+      detectInterruptedTrialFromAudit(checkpoint);
+    if (interrupted) {
+      runner.#audit.append(runner.#ports.nowIso(), "trial-invalidated", {
+        trialId: `interrupted-r${interrupted.round}-${interrupted.sequenceNumber}`,
+        reasons: "INTERRUPTED_IN_PROGRESS",
+        detail:
+          "process ended while this trial was active; it will be repeated once with fresh data",
+        candidateId: interrupted.candidateId,
+        scenarioId: interrupted.scenarioId,
+        round: interrupted.round,
+        sequenceNumber: interrupted.sequenceNumber,
+      });
+    }
+    runner.#audit.append(runner.#ports.nowIso(), "session-resumed", {
+      sessionId: checkpoint.sessionId,
+      skippedSteps: checkpoint.completedSequenceKeys.length,
+      invalidatedInterruptedTrial: interrupted ? 1 : 0,
+    });
+    return runner;
+  }
   get state(): SessionStateName {
     return this.#state;
   }
@@ -81,22 +154,26 @@ export class SessionRunner {
     trials: TrialRecord[];
     auditTrail: readonly AuditEntry[];
   }> {
-    if (this.#state !== "idle") throw new Error("runner already used");
-    this.#setState("setup");
-    this.#audit.append(this.#ports.nowIso(), "experiment-created", {
-      experimentId: String(this.#definition.id),
-      candidateCount: this.#definition.candidates.length,
-      rounds: this.#definition.stoppingCriteria.maxSearchRounds,
-    });
-    this.#sessionId = makeSessionId(
-      `${this.#definition.id}-${Date.now()}`.replace(/[^a-zA-Z0-9-]/g, "-"),
-    );
+    if (this.#state !== "idle" && this.#state !== "setup") {
+      throw new Error("runner already used");
+    }
+    if (this.#state === "idle") this.#setState("setup");
+    if (!this.#resumedFrom) {
+      this.#audit.append(this.#ports.nowIso(), "experiment-created", {
+        experimentId: String(this.#definition.id),
+        candidateCount: this.#definition.candidates.length,
+        rounds: this.#definition.stoppingCriteria.maxSearchRounds,
+      });
+      this.#sessionId = makeSessionId(
+        `${this.#definition.id}-${Date.now()}`.replace(/[^a-zA-Z0-9-]/g, "-"),
+      );
+    }
 
     await this.#ports.store.saveExperiment({
       ...this.#definition,
       candidates: [...this.#definition.candidates],
     });
-    await this.#persistCheckpoint("running");
+    await this.#persistCheckpoint(this.#resumedFrom ? "running" : "running");
 
     const locked = await this.#executionGate();
     if (!locked) {
@@ -105,12 +182,17 @@ export class SessionRunner {
     this.#setState("candidate-transition", "lock acquired");
 
     const maxRounds = Math.max(1, this.#definition.stoppingCriteria.maxSearchRounds);
-    for (let round = 0; round < maxRounds; round++) {
+    let firstRound = this.#resumedFrom ? Math.max(0, this.#resumedFrom.currentRound) : 0;
+    for (let round = firstRound; round < maxRounds; round++) {
+      this.#currentRound = round;
       if (this.#cancelRequested) break;
       const allocation = this.#allocationForRound(round);
       const plan = planCandidateBlocks(this.#definition, round, undefined, allocation);
-      if (plan.length === 0) break;
-      await this.#runPlan(plan, round);
+      const remaining = plan.filter(
+        (spec) => !this.#completedKeys.has(SEQUENCE_KEY(round, spec.sequenceNumber)),
+      );
+      if (plan.length === 0 && round > 0) break;
+      await this.#runPlan(remaining, round);
 
       const measuredTotal = this.#allTrials.filter((t) => t.phase === "measured").length;
       if (
@@ -119,6 +201,7 @@ export class SessionRunner {
       ) {
         break;
       }
+      firstRound = round + 1;
     }
 
     if (this.#cancelRequested) {
@@ -139,7 +222,7 @@ export class SessionRunner {
     await this.#ports.store.saveRecommendation(recommendation);
     await this.#ports.store.saveOptimizerRun({
       experimentId: this.#definition.id,
-      optimizerVersion: "optimizer-v2",
+      optimizerVersion: OPTIMIZER_VERSION_V4,
       schemaVersion: 1,
       utilityWeights: recommendation.utilityWeights as unknown as Record<string, number>,
       config: {},
@@ -198,6 +281,18 @@ export class SessionRunner {
       const repIndex =
         spec.phase === "measured" ? this.#nextRepIndex(spec.candidateId) : null;
 
+      // Pre-trial checkpoint WITH the pending-trial marker: if the process
+      // dies mid-trial, the persisted state names exactly which trial was in
+      // flight so resume can invalidate-and-repeat it explicitly.
+      this.#pendingTrial = {
+        candidateId: spec.candidateId,
+        scenarioId: spec.scenarioId,
+        phase: spec.phase,
+        round,
+        sequenceNumber: spec.sequenceNumber,
+      };
+      await this.#persistCheckpoint("running");
+
       const startedAt = this.#ports.clock.nowMs();
       this.#setState("trial-active");
       this.#audit.append(this.#ports.nowIso(), "trial-started", {
@@ -235,6 +330,7 @@ export class SessionRunner {
       await this.#ports.store.saveTrial(this.#definition.id, record);
       this.#allTrials.push(record);
       this.#completedKeys.add(SEQUENCE_KEY(round, spec.sequenceNumber));
+      this.#pendingTrial = null;
       await this.#persistCheckpoint("running");
       this.#ports.onTrialPersisted?.(record);
 
@@ -351,15 +447,42 @@ export class SessionRunner {
     return { status: "aborted", trials: this.#allTrials, auditTrail: this.auditEntries() };
   }
 
-  async #persistCheckpoint(status: SessionCheckpoint["status"]): Promise<void> {
+  async #persistCheckpoint(status: "running" | "complete" | "aborted"): Promise<void> {
     if (!this.#sessionId) return;
-    const checkpoint: SessionCheckpoint = {
+    const checkpoint: ResumeCheckpoint = {
+      schemaVersion: RESUME_CHECKPOINT_SCHEMA_VERSION,
+      kind: "session-resume",
       sessionId: this.#sessionId,
       experimentId: this.#definition.id,
       status,
+      updatedAtIso: this.#ports.nowIso(),
+      createdAtIso: this.#startedAtIso,
       completedSequenceKeys: [...this.#completedKeys].sort(),
+      currentRound: this.#currentRound,
       phaseLog: [...this.#phaseLog],
       activeTestingMs: this.#activeTestingMs,
+      continuousTestingMs: this.#continuousTestingMs,
+      restCount: 0,
+      blindedLabels: Object.fromEntries(this.#blindedLabels),
+      repCounterByCandidate: Object.fromEntries(this.#repCounterByCandidate),
+      completedTrialIds: this.#allTrials.map((t) => t.id),
+      auditTrail: [...this.#audit.entries()],
+      captureSource: this.#ports.captureSourceMetadata?.() ?? null,
+      playerId: this.#ports.playerIdentity?.().playerId ?? null,
+      playerName: this.#ports.playerIdentity?.().playerName ?? null,
+      dpi: this.#definition.dpi,
+      retestOfExperimentId: this.#definition.notes?.match(/retest of (\S+)/)?.[1] ?? null,
+      calibrationRecordIdsX: [],
+      calibrationRecordIdsY: [],
+      appVersion: APP_VERSION,
+      engineVersion: ENGINE_VERSION,
+      optimizerVersion: OPTIMIZER_VERSION_V4,
+      interruptedTrial:
+        this.#pendingTrial ??
+        detectInterruptedTrialFromAudit({
+          auditTrail: [...this.#audit.entries()],
+        }),
+      lastValidState: this.#state,
     };
     await this.#ports.store.saveRaw(
       "session-checkpoint",
@@ -381,6 +504,45 @@ export class SessionRunner {
       lastEventDetail: detail,
     };
   }
+}
+
+/**
+ * A trial whose "trial-started" audit entry has no matching "trial-ended"
+ * indicates the process died mid-trial. Deterministic pure function so the
+ * UI preview and the runner agree exactly.
+ */
+export function detectInterruptedTrialFromAudit(
+  checkpoint: Pick<ResumeCheckpoint, "auditTrail">,
+): ResumeCheckpoint["interruptedTrial"] {
+  const started = [...checkpoint.auditTrail]
+    .filter((e) => e.category === "trial-started")
+    .map((e) => ({
+      seq: e.seq,
+      candidateId: String(e.detail.candidateId ?? ""),
+      scenarioId: String(e.detail.scenarioId ?? ""),
+      phase: String(e.detail.phase ?? ""),
+      round: Number(e.detail.round ?? -1),
+      sequenceNumber: Number(e.detail.sequenceNumber ?? -1),
+    }));
+  if (started.length === 0) return null;
+  const lastStarted = started[started.length - 1]!;
+  const endedSeqs = new Set(
+    checkpoint.auditTrail
+      .filter((e) => e.category === "trial-ended")
+      .map((e) => e.seq),
+  );
+  // A trial-ended always follows its trial-started directly in our runner.
+  // If ANY trial-ended exists at a seq greater than lastStarted.seq, nothing
+  // is pending; otherwise the last started trial never finished.
+  const anyEndAfterLastStart = [...endedSeqs].some((seq) => seq > lastStarted.seq);
+  if (anyEndAfterLastStart || endedSeqs.size >= started.length) return null;
+  return {
+    candidateId: lastStarted.candidateId,
+    scenarioId: lastStarted.scenarioId,
+    phase: lastStarted.phase,
+    round: lastStarted.round,
+    sequenceNumber: lastStarted.sequenceNumber,
+  };
 }
 
 function outcomeDetail(record: TrialRecord): string {
@@ -419,6 +581,7 @@ function guessEvent(
     "candidate-transition→trial-ready": "TRIAL_ANNOUNCED",
     "candidate-transition→analyzing": "ALL_TRIALS_DONE",
     "warmup→trial-ready": "WARMUP_ENDED",
+    "warmup→trial-active": "TRIAL_STARTED",
     "trial-ready→trial-active": "TRIAL_STARTED",
     "trial-active→inter-trial": "TRIAL_COMPLETED",
     "inter-trial→rest": "REST_STARTED",

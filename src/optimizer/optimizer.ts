@@ -24,6 +24,10 @@ import {
   lookupComparison,
   type PairedComparison,
 } from "./paired.ts";
+import { fitPairedCandidateEffects } from "./pairedFit.ts";
+import { analyzeCurveAdequacy, type CurveAdequacy } from "./adequacy.ts";
+import { analyzeSessionAdaptation, type SessionAdaptationReport } from "./changepoint.ts";
+import type { CaptureQualitySummary } from "../diagnostics/captureQuality.ts";
 import {
   computeConfidence,
   dunnettAdjustedExclusionZ,
@@ -31,6 +35,7 @@ import {
 } from "./confidence.ts";
 import { buildExplanation } from "./explainability.ts";
 import { buildConfidenceCalibration } from "../confidence/calibration.ts";
+import { APP_VERSION, ENGINE_VERSION } from "../version.ts";
 import { computeInputQuality, type InputQualityReport } from "../diagnostics/inputQuality.ts";
 import { detectAdaptation } from "./adaptation.ts";
 import { fitQuadraticWeighted } from "./quadratic.ts";
@@ -47,6 +52,8 @@ export interface OptimizerConfig {
   minValidTrialsPerCandidate: number;
   maxSearchRounds: number;
   inputQuality?: InputQualityReport | null | undefined;
+  /** Session-level capture quality (robust aggregation; requirement F). */
+  captureQualitySession?: CaptureQualitySummary | null | undefined;
 }
 
 export const DEFAULT_OPTIMIZER_CONFIG: OptimizerConfig = {
@@ -159,6 +166,47 @@ export class SensitivityOptimizer {
       this.#config.exclusionPolicy,
     );
     return computePairedComparisons(this.#trialsByCandidate, cellUtilities);
+  }
+
+  /**
+   * Fully paired repeated-measures fit of candidate effects (requirement G).
+   * Returns null when the paired design cannot support the system (sparse
+   * data) — callers must then use the pooled fallback.
+   */
+  pairedEffects() {
+    const cellUtilities = computeCellUtilities(
+      this.#definition,
+      this.#trialsByCandidate,
+      this.#config.exclusionPolicy,
+    );
+    const comparisons = computePairedComparisons(
+      this.#trialsByCandidate,
+      cellUtilities,
+    );
+    return fitPairedCandidateEffects(
+      this.#definition,
+      this.#trialsByCandidate,
+      this.#config.exclusionPolicy,
+      comparisons,
+    );
+  }
+
+  /** Curve-shape diagnostics for non-quadratic safeguards (requirement H). */
+  curveAdequacy(): CurveAdequacy {
+    return analyzeCurveAdequacy(this.evaluations());
+  }
+
+  /** Formal segmented change-point analysis (requirement K). */
+  changePointAnalysis(): SessionAdaptationReport {
+    return analyzeSessionAdaptation(this.#trialsByCandidate, {
+      utilityOf: (trial) => {
+        const scenario = this.#definition.scenarioCatalog.find(
+          (s) => s.id === trial.scenarioId,
+        );
+        const { dimensions } = scoreTrialDimensions(trial, scenario);
+        return trialUtilityFromDimensions(dimensions, DEFAULT_UTILITY_WEIGHTS);
+      },
+    });
   }
 
   evaluations(): CandidateEvaluation[] {
@@ -283,6 +331,49 @@ export class SensitivityOptimizer {
     existingX.add(key);
   }
 
+  /**
+   * Surrogate fit points: paired candidate EFFECTS with heteroskedastic
+   * weights when the paired system is solvable (requirement G), falling back
+   * to pooled per-candidate means otherwise. Scenario difficulty can never
+   * shift these points — it cancels inside every pair difference.
+   */
+  #surrogateFitPoints(
+    evals: readonly CandidateEvaluation[],
+  ): { x: number; y: number; weight: number; basis: "paired" | "pooled" }[] {
+    const paired = this.pairedEffects();
+    if (paired && paired.estimates.length === evals.length) {
+      const byId = new Map(paired.estimates.map((e) => [e.candidateId, e]));
+      const points = evals
+        .map((e) => {
+          const est = byId.get(e.candidateId);
+          if (!est || !Number.isFinite(est.effect) || !(est.standardError > 0)) return null;
+          return {
+            x: e.log2RatioVsBaseline,
+            y: est.effect,
+            weight: 1 / (est.standardError ** 2),
+            basis: "paired" as const,
+          };
+        })
+        .filter((p): p is NonNullable<typeof p> => p !== null);
+      if (points.length >= 3) {
+        this.#surrogateFitPointsBasis = "paired";
+        return points;
+      }
+    }
+    this.#surrogateFitPointsBasis = "pooled";
+    return evals
+      .filter((e) => e.trialsIncluded.length > 0)
+      .map((e) => ({
+        x: e.log2RatioVsBaseline,
+        y: e.utilityMean,
+        weight:
+          Number.isFinite(e.utilityStandardError) && e.utilityStandardError > 0
+            ? 1 / (e.utilityStandardError ** 2)
+            : 1e-6,
+        basis: "pooled" as const,
+      }));
+  }
+
   recommend(): Recommendation {
     const baselineEdpiForRange = (): number =>
       this.#definition.dpi * this.#definition.baselineSensitivity.sensX;
@@ -400,17 +491,19 @@ export class SensitivityOptimizer {
         evaluation.trialsIncluded.length < this.#config.minValidTrialsPerCandidate
       );
     });
-    const unresolvedBoundary =
+
+    // ---- Model adequacy (requirement H): never force a precise optimum out
+    // of bad geometry. -----------------------------------------------
+    const adequacy = analyzeCurveAdequacy(evals);
+
+    let unresolvedBoundary =
       atBoundary && (evaluatedExpansionIncomplete || roundsExhausted);
+    if (adequacy.result.kind === "unresolved-boundary") {
+      unresolvedBoundary = true;
+    }
 
     const vertexFit = fitQuadraticWeighted(
-      evals.map((e) => ({
-        x: e.log2RatioVsBaseline,
-        y: e.utilityMean,
-        weight: Number.isFinite(e.utilityStandardError) && e.utilityStandardError > 0
-          ? 1 / (e.utilityStandardError ** 2)
-          : 1e-6,
-      })),
+      this.#surrogateFitPoints(evals),
     );
 
     const baselineEdpi = baselineEdpiForRange();
@@ -427,6 +520,11 @@ export class SensitivityOptimizer {
       vertexFit !== null &&
       vertexFit.vertexX! >= Math.log2(rangeMin / baselineEdpi) - 1e-9 &&
       vertexFit.vertexX! <= Math.log2(rangeMax / baselineEdpi) + 1e-9;
+    const vertexAllowedByAdequacy =
+      adequacy.vertexUsable &&
+      (adequacy.shape === "single-smooth-optimum" ||
+        adequacy.shape === "asymmetric-optimum");
+    for (const line of adequacy.diagnostics) notes.push(line);
 
     let confidence = computeConfidence({
       utilityGapZ: z,
@@ -435,14 +533,15 @@ export class SensitivityOptimizer {
       bestAtSearchBoundary: atBoundary,
       candidatesWithData: evals.filter((e) => e.trialsIncluded.length > 0).length,
     });
-    if (significantPeak && vertexInsideSpan && !atBoundary) {
+    if (significantPeak && vertexInsideSpan && !atBoundary && vertexAllowedByAdequacy) {
       confidence = Math.min(0.85, confidence + 0.25);
     }
 
     const separation: Evidence["separation"] =
       anyIncomplete || z === null
         ? "insufficient"
-        : Math.abs(z) >= 2 || (significantPeak && vertexInsideSpan)
+        : Math.abs(z) >= 2 ||
+            (significantPeak && vertexInsideSpan && vertexAllowedByAdequacy)
           ? "clear"
           : "weak";
     if (separation === "weak") {
@@ -458,6 +557,13 @@ export class SensitivityOptimizer {
         `capture quality is degraded (input-quality score ${inputQualityReport.score.toFixed(2)}); confidence capped and retest recommended`,
       );
     }
+    const qualitySession = this.#config.captureQualitySession ?? null;
+    if (qualitySession?.retestingNecessary) {
+      confidence = Math.min(confidence, 0.45);
+      warnings.push(
+        `session capture quality is ${qualitySession.grade} (${qualitySession.score.toFixed(2)}): ${qualitySession.reasonCodes.join(", ")}; retest required`,
+      );
+    }
     if (unresolvedBoundary) {
       confidence = Math.min(confidence, 0.45);
       warnings.push(
@@ -470,9 +576,20 @@ export class SensitivityOptimizer {
         "the search reached the edge of the initially tested range; confirm before large commitments",
       );
     }
+    if (adequacy.shape === "multimodal-inconsistent") {
+      confidence = Math.min(confidence, 0.4);
+      warnings.push(
+        "candidate evidence is multimodal/inconsistent; no single reliable optimum can be claimed from these data",
+      );
+    }
 
     let vertexCiLine: string | null = null;
-    if (significantPeak && vertexFit?.vertexStandardError != null && vertexInsideSpan) {
+    if (
+      significantPeak &&
+      vertexFit?.vertexStandardError != null &&
+      vertexInsideSpan &&
+      vertexAllowedByAdequacy
+    ) {
       const ciLo = baselineEdpi * Math.pow(2, vertexFit.vertexX! - 1.96 * vertexFit.vertexStandardError);
       const ciHi = baselineEdpi * Math.pow(2, vertexFit.vertexX! + 1.96 * vertexFit.vertexStandardError);
       vertexCiLine = `${ciLo.toFixed(0)}–${ciHi.toFixed(0)} eDPI`;
@@ -535,9 +652,9 @@ export class SensitivityOptimizer {
         `accuracy dimension: best ${(accBest.mean * 100).toFixed(0)}% vs runner-up ${(accRun.mean * 100).toFixed(0)}%`,
       );
     }
-    if (vertexFit?.vertexX !== null && vertexFit !== null) {
+    if (vertexFit?.vertexX !== null && vertexFit !== null && vertexAllowedByAdequacy) {
       rationale.push(
-        `quadratic surrogate over log2 eDPI ratio places the peak near baseline ×${Math.pow(2, vertexFit.vertexX!).toFixed(3)}`,
+        `quadratic surrogate over paired candidate effects places the peak near baseline ×${Math.pow(2, vertexFit.vertexX!).toFixed(3)}`,
       );
     }
     rationale.push(
@@ -558,7 +675,7 @@ export class SensitivityOptimizer {
     const spanInterior = (xv: number): boolean =>
       xv > testedMinX + 0.02 && xv < testedMaxX - 0.02;
     const pointCandidates = [best.log2RatioVsBaseline];
-    if (!unresolvedBoundary) {
+    if (!unresolvedBoundary && vertexAllowedByAdequacy) {
       if (vertexFit?.vertexX != null && spanInterior(vertexFit.vertexX)) {
         pointCandidates.push(vertexFit.vertexX);
       }
@@ -619,7 +736,12 @@ export class SensitivityOptimizer {
         boundaryTouched ||
         confidence < 0.5 ||
         separation !== "clear" ||
-        (inputQualityReport?.warnings.unsuitableForHighConfidence ?? false),
+        (inputQualityReport?.warnings.unsuitableForHighConfidence ?? false) ||
+        (qualitySession?.retestingNecessary ?? false),
+      curveAdequacy: adequacy,
+      captureQualitySession: qualitySession ?? undefined,
+      engineVersion: ENGINE_VERSION,
+      appVersion: APP_VERSION,
     } satisfies Recommendation;
     const recommendation = recommendationShell;
     const explanation = buildExplanation({
@@ -628,6 +750,10 @@ export class SensitivityOptimizer {
       recommendation,
       inputQuality: inputQualityReport,
     });
+    const pairedEffectsResult =
+      this.#surrogateFitPointsBasis === "paired"
+        ? this.pairedEffects()
+        : null;
     return {
       ...recommendation,
       confidenceCalibration: buildConfidenceCalibration({
@@ -641,8 +767,12 @@ export class SensitivityOptimizer {
       }),
       explanation,
       inputQuality: inputQualityReport,
+      changePointAnalysis: this.changePointAnalysis(),
+      pairedFit: pairedEffectsResult?.diagnostics,
     };
   }
+
+  #surrogateFitPointsBasis: "paired" | "pooled" | "unknown" = "unknown";
 
   #insufficientRecommendation(
     evals: readonly CandidateEvaluation[],
@@ -696,6 +826,8 @@ export class SensitivityOptimizer {
       unresolvedBoundary: false,
       yExploration: undefined,
       furtherTestingSuggested: true,
+      engineVersion: ENGINE_VERSION,
+      appVersion: APP_VERSION,
       confidenceCalibration: buildConfidenceCalibration({
         trialsAnalyzed: analyzed,
         candidatesEvaluated: evals.length,

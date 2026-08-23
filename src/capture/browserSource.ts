@@ -311,6 +311,16 @@ export class PointerLockCaptureSource implements CaptureSource {
     this.#sink?.onEvent(event);
   }
 
+  /**
+   * Test adapter seam (app/src/testHooks.ts, ?e2e=1 only): resolves a pending
+   * lock request as granted and marks the source locked so scripted events
+   * flow through the exact production path.
+   */
+  simulateLockAcquiredForTesting(): void {
+    this.#locked = true;
+    this.#resolvePendingLock(true);
+  }
+
   #resolvePendingLock(granted: boolean): void {
     if (this.#lockTimer !== null) {
       clearTimeout(this.#lockTimer);

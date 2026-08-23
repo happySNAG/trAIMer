@@ -56,7 +56,7 @@ function makeRec(options: {
 
 function trials(seedUtilityDrift: number): TrialRecord[] {
   const out: TrialRecord[] = [];
-  for (const [candidateId, baseUtility] of [
+  for (const [candidateId, _baseUtility] of [
     ["cand-a", 0.5],
     ["cand-b", 0.45],
   ] as const) {

@@ -5,20 +5,40 @@
 ```
 CaptureSource (interface, unchanged since Pass 1)
   ├── SyntheticExperimentRunner   (headless simulation)
-  ├── PointerLockCaptureSource    (browser, Pass 2)
-  └── future native source
+  ├── PointerLockCaptureSource    (browser, Pass 2; coalesced events Pass 3)
+  └── NativeTransportCaptureSource (Pass 4: loopback helper, docs/NATIVE-CAPTURE.md)
+        ↓ negotiated by CaptureSourceNegotiator (Pass 4)
         ↓ CaptureEvents (monotonic ms)
      TrialRecorder ──► TrialRecord (raw-first persistence)
 ```
 
-A native high-frequency source can replace the browser source without any
-change below the event boundary.
+## Capture-source negotiation (Pass 4)
+
+Priority: **1. validated native high-rate → 2. browser coalesced pointer
+events → 3. basic mouse events.** Rules enforced in
+`src/capture/negotiation.ts`, never in UI code:
+
+- tier-1 requires a PASSING diagnostics run (`analyzeNativeStream`); an
+  unvalidated helper is rejected with a reason — never trusted implicitly,
+- the active source and every transition are recorded
+  (`negotiator.transitions`) and persisted on checkpoints/sessions,
+- a native disconnect DURING a measured trial emits a structured
+  `focus-change{reason:"native-disconnect"}` that invalidates that trial;
+  fallback happens only BETWEEN trials,
+- mid-trial source mixing without invalidation throws.
+
+## Session capture quality (Pass 4)
+
+Per-trial `computeInputQuality` reports remain, but confidence gating now
+uses the robust SESSION summary (`src/diagnostics/captureQuality.ts`): median
+per-trial scores, drop fraction, lock/resize totals, degradation over time,
+trial consistency, capture-source transitions, fraction of high-quality
+trials. See `docs/OPTIMIZER.md`; one bad trial cannot sink a clean session.
 
 ## Event vocabulary
 
-`pointer-sample` (dx/dy at event time), `button`, `target-spawn`,
-`target-remove`, `focus-change` (with reason string), plus Pass 2 additions:
-`lock-change` (acquired / pointer-lock-loss / denied) and `resize`.
+Unchanged since Pass 2 plus the transport-level lifecycle handled inside the
+native client (never synthesized into recorded streams).
 
 ## PointerLockCaptureSource
 

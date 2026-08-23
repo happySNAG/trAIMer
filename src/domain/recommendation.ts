@@ -1,6 +1,11 @@
 import type { SensitivityConfiguration } from "./settings.ts";
 import type { InputQualityReport } from "../diagnostics/inputQuality.ts";
 import type { AdaptationReport } from "../optimizer/adaptation.ts";
+import type { CurveAdequacy } from "../optimizer/adequacy.ts";
+import type { SessionAdaptationReport } from "../optimizer/changepoint.ts";
+import type { JointXYSummary } from "../optimizer/jointXY.ts";
+import type { PairedEffectsResult } from "../optimizer/pairedFit.ts";
+import type { CaptureQualitySummary } from "../diagnostics/captureQuality.ts";
 
 export type AimDimension =
   | "speed"
@@ -66,6 +71,14 @@ export interface Recommendation {
   sensitivityChangePlan?: SensitivityChangePlan | undefined;
   inputQuality?: InputQualityReport | null | undefined;
   adaptationEffects?: AdaptationReport | undefined;
+  /** Pass 4 additions — all additive and optional for backward compatibility. */
+  curveAdequacy?: CurveAdequacy | undefined;
+  changePointAnalysis?: SessionAdaptationReport | undefined;
+  jointXY?: JointXYSummary | undefined;
+  pairedFit?: PairedEffectsResult["diagnostics"] | undefined;
+  captureQualitySession?: CaptureQualitySummary | undefined;
+  engineVersion?: string | undefined;
+  appVersion?: string | undefined;
 }
 
 

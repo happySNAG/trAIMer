@@ -57,3 +57,17 @@ trial under the schema version that produced it.
 Round-trip tests cover profile/experiment/trial/recommendation shapes, byte-
 level sample fidelity, envelope rejection (wrong kind, future version), and the
 v0→v1 migration.
+
+## Pass 4 additions
+
+- `session-checkpoint` payloads now carry the resume schema (inner
+  schemaVersion 2): blinded labels, rep counters, completed trial ids, audit
+  trail, capture-source metadata, versions, interrupted-trial marker. The
+  outer envelope machinery is unchanged. See docs/RESUME.md.
+- Recommendations gain OPTIONAL fields: `curveAdequacy`,
+  `changePointAnalysis`, `jointXY`, `pairedFit`, `captureQualitySession`,
+  `engineVersion`, `appVersion`. Old records load unchanged (missing =
+  absent).
+- Calibration records gain OPTIONAL `estimator`, `qualityScore`,
+  `consistency`, `contextFingerprint`, and optional `turns` on measurements.
+- History API reads through the same envelopes only; no new kinds.

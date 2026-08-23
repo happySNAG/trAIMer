@@ -35,7 +35,10 @@ function wrap<T>(
   return new Promise((resolve, reject) => {
     const tx = db.transaction("kv", mode);
     const request = action(tx.objectStore("kv"));
-    request.onerror = () => reject(request.error);
+    request.onerror = () => {
+      const err = request.error ?? new Error("IndexedDB request failed");
+      reject(err);
+    };
     request.onsuccess = () => resolve(request.result);
   });
 }

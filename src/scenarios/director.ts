@@ -145,7 +145,12 @@ export class ScenarioDirector {
       return elapsedMs >= this.#instance.durationMs - 25;
     }
     if (this.#request.scenarioKind === "target-switch") {
-      return state.spawnedTargets.every((t) => t.removedMs !== null);
+      // Sequential targets end when all resolved OR the scenario budget is
+      // exhausted — an unhit sequence must never hang the session (Pass 4 fix).
+      return (
+        state.spawnedTargets.every((t) => t.removedMs !== null) ||
+        elapsedMs >= this.#instance.durationMs - 25
+      );
     }
     const singleResolved = state.spawnedTargets.some(
       (t) => t.removedMs !== null || t.removalReason === "hit",

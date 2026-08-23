@@ -1,4 +1,5 @@
 import type { MonotonicClock } from "../capture/clock.ts";
+import type { CaptureSourceMetadata } from "../capture/negotiation.ts";
 import type { TrialRecord } from "../domain/trial.ts";
 import type { TrialPlanSpec } from "../experiments/protocol.ts";
 import type { LocalJsonStore } from "../persistence/store.ts";
@@ -27,6 +28,9 @@ export interface SessionRunnerPorts {
   onStateChange?: ((state: SessionStateName, detail?: string) => void) | undefined;
   onProgress?: ((progress: SessionProgressSnapshot) => void) | undefined;
   onTrialPersisted?: ((trial: TrialRecord) => void) | undefined;
+  /** Persisted into every checkpoint (requirement E/L provenance). */
+  captureSourceMetadata?: (() => CaptureSourceMetadata | null) | undefined;
+  playerIdentity?: (() => { playerId: string; playerName: string }) | undefined;
 }
 
 export interface SessionProgressSnapshot {
