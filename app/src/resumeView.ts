@@ -5,6 +5,7 @@ import {
 } from "../../src/session/resume.ts";
 import type { LocalJsonStore } from "../../src/persistence/store.ts";
 import { el } from "./dom.ts";
+import { badge, button, formatAgo, formatDateTime, icon } from "./ui.ts";
 
 export interface ResumeListCallbacks {
   onResume(checkpoint: ResumeCheckpoint): void;
@@ -32,26 +33,22 @@ export async function renderResumeList(
       }
     } catch {
       // Corrupted checkpoints are surfaced, not hidden.
-      container.append(
-        el("p", { class: "danger", text: `corrupted checkpoint at ${p} — export it before discarding` }),
+      const warnCard = el("div", { class: "checkpoint-card" });
+      warnCard.append(
+        el("span", { class: "tone-danger" }, [icon("warn", 20)]),
+        el("div", { class: "checkpoint-main" }, [
+          el("span", { class: "checkpoint-title", text: "Corrupted saved session" }),
+          el("span", {
+            class: "checkpoint-meta",
+            text: `The checkpoint at ${p} could not be read. Export it for diagnosis before discarding.`,
+          }),
+        ]),
       );
+      container.append(warnCard);
     }
   }
-  if (entries.length === 0 && container.children.length === 0) return;
+  if (entries.length === 0) return;
 
-  container.append(el("h3", { text: "Incomplete sessions — pick up where you left off?" }));
-  const table = el("table", {});
-  table.append(
-    el("tr", {}, [
-      el("th", { text: "Player" }),
-      el("th", { text: "Experiment" }),
-      el("th", { text: "Started" }),
-      el("th", { text: "Progress" }),
-      el("th", { text: "Round / capture" }),
-      el("th", { text: "Age" }),
-      el("th", { text: "Actions" }),
-    ]),
-  );
   for (const { checkpoint } of entries) {
     const summary = summarizeCheckpointForUi(
       checkpoint,
@@ -61,32 +58,48 @@ export async function renderResumeList(
       } as never,
       new Date().toISOString(),
     );
-    const ageMin = Math.round(summary.ageMs / 60000);
-    const ageLabel = ageMin < 60 ? `${ageMin} min ago` : `${Math.round(ageMin / 60)} h ago`;
-    const row = el("tr", {}, [
-      el("td", { text: summary.playerName }),
-      el("td", { text: summary.experimentLabel }),
-      el("td", { text: new Date(summary.startedAtIso || "").toLocaleString() }),
-      el("td", {
-        text:
-          `${summary.completedMeasuredTrials} measured trials · ${summary.lastValidState}` +
-          (summary.hasInterruptedTrial ? " · interrupted trial pending" : ""),
+
+    const metaBits: HTMLElement[] = [
+      el("span", { text: `Started ${formatDateTime(summary.startedAtIso)}` }),
+      el("span", {
+        class: "mono",
+        text: `${summary.completedMeasuredTrials} trials completed · round ${summary.currentRound + 1}`,
       }),
-      el("td", {
-        text: `round ${summary.currentRound} · ${checkpoint.captureSource?.kind ?? "capture n/a"}`,
-      }),
-      el("td", { text: ageLabel }),
-    ]);
-    const actions = el("td", {});
-    const resumeBtn = el("button", { class: "primary", text: "Resume" });
+      el("span", { text: `Capture: ${checkpoint.captureSource?.kind ?? "not recorded"}` }),
+      el("span", { text: formatAgo(summary.ageMs) }),
+    ];
+    if (summary.hasInterruptedTrial) {
+      metaBits.push(el("span", { class: "tone-warn", text: "one interrupted trial will be excluded" }));
+    }
+
+    const main = el("div", { class: "checkpoint-main" });
+    const titleRow = el("span", { class: "checkpoint-title" });
+    titleRow.append(
+      el("span", { text: `Unfinished session — ${summary.playerName}` }),
+    );
+    const metaRow = el("span", { class: "checkpoint-meta" });
+    metaRow.append(...metaBits);
+    main.append(titleRow, metaRow, el("span", {
+      class: "checkpoint-meta muted",
+      text: "Progress is saved. Resuming restores blinding, completed trials, and search state exactly.",
+    }));
+
+    const actions = el("div", { class: "checkpoint-actions" });
+    const resumeBtn = button("Resume", { variant: "primary", icon: "play" });
     resumeBtn.addEventListener("click", () => callbacks.onResume(checkpoint));
-    const exportBtn = el("button", { text: "Export diagnostic bundle" });
+    const exportBtn = button("Export diagnostic bundle", { variant: "ghost", icon: "download" });
     exportBtn.addEventListener("click", () => callbacks.onExport(checkpoint));
-    const discardBtn = el("button", { class: "danger", text: "Discard" });
+    const discardBtn = button("Discard", { variant: "danger" });
     discardBtn.addEventListener("click", () => callbacks.onDiscard(checkpoint));
     actions.append(resumeBtn, exportBtn, discardBtn);
-    row.append(actions);
-    table.append(row);
+
+    const cardEl = el("div", { class: "checkpoint-card", "data-role": "checkpoint" });
+    cardEl.append(
+      el("span", { class: "tone-info" }, [icon("clock", 22)]),
+      main,
+      badge(checkpoint.status === "interrupted" ? "warn" : "info", checkpoint.status),
+      actions,
+    );
+    container.append(cardEl);
   }
-  container.append(table);
 }

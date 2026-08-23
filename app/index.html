@@ -3,20 +3,35 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="dark" />
     <title>Aldo Aim Lab</title>
+    <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <div id="app">
-      <nav id="tabs">
-        <button data-tab="setup" class="active">Setup</button>
-        <button data-tab="calibration">Calibration</button>
-        <button data-tab="data">Data</button>
-        <button data-tab="history">History</button>
-        <button data-tab="diagnostics">Diagnostics</button>
-        <button data-tab="results">Results</button>
-      </nav>
+      <aside id="sidebar">
+        <div class="wordmark" id="wordmark">
+          <span class="wordmark-sigil" id="wordmark-sigil"></span>
+          <span>
+            <span class="wordmark-name">ALDO</span>
+            <span class="wordmark-sub">Aim Lab</span>
+          </span>
+        </div>
+        <nav id="tabs" aria-label="Primary">
+          <button data-tab="home" class="active">Home</button>
+          <button data-tab="setup">Test</button>
+          <button data-tab="results">Results</button>
+          <button data-tab="history">History</button>
+          <button data-tab="calibration">Calibration</button>
+          <button data-tab="diagnostics">Diagnostics</button>
+          <button data-tab="data">Data</button>
+        </nav>
+        <div class="sidebar-spacer"></div>
+        <div class="sidebar-foot" id="app-footer"></div>
+      </aside>
       <main>
-        <section id="view-setup"></section>
+        <section id="view-home"></section>
+        <section id="view-setup" hidden></section>
         <section id="view-run" hidden></section>
         <section id="view-results" hidden></section>
         <section id="view-data" hidden></section>
@@ -24,7 +39,6 @@
         <section id="view-diagnostics" hidden></section>
         <section id="view-calibration" hidden></section>
       </main>
-      <footer id="app-footer"></footer>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>

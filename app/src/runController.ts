@@ -449,36 +449,59 @@ export class BrowserRunController {
     this.#active = null;
   }
 
+  #stageGradient: CanvasGradient | null = null;
+
   #drawFrame(
     ctx: CanvasRenderingContext2D,
     targets: { x: number; y: number; radius: number }[],
   ): void {
-    ctx.clearRect(0, 0, LOGICAL_VIEWPORT.widthPx, LOGICAL_VIEWPORT.heightPx);
-    ctx.fillStyle = "#101418";
-    ctx.fillRect(0, 0, LOGICAL_VIEWPORT.widthPx, LOGICAL_VIEWPORT.heightPx);
+    const { widthPx: w, heightPx: h } = LOGICAL_VIEWPORT;
+    // Subtle vignette stage (cached gradient; purely visual).
+    if (!this.#stageGradient) {
+      const g = ctx.createRadialGradient(w / 2, h / 2, h / 4, w / 2, h / 2, h);
+      g.addColorStop(0, "#0a0d12");
+      g.addColorStop(1, "#05070a");
+      this.#stageGradient = g;
+    }
+    ctx.fillStyle = this.#stageGradient;
+    ctx.fillRect(0, 0, w, h);
+
+    // Targets: high-visibility volt spheres with a soft core highlight.
     for (const target of targets) {
       ctx.beginPath();
       ctx.arc(target.x, target.y, target.radius, 0, Math.PI * 2);
-      ctx.fillStyle = "#3aa0ff";
+      ctx.fillStyle = "#c8f24e";
       ctx.fill();
-      ctx.strokeStyle = "#bfe0ff";
-      ctx.lineWidth = 2;
+      ctx.strokeStyle = "rgba(233, 255, 168, 0.9)";
+      ctx.lineWidth = 1.5;
       ctx.stroke();
+      const core = Math.max(1.5, target.radius * 0.28);
+      ctx.beginPath();
+      ctx.arc(target.x, target.y, core, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(10, 13, 18, 0.55)";
+      ctx.fill();
     }
+
+    // Reticle: white cross with a dark halo for readability on any target.
     const reticlePos = this.#capture?.reticle.position;
     if (reticlePos) {
-      ctx.strokeStyle = "#ffffff";
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.moveTo(reticlePos.x - 10, reticlePos.y);
-      ctx.lineTo(reticlePos.x - 3, reticlePos.y);
-      ctx.moveTo(reticlePos.x + 3, reticlePos.y);
-      ctx.lineTo(reticlePos.x + 10, reticlePos.y);
-      ctx.moveTo(reticlePos.x, reticlePos.y - 10);
-      ctx.lineTo(reticlePos.x, reticlePos.y - 3);
-      ctx.moveTo(reticlePos.x, reticlePos.y + 3);
-      ctx.lineTo(reticlePos.x, reticlePos.y + 10);
-      ctx.stroke();
+      const drawCross = (color: string, width: number): void => {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = width;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(reticlePos.x - 10, reticlePos.y);
+        ctx.lineTo(reticlePos.x - 3, reticlePos.y);
+        ctx.moveTo(reticlePos.x + 3, reticlePos.y);
+        ctx.lineTo(reticlePos.x + 10, reticlePos.y);
+        ctx.moveTo(reticlePos.x, reticlePos.y - 10);
+        ctx.lineTo(reticlePos.x, reticlePos.y - 3);
+        ctx.moveTo(reticlePos.x, reticlePos.y + 3);
+        ctx.lineTo(reticlePos.x, reticlePos.y + 10);
+        ctx.stroke();
+      };
+      drawCross("rgba(0, 0, 0, 0.65)", 3.5);
+      drawCross("#ffffff", 1.5);
     }
   }
 }
