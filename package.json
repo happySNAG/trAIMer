@@ -1,6 +1,6 @@
 {
   "name": "aldo-aim-lab",
-  "version": "1.0.0-rc.1",
+  "version": "1.0.0-rc.2",
   "private": true,
   "type": "module",
   "description": "Fortnite-focused aim measurement and sensitivity optimization engine (headless core).",

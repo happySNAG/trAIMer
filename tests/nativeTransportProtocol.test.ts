@@ -105,6 +105,33 @@ describe("native transport protocol", () => {
     expect(events).toHaveLength(0);
   });
 
+  it("fails closed when the helper self-reports a different build version", () => {
+    // Right protocol, wrong HELPER_VERSION: data from an unknown helper
+    // implementation must never stream into tier-1 trust decisions.
+    const pair = createLoopbackSocketPair();
+    const { source, events, errors } = makeSource(() => pair.client);
+    pair.open();
+    source.handleRawMessage(
+      JSON.stringify({ type: "welcome", protocolVersion: NATIVE_CAPTURE_PROTOCOL_VERSION, sourceKind: "native", deviceId: "d", deviceDescription: "", nominalRateHz: 500, timeOriginNote: "", helperVersion: "helper-0.9.0" }),
+    );
+    expect(errors).toHaveLength(1);
+    expect(errors[0]!.message).toMatch(/helper version mismatch/);
+    expect(source.status).toBe("failed");
+    expect(events).toHaveLength(0);
+  });
+
+  it("fails closed on a non-finite nominal rate in the welcome header", () => {
+    const pair = createLoopbackSocketPair();
+    const { source, errors } = makeSource(() => pair.client);
+    pair.open();
+    source.handleRawMessage(
+      JSON.stringify({ type: "welcome", protocolVersion: NATIVE_CAPTURE_PROTOCOL_VERSION, sourceKind: "native", deviceId: "d", deviceDescription: "", nominalRateHz: "many", timeOriginNote: "", helperVersion: "helper-1.0.0" }),
+    );
+    expect(errors).toHaveLength(1);
+    expect(errors[0]!.message).toMatch(/malformed welcome/);
+    expect(source.status).toBe("failed");
+  });
+
   it("rejects malformed JSON, malformed events, and bad sequences loudly", () => {
     const pair = createLoopbackSocketPair();
     const { source, errors } = makeSource(() => pair.client);

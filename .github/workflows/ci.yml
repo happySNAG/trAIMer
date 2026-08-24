@@ -49,6 +49,18 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
+      - name: PowerShell launcher scripts parse cleanly
+        shell: pwsh
+        run: |
+          foreach ($script in @("scripts/release/windows/start-aldo-lab.ps1","scripts/release/windows/stop-aldo-lab.ps1")) {
+            $parseErrors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $script), [ref]$null, [ref]$parseErrors)
+            if ($parseErrors -and $parseErrors.Count -gt 0) {
+              $parseErrors | ForEach-Object { Write-Host "##[error]$script:$($_.Extent.StartLineNumber): $($_.Message)" }
+              throw "PowerShell parse errors in $script"
+            }
+            Write-Host "parsed OK: $script"
+          }
       - name: protocol parity checks (host-independent)
         shell: bash
         run: |
@@ -76,6 +88,18 @@ jobs:
         with:
           node-version: 20
       - run: npm ci
+      - name: PowerShell launcher scripts parse cleanly
+        shell: pwsh
+        run: |
+          foreach ($script in @("scripts/release/windows/start-aldo-lab.ps1","scripts/release/windows/stop-aldo-lab.ps1")) {
+            $parseErrors = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $script), [ref]$null, [ref]$parseErrors)
+            if ($parseErrors -and $parseErrors.Count -gt 0) {
+              $parseErrors | ForEach-Object { Write-Host "##[error]$script:$($_.Extent.StartLineNumber): $($_.Message)" }
+              throw "PowerShell parse errors in $script"
+            }
+            Write-Host "parsed OK: $script"
+          }
       - name: native protocol / version constant verification
         shell: bash
         run: |

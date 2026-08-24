@@ -91,4 +91,18 @@ test.describe("security round three", () => {
     expect(stored.dpi).toBeLessThanOrEqual(26000);
     expect(stored.sensX).toBeGreaterThanOrEqual(1);
   });
+
+  test("launcher token is adopted once and stripped from the URL (Pass 8)", async ({ page }) => {
+    const token = "a".repeat(32);
+    await page.goto(`/?token=${token}`);
+    // Adopted into localStorage for the Diagnostics probe...
+    const adopted = await page.evaluate(() => localStorage.getItem("aldo-session-token"));
+    expect(adopted).toBe(token);
+    // ...and removed from the visible URL / history entry immediately.
+    expect(new URL(page.url()).searchParams.get("token")).toBeNull();
+    // A reload must NOT re-adopt anything weird; the stored token persists.
+    await page.reload();
+    const after = await page.evaluate(() => localStorage.getItem("aldo-session-token"));
+    expect(after).toBe(token);
+  });
 });

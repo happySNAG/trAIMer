@@ -74,7 +74,7 @@ export async function importExperimentBundle(
     b.kind !== "session-bundle" ||
     typeof b.schemaVersion !== "number" ||
     !Number.isSafeInteger(b.schemaVersion) ||
-    b.schemaVersion < 0 ||
+    b.schemaVersion < 1 ||
     !b.payload ||
     typeof b.payload !== "object"
   ) {

@@ -6,7 +6,10 @@
  * these strings so any historical result can be traced to the exact code that
  * produced it.
  *
- * The V1 release candidate is identified as 1.0.0-rc.1. All component
+ * The V1 release candidate is identified as 1.0.0-rc.2 (Pass 8 pre-hardware
+ * audit: fail-closed helper-version handshake, per-session experiment
+ * identity). rc.1 never shipped to hardware; rc.N increments mark each
+ * distinct candidate until hardware validation freezes one. All component
  * versions below are frozen for that release line; see docs/RELEASE.md for
  * the full compatibility matrix describing which builds can read which
  * persisted artifacts.
@@ -15,7 +18,7 @@
 export const APP_NAME = "aldo-aim-lab";
 
 /** Application release version for the V1 release candidate. */
-export const APP_VERSION = "1.0.0-rc.1";
+export const APP_VERSION = "1.0.0-rc.2";
 
 /**
  * Engine contract version: bump when a persisted engine-facing data contract

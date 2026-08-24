@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { StoreBackend } from "../src/persistence/backends.ts";
+import { NodeFsBackend } from "../src/persistence/nodeBackend.ts";
 import {
   createLocalJsonStore,
   IndexedDbBackend,
@@ -14,6 +15,8 @@ import {
   equalXy,
   exportExperimentBundle,
   importExperimentBundle,
+  exportBackupAll,
+  importBackupAll,
   SCHEMA_VERSION,
 } from "../src/index.ts";
 
@@ -60,6 +63,32 @@ describe("persistence backends", () => {
     const store = createLocalJsonStore(fsRoot);
     const trials = await store.loadAllTrials(experimentId);
     expect(trials.length).toBeGreaterThan(10);
+  });
+
+  it("filesystem listings include nested artifacts and backups capture them", async () => {
+    // Regression (Pass 8): a flat readdir on the Node backend made
+    // listByPrefix("trials") return ZERO files (only the subdirectory name),
+    // so whole-store backups silently dropped every trial while their
+    // checksum still "verified".
+    const experimentId = await seedTrials(fsRoot);
+    const backend = new NodeFsBackend(fsRoot);
+    const store = new LocalJsonStore(backend);
+    const listed = await store.listByPrefix("trials");
+    expect(listed.length).toBeGreaterThan(10);
+    expect(listed.some((p) => p.startsWith(`trials/${experimentId}/`))).toBe(true);
+
+    const backup = await exportBackupAll(backend);
+    const trialEntries = backup.entryPaths.filter((p) => p.startsWith("trials/"));
+    expect(trialEntries.length).toBe(listed.length);
+
+    // Restoring into an in-memory store yields the same trial count.
+    const targetBackend = new InMemoryBackend();
+    const restore = await importBackupAll(targetBackend, JSON.parse(JSON.stringify(backup)));
+    expect(restore.restoredCount).toBe(backup.entryPaths.length);
+    const restored = new LocalJsonStore(targetBackend);
+    expect((await restored.loadAllTrials(experimentId)).length).toBe(
+      (await store.loadAllTrials(experimentId)).length,
+    );
   });
 
   it("round-trips through an IndexedDB facade backend", async () => {
@@ -130,5 +159,10 @@ describe("session bundle export/import", () => {
         payload: {},
       }),
     ).rejects.toThrow(/newer than supported/);
+    // Pass 8: schemaVersion 0 is not a real generation — rejected like
+    // negative versions instead of silently treated as current.
+    await expect(
+      importExperimentBundle(store, { kind: "session-bundle", schemaVersion: 0, payload: {} }),
+    ).rejects.toThrow(/invalid session bundle/);
   });
 });

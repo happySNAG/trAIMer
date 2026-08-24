@@ -1,6 +1,7 @@
 import type { CaptureEvent, CaptureSource, CaptureSink } from "./events.ts";
 import { NATIVE_CAPTURE_PROTOCOL_VERSION } from "./native.ts";
 import type { NativeStreamHeader } from "./native.ts";
+import { EXPECTED_HELPER_VERSION } from "../version.ts";
 
 /**
  * Local native-capture transport client (Pass 4, requirements A/B).
@@ -315,6 +316,25 @@ export class NativeTransportCaptureSource implements CaptureSource {
           this.#fail(
             new NativeTransportError(
               `protocol mismatch: helper speaks v${msg.protocolVersion}, client expects v${NATIVE_CAPTURE_PROTOCOL_VERSION}`,
+            ),
+          );
+          return;
+        }
+        // Helper implementation pinning: a helper with the right protocol
+        // version but wrong/unknown build must NOT stream data into records
+        // that tier-1 trust decisions rely on (fail-closed handshake).
+        if (String(msg.helperVersion) !== EXPECTED_HELPER_VERSION) {
+          this.#fail(
+            new NativeTransportError(
+              `helper version mismatch: helper reports "${String(msg.helperVersion)}", client expects "${EXPECTED_HELPER_VERSION}"`,
+            ),
+          );
+          return;
+        }
+        if (typeof msg.nominalRateHz !== "number" || !Number.isFinite(msg.nominalRateHz) || msg.nominalRateHz <= 0) {
+          this.#fail(
+            new NativeTransportError(
+              `malformed welcome: nominalRateHz ${String(msg.nominalRateHz)}`,
             ),
           );
           return;

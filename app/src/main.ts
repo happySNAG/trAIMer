@@ -100,6 +100,24 @@ function renderStorageFailure(container: HTMLElement, err: unknown): void {
   container.append(cardNode);
 }
 
+/**
+ * Same three-part contract for unexpected session-level failures (a rejected
+ * runner, a crashed analysis): always honest that completed trials were saved
+ * trial-by-trial as they happened.
+ */
+function renderSessionFailure(container: HTMLElement, err: unknown): void {
+  clear(container);
+  container.append(
+    card(
+      { title: "Something went wrong while running the session", icon: "warn", tone: "danger" },
+      el("p", { text: "What happened: the session stopped earlier than planned because of an unexpected error." }),
+      el("p", { text: "Is your data safe: yes — every completed trial was saved the moment it finished, so all progress up to this point is already stored on this machine." }),
+      el("p", { text: "What to do next: check Results and History — completed trials and any saved checkpoint appear there. You can safely start a new session; if the error repeats, export the diagnostic bundle from Diagnostics." }),
+      el("p", { class: "muted mono", text: `detail: ${String(err).slice(0, 200)}` }),
+    ),
+  );
+}
+
 // ---- preflight, shared by Home + Test; recomputable on demand ----
 
 interface PreflightOutcome {
@@ -204,6 +222,18 @@ function sessionToken(): string {
   const injected = params.get("token");
   if (injected && /^[0-9a-f]{32}$/.test(injected)) {
     localStorage.setItem("aldo-session-token", injected);
+    // Strip the credential from the URL/history immediately: the token lives
+    // in localStorage from here on, and the address bar (screenshots, session
+    // history, reloads) should not keep advertising it.
+    params.delete("token");
+    const rest = params.toString();
+    const cleanUrl = `${window.location.pathname}${rest ? `?${rest}` : ""}${window.location.hash}`;
+    try {
+      window.history.replaceState(null, "", cleanUrl);
+    } catch {
+      // replaceState can throw on exotic origins (file://); the token in the
+      // visible URL is then unavoidable but remains loopback-only.
+    }
     return injected;
   }
   let token = localStorage.getItem("aldo-session-token");
@@ -213,6 +243,11 @@ function sessionToken(): string {
   }
   return token;
 }
+
+// Adopt (and strip) a launcher-passed ?token= eagerly at boot — not lazily
+// on the Diagnostics tab — so the credential never lingers in the address
+// bar, history, or a reload.
+sessionToken();
 
 for (const b of document.querySelectorAll<HTMLButtonElement>("#tabs button")) {
   const name = NAV_ICONS[b.dataset.tab ?? ""];
@@ -510,6 +545,7 @@ function makeCallbacks(run: RunView): RunControllerCallbacks {
   // The candidate/scenario line stays visible through the whole trial, not
   // just on the transition that carried it.
   let stickyDetail = "";
+  let previousState = "";
   return {
     onHud(state, detail) {
       const pres = STATE_PRESENTATION[state] ?? { label: state, tone: "neutral" as Tone };
@@ -521,7 +557,8 @@ function makeCallbacks(run: RunView): RunControllerCallbacks {
       if (state === "paused" || state === "analyzing" || state === "complete" || state === "aborted") {
         run.setIntentHint(null);
       }
-      diagnosticLog.sessionTransition(diagnosticLog.entries().at(-1)?.event ?? "", state);
+      diagnosticLog.sessionTransition(previousState, state);
+      previousState = state;
       if (state === "awaiting-lock") {
         run.showOverlay(
           "crosshair",
@@ -566,6 +603,7 @@ function makeCallbacks(run: RunView): RunControllerCallbacks {
           : "Partial data was saved. You can review what completed or start again.",
       );
       let finalResult = null;
+      let resultLoadFailed: unknown = null;
       try {
         const s = await store();
         lastRecommendation = await s.loadRecommendation(controller!.definition.id);
@@ -594,16 +632,31 @@ function makeCallbacks(run: RunView): RunControllerCallbacks {
         const aimErr = toAimLabError(err);
         diagnosticLog.error(aimErr.code, aimErr.message);
         lastRecommendation = null;
+        resultLoadFailed = err;
       }
       lastFinalResult = finalResult;
       setTimeout(() => {
         exitSessionChrome();
-        renderResultsView(views.results, {
-          recommendation: lastRecommendation,
-          trialsAnalyzed: lastTrialsAnalyzed.count,
-          finalResult,
-          onStartTest: () => activate("setup"),
-        });
+        if (lastRecommendation) {
+          renderResultsView(views.results, {
+            recommendation: lastRecommendation,
+            trialsAnalyzed: lastTrialsAnalyzed.count,
+            finalResult,
+            onStartTest: () => activate("setup"),
+          });
+        } else if (resultLoadFailed !== null) {
+          // A completed session whose result could not be loaded must not
+          // render the misleading "No results yet" empty state — the trials
+          // exist; say what happened and how to get them back.
+          renderSessionFailure(views.results, resultLoadFailed);
+        } else {
+          renderResultsView(views.results, {
+            recommendation: null,
+            trialsAnalyzed: lastTrialsAnalyzed.count,
+            finalResult: null,
+            onStartTest: () => activate("setup"),
+          });
+        }
         activate("results");
       }, 900);
     },
@@ -653,18 +706,35 @@ renderSetupView(views.setup, {
         },
       });
     }
-    void created.then((c) => {
-      controller = c;
-      run.setProgress(0, plannedTrialBound(c));
-      run.setPendingStart(() => {
-        void c.start();
+    void created
+      .then((c) => {
+        controller = c;
+        run.setProgress(0, plannedTrialBound(c));
+        run.setPendingStart(() => {
+          void c.start().catch((err) => {
+            // A rejected run() (e.g. storage died mid-session) must never
+            // leave the app trapped behind the session chrome.
+            diagnosticLog.error("SESSION_RUN_FAILED", String(err));
+            exitSessionChrome();
+            renderSessionFailure(views.results, err);
+            activate("results");
+          });
+        });
+        // E2E adapter: no real pointer-lock gesture is possible; start directly
+        // (unless the spec asked for a hooks-only controller).
+        if (e2e && !new URLSearchParams(window.location.search).has("nostart")) {
+          void c.start().catch((err) => {
+            diagnosticLog.error("SESSION_RUN_FAILED", String(err));
+          });
+        }
+      })
+      .catch((err) => {
+        // create() opens IndexedDB; in private mode / blocked storage it
+        // rejects and the arena would otherwise sit dead with no explanation.
+        diagnosticLog.error("CONTROLLER_CREATE_FAILED", String(err));
+        exitSessionChrome();
+        renderStorageFailure(views.run, err);
       });
-      // E2E adapter: no real pointer-lock gesture is possible; start directly
-      // (unless the spec asked for a hooks-only controller).
-      if (e2e && !new URLSearchParams(window.location.search).has("nostart")) {
-        void c.start();
-      }
-    });
   },
 });
 
@@ -692,17 +762,29 @@ async function mountResumeList(container: HTMLElement): Promise<void> {
           void (async () => {
             const paths = await s.listByPrefix("sessions/checkpoints");
             for (const p of paths) {
-              const loaded = await s.loadRawAt<{ sessionId?: string }>("session-checkpoint", p);
-              if (loaded?.payload?.sessionId === checkpoint.sessionId) {
-                // Mark discarded rather than delete history (raw data preserved).
-                await s.saveRaw("session-checkpoint", p, {
-                  ...checkpoint,
-                  status: "aborted",
-                });
+              try {
+                const loaded = await s.loadRawAt<{ sessionId?: string }>("session-checkpoint", p);
+                if (loaded?.payload?.sessionId === checkpoint.sessionId) {
+                  // Mark discarded rather than delete history (raw data preserved).
+                  await s.saveRaw("session-checkpoint", p, {
+                    ...checkpoint,
+                    status: "aborted",
+                  });
+                }
+              } catch {
+                // One unreadable/mismatched checkpoint must not abort the
+                // discard of the others.
               }
             }
             location.reload();
-          })();
+          })().catch((err) => {
+            diagnosticLog.error("DISCARD_CHECKPOINT_FAILED", String(err));
+            void infoDialog("Could not discard the saved session", [
+              "What happened: the saved session could not be updated because of a storage error.",
+              "Is your data safe: yes — the checkpoint is untouched and all recorded trials remain in your history.",
+              "What to do next: reload the page and try again; if storage keeps failing, leave private mode / allow site data for this page.",
+            ]);
+          });
         });
       },
       onExport(checkpoint: ResumeCheckpoint) {

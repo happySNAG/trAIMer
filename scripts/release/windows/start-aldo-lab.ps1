@@ -11,12 +11,10 @@
 # Everything stays on 127.0.0.1. No telemetry, no remote endpoints.
 # Keep this window open while playing; closing it (or running
 # stop-aldo-lab.ps1) tears the helper down deterministically.
+#
+# The web-server port is picked automatically from 48800-48809 so a
+# second instance can never collide with the first.
 # --------------------------------------------------------------------
-param(
-  # Static-server port. The CAPTURE helper always uses 48765 (the app's
-  # default ws://127.0.0.1:48765); this is the web server's port.
-  [int]$port = 48800
-)
 
 $ErrorActionPreference = "Stop"
 
@@ -185,10 +183,13 @@ try {
       Write-Host "  or decline to continue without the local server."
       $doAcl = Read-Host "  Register now? [Y/n]"
       if ($doAcl -notmatch '^[Nn]') {
+        # Start-Process joins -ArgumentList with single spaces WITHOUT quoting,
+        # so an argument containing a space (e.g. "DOMAIN\John Smith") must
+        # carry its own embedded quotes or netsh receives broken arguments.
         $aclArgs = @(
           "http", "add", "urlacl",
           "url=http://127.0.0.1:$port/",
-          "user=$env:USERDOMAIN\$env:USERNAME"
+          "`"user=$env:USERDOMAIN\$env:USERNAME`""
         )
         $aclProc = Start-Process -FilePath "netsh.exe" -ArgumentList $aclArgs `
           -Verb RunAs -Wait -PassThru -ErrorAction SilentlyContinue
@@ -210,7 +211,15 @@ try {
   Write-Host "  Leave this window open while you play. Stop everything with"
   Write-Host "  .\stop-aldo-lab.ps1 or by closing this window."
   Write-Host ""
-  Start-Process $appUrl
+  try {
+    Start-Process $appUrl
+  } catch {
+    # No default-browser association (or the shell refused): never fail the
+    # whole launch silently — print exactly what to open by hand.
+    Write-Host "  Could not open your browser automatically." -ForegroundColor Yellow
+    Write-Host "  Open this address manually:" -ForegroundColor Yellow
+    Write-Host "  $appUrl"
+  }
 
   while ($true) {
     $context = $listener.GetContext()

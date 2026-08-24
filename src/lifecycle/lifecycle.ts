@@ -51,10 +51,14 @@ export class InstanceGuard {
     this.#channel?.addEventListener("message", (ev: MessageEvent) => {
       const data = ev.data as { from?: string } | null;
       if (data && typeof data.from === "string" && data.from !== this.instanceId) {
+        const isNewPeer = !this.#peers.has(data.from);
         this.#peers.add(data.from);
         this.#peerSeen = true;
-        // Answer so the OTHER side also learns about us.
-        this.#channel?.postMessage({ from: this.instanceId });
+        // Answer exactly ONCE per new peer so the other side learns about us.
+        // Replying unconditionally would make two guards ping-pong forever.
+        if (isNewPeer) {
+          this.#channel?.postMessage({ from: this.instanceId });
+        }
       }
     });
     this.announce();

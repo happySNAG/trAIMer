@@ -320,6 +320,10 @@ function buildLatestPanel(
         }),
       );
     }
+  }, () => {
+    trendCell.append(
+      el("p", { class: "muted", text: "Trend unavailable — saved sessions could not be read." }),
+    );
   });
   wrap.append(trendCell);
 

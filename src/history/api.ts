@@ -258,7 +258,13 @@ export class HistoryApi {
       )
         .map(([candidateId, validTrials]) => ({
           candidateId,
-          edpiX: Math.round(rec.edpiRange.min),
+          // Real per-candidate eDPI from the engine explanation when present;
+          // fall back to the plausible-range minimum only for legacy
+          // recommendations that predate `explanation.candidatesTested`.
+          edpiX:
+            rec.explanation?.candidatesTested?.find(
+              (c) => c.candidateId === candidateId,
+            )?.edpiX ?? Math.round(rec.edpiRange.min),
           rank: Number.MAX_SAFE_INTEGER,
           utilityMean: null,
           utilitySe: null,

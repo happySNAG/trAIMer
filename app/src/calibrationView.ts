@@ -1,5 +1,6 @@
 import {
   deriveCalibration,
+  degreesPerCountForRep,
   type CalibrationMeasurement,
 } from "../../src/calibration/core.ts";
 import {
@@ -142,7 +143,9 @@ export function renderCalibrationView(container: HTMLElement): void {
   function redrawMeasurements(): void {
     computeButton.disabled = measurements.length === 0;
     clear(measurementsTableHolder);
-    const derived = measurements.map((m) => m.thetaDeg / (m.countsX * (m.sensPercent / 100)));
+    // Engine-owned math (UI-contract §4): the preview table must use the same
+    // degreesPerCountForRep formula that deriveCalibration persists.
+    const derived = measurements.map((m) => degreesPerCountForRep(m));
     measurementsTableHolder.append(
       table({
         head: ["#", "Counts X", "deg/count @100%"],
@@ -181,7 +184,23 @@ export function renderCalibrationView(container: HTMLElement): void {
   }
 
   startButton.addEventListener("click", async () => {
-    if (!capture) await lock();
+    if (!capture) {
+      const granted = await lock();
+      if (!granted) {
+        // Lock denied (e.g. browser cooldown right after a session): do not
+        // silently accumulate zero counts. Reset so the next click retries.
+        capture = null;
+        clear(status);
+        status.append(
+          inlineAlert(
+            "danger",
+            "Mouse capture was not granted.",
+            "What happened: the page could not lock the pointer for this rep. Is your data safe: yes — nothing was recorded or changed. What to do next: click anywhere on this page once, then press Start rep again.",
+          ),
+        );
+        return;
+      }
+    }
     accX = 0;
     accumulating = true;
     startButton.disabled = true;
@@ -207,28 +226,39 @@ export function renderCalibrationView(container: HTMLElement): void {
   });
 
   computeButton.addEventListener("click", async () => {
-    const record = deriveCalibration("x", methodSelect.value as CalibrationMeasurement["method"], measurements);
-    const backend = new IndexedDbBackend(await openAimLabDb());
-    const store = new LocalJsonStore(backend);
-    await store.saveRaw(
-      "calibration-record",
-      `calibrations/x-${Date.now()}.json`,
-      record,
-    );
-    clear(status);
-    status.append(
-      record.adequate
-        ? inlineAlert(
-            "ok",
-            "Calibration saved and judged adequate by the engine.",
-            `degreesPerCountAt100 = ${record.degreesPerCountAt100?.toExponential(4)} ± ${record.standardErrorDegreesPerCountAt100?.toExponential(2)} (95% CI ${record.ci95DegreesPerCountAt100?.min.toExponential(3)} – ${record.ci95DegreesPerCountAt100?.max.toExponential(3)})`,
-          )
-        : inlineAlert(
-            "danger",
-            "Not adequate — the engine will not trust this calibration.",
-            `${record.inadequacyReasons.join("; ")}. Your raw measurements are stored; add more consistent reps and compute again.`,
-          ),
-    );
+    try {
+      const record = deriveCalibration("x", methodSelect.value as CalibrationMeasurement["method"], measurements);
+      const backend = new IndexedDbBackend(await openAimLabDb());
+      const store = new LocalJsonStore(backend);
+      await store.saveRaw(
+        "calibration-record",
+        `calibrations/x-${Date.now()}.json`,
+        record,
+      );
+      clear(status);
+      status.append(
+        record.adequate
+          ? inlineAlert(
+              "ok",
+              "Calibration saved and judged adequate by the engine.",
+              `degreesPerCountAt100 = ${record.degreesPerCountAt100?.toExponential(4)} ± ${record.standardErrorDegreesPerCountAt100?.toExponential(2)} (95% CI ${record.ci95DegreesPerCountAt100?.min.toExponential(3)} – ${record.ci95DegreesPerCountAt100?.max.toExponential(3)})`,
+            )
+          : inlineAlert(
+              "danger",
+              "Not adequate — the engine will not trust this calibration.",
+              `${record.inadequacyReasons.join("; ")}. Your raw measurements are stored; add more consistent reps and compute again.`,
+            ),
+      );
+    } catch (err) {
+      clear(status);
+      status.append(
+        inlineAlert(
+          "danger",
+          "Calibration could not be saved.",
+          `What happened: saving to local storage failed (${String(err).slice(0, 120)}). Is your data safe: yes — your measurements are still in the table above, nothing was deleted. What to do next: check that site data is allowed for this page and press Compute & save again.`,
+        ),
+      );
+    }
   });
 
   container.append(sectionLabel("Guided procedure"));

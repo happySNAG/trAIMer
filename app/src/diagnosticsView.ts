@@ -101,6 +101,8 @@ export function renderDiagnosticsView(
 
   const selfTestTile = diagTile("Capture check", "pulse", "neutral", "Not run yet", "Run the guided check below");
   statusGrid.append(selfTestTile);
+  const storageTile = diagTile("Storage", "storage", "neutral", "Local browser database", "Raw trials, sessions, and results never leave this machine");
+  statusGrid.append(storageTile);
   void store.then(async (s) => {
     try {
       const paths = await s.listByPrefix("self-tests");
@@ -124,11 +126,19 @@ export function renderDiagnosticsView(
     } catch {
       // leave the neutral tile
     }
+  }, (err: unknown) => {
+    // Storage unavailable: never claim everything is fine.
+    log.error("DIAGNOSTICS_STORE_FAILED", String(err));
+    storageTile.replaceWith(
+      diagTile(
+        "Storage",
+        "storage",
+        "danger",
+        "Unavailable",
+        "Local database could not be opened — self-test records cannot be read or saved. Existing data is untouched.",
+      ),
+    );
   });
-
-  statusGrid.append(
-    diagTile("Storage", "storage", "neutral", "Local browser database", "Raw trials, sessions, and results never leave this machine"),
-  );
   container.append(statusGrid);
 
   // ---- guided native capture check ----
@@ -162,6 +172,7 @@ export function renderDiagnosticsView(
     const frames: NativeFrame[] = [];
     let seq = 0;
     const startedAt = performance.now();
+    const startedAtWallIso = new Date().toISOString();
     const durationMs = Math.max(1, Number(durationInput.value) || 3) * 1000;
     // Display refresh estimate: count rAF cadence during the same window
     // (Pass 7 hardware-validation metadata; honest null when unavailable).
@@ -210,7 +221,10 @@ export function renderDiagnosticsView(
         dropped: report.droppedSequences,
       });
       // Record the display refresh estimate for the hardware-validation bundle.
-      const rafElapsedS = (performance.now() - rafStart) / 1000;
+      // Elapsed is clamped to the measurement window: finish() can run up to
+      // 4 s later while waiting for a stalled helper, and dead time would
+      // dilute the estimate (frames/seconds must span only the counted window).
+      const rafElapsedS = Math.min(performance.now() - rafStart, durationMs) / 1000;
       if (rafFrames > 30 && rafElapsedS > 0.5) {
         try {
           localStorage.setItem(
@@ -226,7 +240,10 @@ export function renderDiagnosticsView(
         const selfTest = {
           kind: "capture-self-test" as const,
           schemaVersion: 1 as const,
-          startedAtIso: new Date(startedAt).toISOString(),
+          // Wall-clock ISO stamps must come from Date: performance.now() is a
+          // monotonic time-origin offset, and feeding it to Date produced
+          // 1970-era provenance timestamps in persisted self-tests.
+          startedAtIso: startedAtWallIso,
           endedAtIso: new Date().toISOString(),
           durationMs: Math.round(performance.now() - startedAt),
           sourceKind: source.header.sourceKind,

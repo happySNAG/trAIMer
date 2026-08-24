@@ -3,6 +3,7 @@ import { detectPointerEventCapabilities } from "../../src/capture/browserSource.
 import type { LocalJsonStore } from "../../src/persistence/store.ts";
 import type { CaptureSelfTestResult } from "../../src/diagnostics/captureSelfTest.ts";
 import type { RuntimeFacts } from "../../src/diagnostics/hardwareValidation.ts";
+import { SETTINGS_KEY } from "./state.ts";
 
 /**
  * Gathers the live-browser preflight environment (Pass 5).
@@ -79,7 +80,7 @@ export async function gatherPreflightEnvironment(
   let sensXPercent: number | null = null;
   let sensYPercent: number | null = null;
   try {
-    const raw = localStorage.getItem("aldo-aim-lab-settings");
+    const raw = localStorage.getItem(SETTINGS_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as { dpi?: number; sensX?: number; sensY?: number };
       dpi = typeof parsed.dpi === "number" ? parsed.dpi : null;

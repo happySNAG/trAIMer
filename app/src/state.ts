@@ -13,7 +13,7 @@ export interface AppSettings {
   yExploration: boolean;
 }
 
-const SETTINGS_KEY = "aldo-aim-lab-settings";
+export const SETTINGS_KEY = "aldo-aim-lab-settings";
 
 export const DEFAULT_SETTINGS: AppSettings = {
   playerName: "Aldo",

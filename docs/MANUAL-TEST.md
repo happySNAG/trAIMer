@@ -40,10 +40,12 @@ attach it to the report.
 
 | # | Check | Expected | Gate | Evidence |
 |---|-------|----------|------|----------|
-| C1 | Windows display scaling (Settings → Display) | Record it (100/125/150/200%) | record | |
-| C2 | Monitor refresh rate (Advanced display settings) | Record it (e.g. 200 Hz); set the GPU driver to the max, not 60 Hz | HARD | |
-| C3 | Mouse polling rate (vendor tool or online checker) | Record it (125/250/500/1000 Hz) | HARD | |
-| C4 | Chrome or Edge version ≥ 114, Firefox NOT used for the session | primary browser confirmed | HARD | |
+| C1 | Windows edition + version (`winver`) | Record it (e.g. Windows 11 24H2) | record | |
+| C2 | Display resolution + Windows scaling (Settings → Display) | Record native resolution (1920×1080 / 2560×1440 / 3840×2160) and scaling % (100/125/150/200) | record | |
+| C3 | Monitor refresh rate (Advanced display settings) | Record it (e.g. 200 Hz); set the GPU driver to the max, not 60 Hz | HARD | |
+| C4 | Mouse identity + polling rate (vendor tool or online checker) | Record make/model and rate (125/250/500/1000 Hz) | HARD | |
+| C5 | In-game DPI + sensitivity used for the session | Record the values entered on the Test tab | HARD | |
+| C6 | Browser name/version ≥ 114, Chromium-family only (Chrome/Edge), Firefox NOT used | primary browser confirmed | HARD | |
 
 ## D — In-app readiness (browser)
 
@@ -52,7 +54,7 @@ attach it to the report.
 | D1 | Home tab loads; footer shows app + engine versions | versions visible | | |
 | D2 | Test tab → readiness checks | No BLOCKED verdicts; DPI/sens configured; capture group green or warning-only | HARD | |
 | D3 | Diagnostics tab shows capture path | "pointermove-coalesced" expected on Chrome/Edge | HARD | |
-| D4 | Diagnostics → connect to helper (`ws://127.0.0.1:48765`) and run the live probe ~5 s while moving the mouse | verdict pass; observed rate ≈ mouse polling rate (C3); jitter/drops low | HARD | |
+| D4 | Diagnostics → connect to helper (`ws://127.0.0.1:48765`) and run the live probe ~5 s while moving the mouse | verdict pass; observed rate ≈ mouse polling rate (C4); jitter/drops low | HARD | |
 | D5 | Export **hardware validation bundle** (Diagnostics) | File downloads; keep it | HARD | |
 
 ## E — Pointer-lock measurement sanity
@@ -91,7 +93,7 @@ attach it to the report.
 |---|-------|----------|------|----------|
 | H1 | Export hardware validation bundle AGAIN (post-session state) | sessions.total ≥ 1; warnings reviewed | HARD | |
 | H2 | Stop launcher; confirm helper process gone (Task Manager) | clean exit | HARD | |
-| H3 | Copy to report: zip SHA-256, scaling %, refresh Hz, polling Hz, observed capture rate, both bundle files | recorded | HARD | |
+| H3 | Copy to report: zip SHA-256, Windows version, resolution, scaling %, refresh Hz, polling Hz + mouse model, observed capture rate, both bundle files | recorded | HARD | |
 
 ## Headless verification (dev machine, before the visit)
 
@@ -104,7 +106,7 @@ npm run audit:no-telemetry && npm audit
 
 ## Known honest limits (do not "fix" on-site)
 
-- Simulated refresh-rate/polling tests cover logic only; C2–C4/D4 are the
+- Simulated refresh-rate/polling tests cover logic only; C3–C4/D4 are the
   real-hardware counterparts.
 - Native tier-1 trust requires a passing D4 probe; otherwise the session
   runs in browser capture with reduced-confidence labels — that is the

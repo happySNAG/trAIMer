@@ -201,7 +201,7 @@ describe("property invariants (deterministic randomized)", () => {
           deviceDescription: "",
           nominalRateHz: 1000,
           timeOriginNote: "",
-          helperVersion: "h",
+          helperVersion: "helper-1.0.0",
         }),
       );
       // Fuzz: corrupt one aspect of a valid frame.

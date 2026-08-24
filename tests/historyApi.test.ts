@@ -177,6 +177,38 @@ describe("history API", () => {
     expect(rows.filter((r) => r.rank === 1)).toHaveLength(1);
   });
 
+  it("uses real per-candidate eDPI from the explanation in ranking rows (Pass 8)", async () => {
+    const { store, recommendation } = await seedStore();
+    // Attach an explanation with DISTINCT per-candidate eDPI values.
+    await store.saveRecommendation({
+      ...recommendation,
+      explanation: {
+        whyThisX: [],
+        whyThisY: [],
+        candidatesTested: [
+          { candidateId: "cand-a", edpiX: 5600, utilityMean: 0.5, utilityStandardError: 0.02, validTrials: 5, tiedWithBest: false },
+          { candidateId: "cand-b", edpiX: 6160, utilityMean: 0.7, utilityStandardError: 0.02, validTrials: 5, tiedWithBest: false },
+        ],
+        scenarioContributions: [],
+        evidenceForWinner: [],
+        evidenceAgainstWinner: [],
+        uncertaintyRemaining: [],
+        furtherTestingActions: [],
+        boundaryReached: false,
+        captureQualityAdequate: true,
+      },
+    });
+    const api = new HistoryApi(store);
+    const rankings = await api.rankingHistory();
+    const rows = rankings[0]!.rows;
+    expect(rows.find((r) => r.candidateId === "cand-a")!.edpiX).toBe(5600);
+    expect(rows.find((r) => r.candidateId === "cand-b")!.edpiX).toBe(6160);
+    // Candidates missing from the explanation still fall back to the range.
+    expect(rows.find((r) => r.candidateId === "cand-e")!.edpiX).toBe(
+      Math.round(recommendation.edpiRange.min),
+    );
+  });
+
   it("tracks dimension estimates across sessions", async () => {
     const { store } = await seedStore();
     const api = new HistoryApi(store);

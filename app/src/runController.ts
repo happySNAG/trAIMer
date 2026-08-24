@@ -98,7 +98,13 @@ export class BrowserRunController {
     canvas.height = LOGICAL_VIEWPORT.heightPx;
 
     this.#definition = buildExperimentDefinition({
-      id: makeExperimentId(`live-${settings.experimentSeed}`),
+      // Every live session is its own experiment: recommendations, optimizer
+      // runs, definitions, audit trails, and trial folders are keyed by this
+      // id, so reusing one id across sessions would overwrite provenance and
+      // mix trials from different sessions in history. The seed (which drives
+      // candidate order, blinding, and scenario instances) stays independent
+      // of the identity.
+      id: makeExperimentId(`live-${settings.experimentSeed}-${Date.now().toString(36)}`),
       name: `live session (${settings.playerName})`,
       baselineSensitivity: { sensX: settings.sensX, sensY: settings.sensY },
       dpi: settings.dpi,
@@ -391,11 +397,12 @@ export class BrowserRunController {
       }
     }
 
+    // Fatal interruptions (manual-test policy E4): losing pointer lock or
+    // window focus mid-trial ends the trial as invalid and cancels the
+    // session honestly — no trial measured without full control survives.
     const isFatal =
       (event.kind === "lock-change" && !event.locked) ||
-      (event.kind === "focus-change" &&
-        !event.focused &&
-        event.reason !== "window-blur-focus-restore");
+      (event.kind === "focus-change" && !event.focused);
     if (isFatal && !active.fatalSeen) {
       active.fatalSeen = true;
       this.#fatalInterruptionSeen = true;

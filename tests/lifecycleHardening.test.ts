@@ -223,6 +223,31 @@ describe("duplicate application instances", () => {
       }, 120);
     });
   });
+
+  it("InstanceGuard replies are bounded — two guards must not ping-pong forever", () => {
+    if (typeof BroadcastChannel === "undefined") return; // covered above
+    const sent: string[] = [];
+    const a = new InstanceGuard("storm-a");
+    const b = new InstanceGuard("storm-b");
+    const observer = new BroadcastChannel("aldo-aim-lab-instances");
+    observer.addEventListener("message", (ev: MessageEvent) => {
+      const data = ev.data as { from?: string } | null;
+      if (data && typeof data.from === "string") sent.push(data.from);
+    });
+    b.announce();
+    return new Promise<void>((resolve) => {
+      setTimeout(() => {
+        // With reply-only-once-per-new-peer, a two-guard exchange settles
+        // after a handful of messages. The old unconditional reply made two
+        // guards answer each other forever at full message speed.
+        expect(sent.length).toBeLessThan(20);
+        expect(a.peerIds().length + b.peerIds().length).toBeGreaterThan(0);
+        for (const g of [a, b]) g.dispose();
+        observer.close();
+        resolve();
+      }, 250);
+    });
+  });
 });
 
 describe("lifecycle policy table completeness", () => {

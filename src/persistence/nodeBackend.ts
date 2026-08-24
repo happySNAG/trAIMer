@@ -31,12 +31,34 @@ export class NodeFsBackend implements StoreBackend {
   }
 
   async listFiles(relDir: string): Promise<string[]> {
+    // Recursive walk: store layouts nest (e.g. trials/<experimentId>/<trial>.json)
+    // and callers contractually receive paths RELATIVE to relDir — a flat
+    // readdir silently dropped every nested artifact from listings, backups,
+    // and trial loads.
+    const out: string[] = [];
+    const base = join(this.#rootDir, relDir);
+    const walk = async (relPrefix: string): Promise<void> => {
+      let dirents;
+      try {
+        dirents = await readdir(join(base, relPrefix), { withFileTypes: true });
+      } catch (err) {
+        if ((err as NodeJS.ErrnoException).code === "ENOENT" && relPrefix === "") {
+          return;
+        }
+        throw err;
+      }
+      for (const entry of dirents) {
+        const childRel = relPrefix === "" ? entry.name : `${relPrefix}/${entry.name}`;
+        if (entry.isDirectory()) await walk(childRel);
+        else if (entry.isFile() && entry.name.endsWith(".json")) out.push(childRel);
+      }
+    };
     try {
-      const entries = await readdir(join(this.#rootDir, relDir));
-      return entries.filter((f) => f.endsWith(".json")).sort();
+      await walk("");
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
       throw err;
     }
+    return out.sort();
   }
 }

@@ -25,8 +25,10 @@ export async function renderResumeList(
   const paths = await store.listByPrefix("sessions/checkpoints");
   const entries: { path: string; checkpoint: ResumeCheckpoint }[] = [];
   for (const p of paths) {
-    const loaded = await store.loadRawAt<unknown>("session-checkpoint", p);
     try {
+      // Inside the try: a truncated/unparsable file must surface as its own
+      // corruption card, never hide the rest of the list.
+      const loaded = await store.loadRawAt<unknown>("session-checkpoint", p);
       const checkpoint = parseResumeCheckpoint(loaded?.payload);
       if (checkpoint.status === "running" || checkpoint.status === "interrupted") {
         entries.push({ path: p, checkpoint });
