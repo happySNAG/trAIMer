@@ -15,6 +15,9 @@
     "demo": "tsx src/demo/cli.ts",
     "app": "vite",
     "build": "vite build",
+    "package:dry-run": "npm run build && node scripts/package-release.mjs --allow-placeholder-helper",
+    "verify:release": "node scripts/verify-release.mjs",
+    "audit:no-telemetry": "node scripts/audit-no-telemetry.mjs",
     "demo:help": "tsx src/demo/cli.ts --help",
     "bench": "tsx benchmarks/bench.ts",
     "test:browser": "playwright test"

@@ -122,3 +122,40 @@ enum, or reason code was removed or renamed:
 
 No visual or layout prescription is added; the redesign remains free within
 §1.
+
+### Pass 7 compatibility statement (integration hardening)
+
+Changes made while auditing the merged engine+UI release candidate. All
+additive or presentation-only; no seam shape was removed or renamed:
+
+- `SessionSummaryViewModel` (src/history/api.ts) gained an OPTIONAL
+  `confidenceLabel: string | null` field carrying the engine's own
+  low/moderate/high label. Views must derive confidence COLOR from this
+  label, never from numeric cutoffs — a static contract test
+  (tests/uiContract.test.ts) enforces that app/src contains no
+  `confidence >= 0.x` re-derivation and no network-capable APIs.
+- Results/Home confidence tones now follow the engine label
+  (`CONFIDENCE_LABEL_THRESHOLDS`); the accepted visual language is unchanged.
+- Card titles render as h3 instead of h4 (heading hierarchy: page h2 → card
+  h3; CSS is class-based so pixels are identical). Form labels are now
+  programmatically associated via `for=` (ui.ts `field()`).
+- Session-mode side-effect guards: selection/drag/context-menu suppressed on
+  the run screen; `user-select:none` + overscroll chaining off while a
+  session is active.
+- Storage-failure experience: views that cannot open IndexedDB render a
+  WHAT-HAPPENED / IS-DATA-SAFE / WHAT-NEXT failure card instead of failing
+  silently.
+- Stored settings are sanitized against engine bounds
+  (`PREFLIGHT_THRESHOLDS`, `DEFAULT_SAFE_RANGE`) on load — old/corrupt/
+  hostile blobs can no longer poison session definitions.
+- Test-only adapter additions (?e2e=1): `simulateLockLoss()` flows a fatal
+  lock-loss event through the production capture path;
+  `renderResultsForTesting(...)` renders engine-built results through the
+  production results view for torture automation; `&nostart=1` skips e2e
+  auto-start. Production behavior without these params is unchanged.
+- New Diagnostics card "Hardware validation evidence" exports
+  `buildHardwareValidationBundle` output (Pass 7 requirement V) — local-only,
+  user-triggered, no raw samples.
+- The Windows launcher scripts now exist at
+  `scripts/release/windows/` (they were referenced by Pass 6 tests/packaging
+  but never committed — the integration defect Pass 7 fixed).

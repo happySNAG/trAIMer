@@ -73,3 +73,44 @@ test("complete session flows to results with a persisted recommendation", async 
     timeout: 15_000,
   });
 });
+
+test("pointer-lock loss mid-trial invalidates the trial and ends the session visibly", async ({ page }) => {
+  test.setTimeout(120_000);
+  await page.goto("/?e2e=1");
+  await page.click(`#tabs button[data-tab="setup"]`);
+  await page.locator("#view-setup input[type=text]").first().fill("E2EPlayer");
+  await page.click("#view-setup details.details summary");
+  const numbers = page.locator('#view-setup input[type="number"]');
+  await numbers.nth(3).fill("99");
+  await numbers.nth(4).fill("1"); // rounds
+  await numbers.nth(5).fill("3"); // reps
+  await numbers.nth(6).fill("0"); // warmups
+  await page.locator('#view-setup input[type="checkbox"]').uncheck();
+  await page.click(`#view-setup button[type=submit]`);
+  await page.click("#run-canvas");
+
+  // Wait until a real trial is live, then drop pointer lock mid-trial.
+  await expect
+    .poll(() => sessionState(page), { timeout: 30_000 })
+    .toMatch(/trial-active|warmup|inter-trial|candidate-transition/);
+  const sawLiveTrial = ["trial-active", "warmup"].includes(await sessionState(page));
+  if (!sawLiveTrial) {
+    // Between-trial window: drive into a trial first.
+    await page.evaluate(async () => {
+      await window.__ALDO_TEST_HOOKS__!.grantLock();
+      await window.__ALDO_TEST_HOOKS__!.injectPointerSample(5, 2);
+    });
+    await expect.poll(() => sessionState(page), { timeout: 20_000 }).toBe("trial-active");
+  }
+  await page.evaluate(() => window.__ALDO_TEST_HOOKS__!.simulateLockLoss());
+
+  // The engine must treat the compromise as fatal — never continue silently,
+  // never mix post-loss input into the measurement.
+  await expect(page.locator(".run-screen")).toHaveAttribute(
+    "data-session-state",
+    /aborted|awaiting-lock|paused/,
+    { timeout: 20_000 },
+  );
+  await expect(page.locator(".overlay-message")).toBeVisible();
+  await expect(page.locator(".overlay-title")).toHaveText(/Ended|Paused|lock/i);
+});

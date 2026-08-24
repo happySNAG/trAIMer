@@ -253,6 +253,13 @@ body.session-active #sidebar {
   display: none;
 }
 
+/* Session mode also suppresses text selection and overscroll chaining so
+   stray input can never interfere with measurement (print/screenshot-safe). */
+body.session-active {
+  user-select: none;
+  overscroll-behavior: none;
+}
+
 body.session-active #app {
   grid-template-columns: 1fr;
 }

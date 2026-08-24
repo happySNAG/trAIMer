@@ -69,3 +69,16 @@ All regression-tested in `tests/securityRoundTwo.test.ts` and
   self-test cross-checking claimed vs observed rates before tier-1 trust.
 - The launcher's static server serves only its own folder on loopback; it
   adds no auth because there is nothing to protect from the same user.
+
+## Round three (Pass 7 — integrated presentation layer)
+
+| # | Finding | Severity | Resolution |
+|---|---|---|---|
+| S15 | Stored settings blob was trusted on load and at submit (`Number(...) || default` only); a corrupt/hostile/old `aldo-aim-lab-settings` could poison DPI/sensitivity in session definitions (e.g. dpi = -99999 or 1e9) | medium | `sanitizeSettings()` clamps every numeric field to engine bounds (`PREFLIGHT_THRESHOLDS`, `DEFAULT_SAFE_RANGE`), caps name length, hardens seed; applied on BOTH load and save; browser-tested |
+| S16 | Launcher scripts referenced by tests/packaging did not exist in the repository (integration defect) | high (build integrity, not runtime) | real launcher scripts committed with the S12 static contract enforced by tests: RNG token + shape check, loopback-only HttpListener prefix, GetFullPath+StartsWith traversal guard, MIME allowlist, TryParse-guarded PID kills, no shell-interpolation sinks |
+| S17 | Presentation-layer XSS re-audit of merged UI | clean | no innerHTML/outerHTML/insertAdjacentHTML/document.write anywhere in app/src (static contract test); hostile display names/ids render as inert text; prototype-pollution shapes via JSON are inert; oversized strings capped at ingest |
+| S18 | Token hand-off from launcher to app | info | token travels once via `?token=` query param on first open, shape-validated (`^[0-9a-f]{32}$`) before adoption into localStorage; used solely for the loopback helper handshake |
+
+Regression-tested in `tests/uiContract.test.ts`,
+`tests/browser/securityRoundThree.spec.ts`, and
+`tests/securityRoundTwo.test.ts`.

@@ -54,12 +54,24 @@ function fail(message) {
 
 if (!existsSync(distDir)) fail(`dist folder not found: ${distDir}`);
 const placeholderHelper = process.argv.includes("--allow-placeholder-helper");
-if (!existsSync(helperPath) && !placeholderHelper) {
-  fail(
-    `helper binary not found: ${helperPath}\n` +
-      `  Compile it on a Windows host first (scripts/build-native-windows.bat) — this packager does NOT fabricate binaries.\n` +
-      `  (CI dry-runs may pass --allow-placeholder-helper with a non-binary file; the manifest will say so.)`,
+let effectiveHelperPath = helperPath;
+if (!existsSync(helperPath)) {
+  if (!placeholderHelper) {
+    fail(
+      `helper binary not found: ${helperPath}\n` +
+        `  Compile it on a Windows host first (scripts/build-native-windows.bat) — this packager does NOT fabricate binaries.\n` +
+        `  (CI dry-runs may pass --allow-placeholder-helper with a non-binary file; the manifest will say so.)`,
+    );
+  }
+  // Dry-run mode: emit an unmistakable placeholder so the folder layout and
+  // manifest pipeline can be exercised without a Windows compile step.
+  const placeholder = join(outRoot, "PLACEHOLDER-helper-not-compiled.txt");
+  mkdirSync(outRoot, { recursive: true });
+  writeFileSync(
+    placeholder,
+    "PLACEHOLDER — not a real binary. A release with helperBinaryIsPlaceholder:true must never ship.\n",
   );
+  effectiveHelperPath = placeholder;
 }
 
 const pkg = JSON.parse(readFileSync("package.json", "utf8"));
@@ -99,7 +111,8 @@ rmrf(releaseDir);
 mkdirSync(releaseDir, { recursive: true });
 
 cpSync(distDir, join(releaseDir, "app"), { recursive: true });
-copyFileSync(helperPath, join(releaseDir, "aldo_capture_helper.exe"));copyFileSync("scripts/release/windows/start-aldo-lab.ps1", join(releaseDir, "start-aldo-lab.ps1"));
+copyFileSync(effectiveHelperPath, join(releaseDir, "aldo_capture_helper.exe"));
+copyFileSync("scripts/release/windows/start-aldo-lab.ps1", join(releaseDir, "start-aldo-lab.ps1"));
 copyFileSync("scripts/release/windows/stop-aldo-lab.ps1", join(releaseDir, "stop-aldo-lab.ps1"));
 copyFileSync("scripts/release/windows/FIRST-RUN.md", join(releaseDir, "FIRST-RUN.md"));
 

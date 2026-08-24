@@ -2,6 +2,7 @@ import type { PreflightEnvironment } from "../../src/preflight/preflight.ts";
 import { detectPointerEventCapabilities } from "../../src/capture/browserSource.ts";
 import type { LocalJsonStore } from "../../src/persistence/store.ts";
 import type { CaptureSelfTestResult } from "../../src/diagnostics/captureSelfTest.ts";
+import type { RuntimeFacts } from "../../src/diagnostics/hardwareValidation.ts";
 
 /**
  * Gathers the live-browser preflight environment (Pass 5).
@@ -141,4 +142,42 @@ export async function loadStoredEngineVersions(
     // unreadable artifacts are surfaced by other gates
   }
   return out;
+}
+
+/**
+ * Runtime/display facts for the hardware-validation bundle (Pass 7).
+ * `estimatedRefreshHz` comes from the Diagnostics rAF probe when it ran;
+ * localStorage is only read, never written, here.
+ */
+export function gatherRuntimeFacts(): RuntimeFacts {
+  const estimatedRefreshHzRaw = (() => {
+    try {
+      const v = localStorage.getItem("aldo-estimated-refresh-hz");
+      return v === null ? null : Number(v);
+    } catch {
+      return null;
+    }
+  })();
+  return {
+    userAgent: typeof navigator !== "undefined" ? navigator.userAgent : "unknown",
+    platform:
+      typeof navigator !== "undefined" && navigator.platform ? navigator.platform : "unknown",
+    screenPx: {
+      width: typeof screen !== "undefined" && Number.isFinite(screen.width) ? screen.width : null,
+      height:
+        typeof screen !== "undefined" && Number.isFinite(screen.height) ? screen.height : null,
+    },
+    devicePixelRatio:
+      typeof window !== "undefined" && Number.isFinite(window.devicePixelRatio)
+        ? window.devicePixelRatio
+        : null,
+    hardwareConcurrency:
+      typeof navigator !== "undefined" && Number.isFinite(navigator.hardwareConcurrency)
+        ? navigator.hardwareConcurrency
+        : null,
+    estimatedRefreshHz:
+      estimatedRefreshHzRaw !== null && Number.isFinite(estimatedRefreshHzRaw) && estimatedRefreshHzRaw > 20
+        ? Math.round(estimatedRefreshHzRaw)
+        : null,
+  };
 }

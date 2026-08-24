@@ -265,12 +265,19 @@ function buildLatestPanel(
     ]),
   );
   if (confidence !== null) {
+    // Tone follows the ENGINE-owned label (see SessionSummaryViewModel.
+    // confidenceLabel); the raw number is never re-interpreted here.
+    const tone =
+      latest.confidenceLabel === "high"
+        ? "ok"
+        : latest.confidenceLabel === "moderate"
+          ? "warn"
+          : latest.confidenceLabel === "low"
+            ? "danger"
+            : "neutral";
     evCell.append(
       el("div", { class: "confidence-row" }, [
-        meter(confidence, {
-          tone: confidence >= 0.7 ? "ok" : confidence >= 0.4 ? "warn" : "danger",
-          label: "confidence",
-        }),
+        meter(confidence, { tone, label: "confidence" }),
         el("span", { class: "confidence-pct", text: `${(confidence * 100).toFixed(0)}%` }),
       ]),
       el("p", { class: "muted", text: "Heuristic confidence — Results has the full basis." }),

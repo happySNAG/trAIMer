@@ -71,9 +71,15 @@ function exclusionLabel(code: string): string {
   return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
-function confidenceTone(confidence: number): Tone {
-  if (confidence >= 0.7) return "ok";
-  if (confidence >= 0.4) return "warn";
+/**
+ * Presentation tone for confidence, derived from the ENGINE-owned
+ * `confidenceLabel` (low / moderate / high, thresholds live in the engine's
+ * CONFIDENCE_LABEL_THRESHOLDS) — never re-derived from the raw number here,
+ * so UI color and engine wording can never disagree.
+ */
+function confidenceLabelTone(label: string): Tone {
+  if (label === "high") return "ok";
+  if (label === "moderate") return "warn";
   return "danger";
 }
 
@@ -218,7 +224,7 @@ function renderFinalResult(
   // ---- next action + confidence ----
   const actionLabel = NEXT_ACTION_LABELS[fr.recommendedNextAction] ?? fr.recommendedNextAction;
   const conf = fr.confidence;
-  const confTone = confidenceTone(conf);
+  const confTone = confidenceLabelTone(fr.confidenceLabel);
 
   // Retest plan folds into the action card — one place answers "what next,
   // why, and when can I start".
@@ -464,7 +470,7 @@ function renderLegacyRecommendation(
   rec: Recommendation,
   input: ResultsInput,
 ): void {
-  const confTone = confidenceTone(rec.confidence);
+  const confTone = confidenceLabelTone(rec.confidenceLabel);
   container.append(
     grid(
       2,

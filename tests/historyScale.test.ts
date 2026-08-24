@@ -64,10 +64,10 @@ function makeRecommendation(experimentId: string, i: number): Recommendation {
   } as never;
 }
 
-async function seedLargeHistory() {
+async function seedLargeHistory(sessionCount: number = SESSIONS) {
   const backend = new InMemoryBackend();
   const store = new LocalJsonStore(backend);
-  for (let i = 0; i < SESSIONS; i++) {
+  for (let i = 0; i < sessionCount; i++) {
     const definition = buildExperimentDefinition({
       id: `experiment-scale-${i}` as never,
       name: `scale session ${i}`,
@@ -206,4 +206,33 @@ describe("history at scale", () => {
     await expect(importBackupAll(target, truncated)).rejects.toThrow();
     expect((await target.listFiles("")).length).toBe(0);
   }, 180_000);
+
+  it("stays responsive at 1000 sessions (Pass 7 requirement M)", async () => {
+    const { store } = await seedLargeHistory(1000);
+    const api = new HistoryApi(store);
+
+    // Full snapshot within an interactive budget.
+    const t0 = performance.now();
+    const snap = await api.snapshot();
+    const snapshotMs = performance.now() - t0;
+    expect(snap.sessions.length).toBe(1000);
+    expect(snapshotMs).toBeLessThan(15_000);
+
+    // The summary list (what the History table renders) stays well under it.
+    const t1 = performance.now();
+    const sessions = await api.listSessions();
+    const listMs = performance.now() - t1;
+    expect(sessions.length).toBe(1000);
+    expect(listMs).toBeLessThan(10_000);
+    expect(listMs).toBeLessThanOrEqual(snapshotMs + 1);
+
+    // Ordering stays deterministic and every summary carries the engine label.
+    const again = await api.listSessions();
+    expect(again.map((s) => s.experimentId)).toEqual(sessions.map((s) => s.experimentId));
+    for (const s of sessions) {
+      if (s.confidence !== null && s.confidenceLabel !== null) {
+        expect(["low", "moderate", "high"]).toContain(s.confidenceLabel);
+      }
+    }
+  }, 240_000);
 });

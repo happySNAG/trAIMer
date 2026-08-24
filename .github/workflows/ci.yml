@@ -122,11 +122,18 @@ jobs:
       - name: zip the portable folder
         shell: pwsh
         run: |
-          Compress-Archive -Path "release/AldoAimLab-v*" -DestinationPath "release/AldoAimLab-portable.zip" -Force
+          $version = (Get-Content "release/AldoAimLab-*/manifest.json" -Raw | ConvertFrom-Json).appVersion
+          $zipName = "Aldo-Aim-Lab-v$version-windows-x64.zip"
+          Compress-Archive -Path "release/AldoAimLab-v*" -DestinationPath "release/$zipName" -Force
+          "RELEASE_ZIP_NAME=$zipName" | Out-File -FilePath $env:GITHUB_ENV -Append
+          # Publish the archive checksum directly in the job output.
+          $hash = (Get-FileHash -Algorithm SHA256 "release/$zipName").Hash.ToLower()
+          "SHA256: $hash  $zipName" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          Write-Host "SHA256: $hash  $zipName"
       - uses: actions/upload-artifact@v4
         with:
           name: aldo-aim-lab-portable-release
           path: |
-            release/AldoAimLab-portable.zip
+            release/Aldo-Aim-Lab-*-windows-x64.zip
             release/AldoAimLab-*-SHA256SUMS.txt
           retention-days: 90

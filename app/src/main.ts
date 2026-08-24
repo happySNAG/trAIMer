@@ -12,6 +12,7 @@ import { el, clear } from "./dom.ts";
 import {
   icon,
   button,
+  card,
   statusDot,
   meter,
   infoDialog,
@@ -80,6 +81,23 @@ const lastTrialsAnalyzed = { count: 0 };
 
 async function store(): Promise<LocalJsonStore> {
   return new LocalJsonStore(new IndexedDbBackend(await openAimLabDb()));
+}
+
+/**
+ * Failure experience contract (WHAT HAPPENED / IS DATA SAFE / WHAT NEXT):
+ * rendered whenever local storage cannot be opened so no view ever fails
+ * silently into a blank screen.
+ */
+function renderStorageFailure(container: HTMLElement, err: unknown): void {
+  clear(container);
+  const cardNode = card(
+    { title: "Local storage is not available", icon: "storage", tone: "danger" },
+    el("p", { text: "What happened: the app could not open this browser's local database, so saved sessions and settings could not be loaded." }),
+    el("p", { text: "Is your data safe: yes — nothing was deleted. Existing sessions stay on disk untouched until storage works again." }),
+    el("p", { text: "What to do next: leave private/incognito mode, allow site data for this page, disable content-blocking extensions for it, then reload." }),
+    el("p", { class: "muted mono", text: `detail: ${String(err).slice(0, 200)}` }),
+  );
+  container.append(cardNode);
 }
 
 // ---- preflight, shared by Home + Test; recomputable on demand ----
@@ -158,16 +176,36 @@ function activate(tab: string): void {
       void mountResumeList(resumeContainer);
     }
   }
-  if (tab === "data") void renderDataView(views.data);
+  if (tab === "data") {
+    void renderDataView(views.data).catch((err) => {
+      diagnosticLog.error("DATA_STORE_FAILED", String(err));
+      renderStorageFailure(views.data, err);
+    });
+  }
   if (tab === "calibration") renderCalibrationView(views.calibration);
   if (tab === "history") {
-    void store().then((s) => renderHistoryView(views.history, s, () => activate("setup")));
+    void store()
+      .then((s) => renderHistoryView(views.history, s, () => activate("setup")))
+      .catch((err) => {
+        diagnosticLog.error("HISTORY_STORE_FAILED", String(err));
+        renderStorageFailure(views.history, err);
+      });
   }
   if (tab === "diagnostics") renderDiagnosticsView(views.diagnostics, sessionToken(), diagnosticLog, store());
   if (tab === "results") void renderResults();
 }
 
 function sessionToken(): string {
+  // The Windows launcher passes its freshly generated helper token via
+  // ?token= on first open; adopt it once so the Diagnostics capture probe
+  // authenticates without manual copying. Shape-checked, never trusted
+  // beyond that (it is only ever compared by the loopback helper).
+  const params = new URLSearchParams(window.location.search);
+  const injected = params.get("token");
+  if (injected && /^[0-9a-f]{32}$/.test(injected)) {
+    localStorage.setItem("aldo-session-token", injected);
+    return injected;
+  }
   let token = localStorage.getItem("aldo-session-token");
   if (!token) {
     token = `tok-${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
@@ -200,14 +238,19 @@ for (const b of document.querySelectorAll<HTMLButtonElement>("#tabs button")) {
 // ---- home ----
 
 async function renderHome(): Promise<void> {
-  const s = await store();
-  await renderHomeView(views.home, {
-    store: s,
-    preflight: preflightOutcome.then((o) => o.report),
-    onStartTest: () => activate("setup"),
-    onNavigate: (tab) => activate(tab),
-    resumeMount: (container) => mountResumeList(container),
-  });
+  try {
+    const s = await store();
+    await renderHomeView(views.home, {
+      store: s,
+      preflight: preflightOutcome.then((o) => o.report),
+      onStartTest: () => activate("setup"),
+      onNavigate: (tab) => activate(tab),
+      resumeMount: (container) => mountResumeList(container),
+    });
+  } catch (err) {
+    diagnosticLog.error("HOME_STORE_FAILED", String(err));
+    renderStorageFailure(views.home, err);
+  }
 }
 
 // ---- results (in-memory result, or latest persisted recommendation) ----
@@ -265,6 +308,8 @@ async function renderResults(): Promise<void> {
     }
   } catch (err) {
     diagnosticLog.error("RESULTS_LOAD_FAILED", String(err));
+    renderStorageFailure(views.results, err);
+    return;
   }
   renderResultsView(views.results, {
     recommendation: null,
@@ -390,6 +435,12 @@ function buildRunView(): RunView {
     pendingStart?.();
     pendingStart = null;
   });
+
+  // Measurement-safety side-effect guards: no accidental selection, drag
+  // ghosts, or context menus over the stage (print/screenshot hygiene).
+  screen.addEventListener("selectstart", (e) => e.preventDefault());
+  screen.addEventListener("dragstart", (e) => e.preventDefault());
+  screen.addEventListener("contextmenu", (e) => e.preventDefault());
 
   const fillEl = progressMeter.querySelector<HTMLElement>(".meter-fill");
 
@@ -583,15 +634,36 @@ renderSetupView(views.setup, {
         ...(e2e ? { restBetweenCandidatesMs: 250 } : {}),
       },
     );
-    if (e2e) installTestHooks(created);
+    if (e2e) {
+      installTestHooks(created, {
+        // Result-state torture automation: render through the exact
+        // production results path (same view + navigation as a real finish).
+        renderResultsForTesting: ({ recommendation, finalResult, trialsAnalyzed }) => {
+          lastRecommendation = recommendation;
+          lastFinalResult = finalResult;
+          lastTrialsAnalyzed.count = trialsAnalyzed;
+          exitSessionChrome();
+          renderResultsView(views.results, {
+            recommendation,
+            trialsAnalyzed,
+            finalResult,
+            onStartTest: () => activate("setup"),
+          });
+          activate("results");
+        },
+      });
+    }
     void created.then((c) => {
       controller = c;
       run.setProgress(0, plannedTrialBound(c));
       run.setPendingStart(() => {
         void c.start();
       });
-      // E2E adapter: no real pointer-lock gesture is possible; start directly.
-      if (e2e) void c.start();
+      // E2E adapter: no real pointer-lock gesture is possible; start directly
+      // (unless the spec asked for a hooks-only controller).
+      if (e2e && !new URLSearchParams(window.location.search).has("nostart")) {
+        void c.start();
+      }
     });
   },
 });

@@ -4,7 +4,9 @@ import {
   type TransportSocket,
 } from "../../src/capture/nativeClient.ts";
 import { analyzeNativeStream } from "../../src/diagnostics/nativeDiagnostics.ts";
+import { buildHardwareValidationBundle } from "../../src/diagnostics/hardwareValidation.ts";
 import { detectPointerEventCapabilities } from "../../src/capture/browserSource.ts";
+import { gatherRuntimeFacts } from "./preflightClient.ts";
 import type { LocalDiagnosticLog } from "../../src/diagnostics/localLog.ts";
 import type { CaptureSink } from "../../src/capture/events.ts";
 import type { NativeFrame } from "../../src/capture/native.ts";
@@ -161,6 +163,15 @@ export function renderDiagnosticsView(
     let seq = 0;
     const startedAt = performance.now();
     const durationMs = Math.max(1, Number(durationInput.value) || 3) * 1000;
+    // Display refresh estimate: count rAF cadence during the same window
+    // (Pass 7 hardware-validation metadata; honest null when unavailable).
+    let rafFrames = 0;
+    const rafStart = startedAt;
+    const countRaf = (): void => {
+      rafFrames++;
+      if (performance.now() - rafStart < durationMs) requestAnimationFrame(countRaf);
+    };
+    requestAnimationFrame(countRaf);
     const sink: CaptureSink = {
       onEvent(event) {
         if (
@@ -198,6 +209,18 @@ export function renderDiagnosticsView(
         observedRateHz: Number(report.observedRateHz.toFixed(1)),
         dropped: report.droppedSequences,
       });
+      // Record the display refresh estimate for the hardware-validation bundle.
+      const rafElapsedS = (performance.now() - rafStart) / 1000;
+      if (rafFrames > 30 && rafElapsedS > 0.5) {
+        try {
+          localStorage.setItem(
+            "aldo-estimated-refresh-hz",
+            String(Math.round(rafFrames / rafElapsedS)),
+          );
+        } catch {
+          // storage optional — the estimate simply won't persist
+        }
+      }
       // Persist the self-test so preflight can trust tier-1 later.
       if (source.header) {
         const selfTest = {
@@ -406,6 +429,39 @@ export function renderDiagnosticsView(
         text: "Contains app versions, capture mode, state transitions, and error codes only — never raw input data. Nothing is sent anywhere; you choose where the file goes.",
       }),
       el("div", {}, [exportBtn]),
+    ),
+  );
+
+  // ---- hardware validation evidence (Pass 7) ----
+  const validationBtn = button("Export hardware validation bundle", {
+    variant: "secondary",
+    icon: "download",
+  });
+  validationBtn.addEventListener("click", () => {
+    void (async () => {
+      try {
+        const s = await store;
+        const bundle = await buildHardwareValidationBundle(s, {
+          runtime: gatherRuntimeFacts(),
+        });
+        downloadJson(
+          `aldo-hardware-validation-${Date.now()}.json`,
+          bundle,
+        );
+        log.log("info", "hardware-validation-export", { sessions: bundle.sessions.total });
+      } catch (err) {
+        log.error("VALIDATION_BUNDLE_FAILED", String(err));
+      }
+    })();
+  });
+  container.append(
+    card(
+      { title: "Hardware validation evidence", icon: "check" },
+      el("p", {
+        class: "muted",
+        text: "A compact summary for the first real smoke on this PC: versions, display and scaling facts, capture self-test results (observed rate, jitter, drops), session/resume/calibration status. Local-only until you share the file yourself.",
+      }),
+      el("div", {}, [validationBtn]),
     ),
   );
 }

@@ -84,3 +84,34 @@ Measured on the dev MacBook Pro (M-class, Node 25); CI re-runs
 | High-rate ingest (125–8000 Hz simulated streams) | no catastrophic degradation | lossless serialization, monotonic validation, bounded memory at every rate incl. 8 kHz |
 | History snapshot over 240 sessions / 2.4 k trials | < 10 s in-memory | well under (see tests/historyScale.test.ts) |
 | Release repackaging determinism | byte-identical manifests | verified (docs/PASS6-DETERMINISM-REPRODUCIBILITY.md) |
+
+### Pass 7 additions
+
+**Active-session UI budgets** (measured trials in progress):
+
+| Path | Budget | Basis |
+|---|---|---|
+| DOM work per raw input event @1000 Hz | zero — events stay in-memory (`TrialRecorder`); no DOM/React-style re-render per event | code audit: `app/src/runController.ts` ingest path touches only recorder state |
+| HUD/DOM writes during play | bounded by state transitions (< ~10/s), not by event rate | `onHud` fires on session-state change only; progress bar updates per persisted trial |
+| Frame render cost at any refresh rate | one cached-gradient fillRect + ≤ handful of arcs on a fixed 1280×720 backing store; no blur/shadow/filter animates during play | `#drawFrame`; hit ring is the only effect (160 ms, draw-after-the-fact) |
+| Background observers/charts during trials | none — sidebar is removed (`display:none`) for the run screen; charts render only when History/Home activate | `body.session-active` CSS + view activation model |
+| Timers during play | only the trial rAF loop; diagnostics probe ticker exists solely inside an explicit user-triggered probe and clears itself | audit |
+
+**Coordinate / DPI model (Windows display readiness):**
+
+- The stage is a FIXED logical viewport of **1280×720 units** (`LOGICAL_VIEWPORT`
+  in `app/src/runController.ts`). The canvas backing store is exactly
+  1280×720 device-independent pixels; CSS scales it to fit the window.
+- Targets, reticle position, and movement deltas all live in this single
+  logical space: pointer-lock deltas are applied to the reticle in logical
+  units and scenario targets are planned against the same `Viewport`, so
+  geometry can never be distorted relative to itself.
+- Windows display scaling (100–200%) changes CSS-pixel density, i.e. how
+  large the stage appears — not the relationship between deltas and target
+  geometry. eDPI math uses raw deltas vs. logical geometry only; OS scaling
+  does not enter the computation. `devicePixelRatio` is recorded as runtime
+  metadata (hardware-validation bundle), never used to rescale gameplay.
+- High refresh rates cannot speed up or slow down measurement: spawn times
+  are absolute scheduled timestamps, motion is keyframe-interpolated by
+  elapsed time, and completion is deadline-based (see
+  tests/highRefreshTiming.test.ts for the 60–240 Hz cadence proofs).

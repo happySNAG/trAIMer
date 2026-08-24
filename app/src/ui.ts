@@ -182,7 +182,8 @@ export function card(opts: CardOptions, ...body: (Node | string)[]): HTMLElement
       );
     }
     const titleCol = el("div", {});
-    titleCol.append(el("h4", { class: "card-title", text: opts.title }));
+    // h3: page headers are h2, so card titles must not skip a level.
+    titleCol.append(el("h3", { class: "card-title", text: opts.title }));
     if (opts.subtitle) titleCol.append(el("p", { class: "card-subtitle", text: opts.subtitle }));
     titleWrap.append(titleCol);
     head.append(titleWrap);
@@ -270,7 +271,14 @@ export interface FieldOptions {
 
 export function field(labelText: string, input: HTMLElement, opts: FieldOptions = {}): HTMLElement {
   const wrap = el("div", { class: `field${opts.class ? ` ${opts.class}` : ""}` });
-  const label = el("label", { class: "field-label", text: labelText });
+  // Programmatic label association: reuse an existing id or mint a unique
+  // one so every form control is announced correctly by assistive tech.
+  if (!input.id) {
+    input.id = `field-${labelText.toLowerCase().replace(/[^a-z0-9]+/g, "-")}-${Math.random()
+      .toString(36)
+      .slice(2, 7)}`;
+  }
+  const label = el("label", { class: "field-label", text: labelText, for: input.id });
   wrap.append(label, input);
   if (opts.hint) wrap.append(el("p", { class: "field-hint", text: opts.hint }));
   return wrap;

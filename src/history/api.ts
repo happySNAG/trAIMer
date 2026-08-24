@@ -20,6 +20,8 @@ export interface SessionSummaryViewModel {
   invalidTrials: number;
   recommendedEdpi: number | null;
   confidence: number | null;
+  /** Engine-owned label ("low"/"moderate"/"high"); presentation must not re-derive it from the number. */
+  confidenceLabel: string | null;
   edpiRange: { min: number; max: number } | null;
   unresolvedBoundary: boolean | null;
   captureQualityScore: number | null;
@@ -170,6 +172,7 @@ export class HistoryApi {
         invalidTrials: trials.filter((t) => t.validity?.status !== "valid").length,
         recommendedEdpi: rec.recommendedEdpi ?? null,
         confidence: rec.confidence ?? null,
+        confidenceLabel: rec.confidenceLabel ?? null,
         edpiRange: rec.edpiRange ? { ...rec.edpiRange } : null,
         unresolvedBoundary: rec.unresolvedBoundary ?? null,
         captureQualityScore: null,
@@ -200,6 +203,7 @@ export class HistoryApi {
       invalidTrials: hs.invalidTrialCount ?? 0,
       recommendedEdpi: rec?.recommendedEdpi ?? hs.recommendationEdpi ?? null,
       confidence: rec?.confidence ?? hs.recommendationConfidence ?? null,
+      confidenceLabel: rec?.confidenceLabel ?? null,
       edpiRange: rec?.edpiRange ? { ...rec.edpiRange } : null,
       unresolvedBoundary: rec?.unresolvedBoundary ?? null,
       captureQualityScore:

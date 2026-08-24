@@ -2,6 +2,10 @@ import { defineConfig } from "vite";
 
 export default defineConfig({
   root: "app",
+  // Relative asset URLs keep the built app relocatable: the Windows release
+  // serves it from any launcher-chosen loopback port, and app/index.html
+  // remains openable straight from disk as a last-resort fallback.
+  base: "./",
   publicDir: false,
   server: {
     port: 5173,
