@@ -321,12 +321,24 @@ session, and it says why.
 
 ### Installer
 
+The build shipped to the flash drive:
+
 | | |
 | --- | --- |
-| File | `AldoAimLab-Setup-1.0.0-rc.4.exe` (also `AldoAimLab-Setup.exe`) |
-| Size | 100,453,253 bytes |
-| SHA-256 | `369d7692d016e9ee1fbcf303f0bb49a32bd1dd0cfb7b040010324a7c3e7f0ef3` |
-| Flash drive | copied to `/Volumes/NO NAME`, both names re-hashed **after** the copy and matching |
+| File | `AldoAimLab-Setup-1.0.0-rc.4.exe` (also copied as `AldoAimLab-Setup.exe`) |
+| Size | 100,456,019 bytes |
+| SHA-256 | `c2e34ce7fd2ebf76cb298e7bb2b9b267065d9eba067bec21c303b073f4072ca0` |
+| Built by | CI run **34063592565**, commit `67b61aa` (all five jobs green) |
+| Flash drive | `/Volumes/NO NAME` — both names re-hashed **after** the copy; each matches the CI-published checksum byte for byte |
+
+`electron-builder` output is not byte-reproducible (build timestamps), so the
+SHA-256 above names **one specific CI build**, not the source tree. A later
+docs-only commit produces a different hash for identical application code;
+the hash on the drive is the one recorded here.
+
+Aldo's PC should be told to uninstall rc.3 first (Settings → Apps → Aldo Aim
+Lab), then run this installer. The previous rc.3 installer was no longer
+present on the drive when this copy was made.
 
 ---
 
