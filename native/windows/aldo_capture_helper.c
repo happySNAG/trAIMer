@@ -47,6 +47,15 @@
 #include <stdint.h>
 
 #define HELPER_VERSION            "helper-1.0.0"
+
+/* Reported by --version so the release pipeline can assert the shipped
+   binary really is the 64-bit build (constant folded, not a runtime test:
+   MSVC /W4 /WX rejects constant conditional expressions). */
+#if defined(_WIN64) || defined(_M_X64) || defined(__x86_64__)
+#define HELPER_ARCH               "x64"
+#else
+#define HELPER_ARCH               "x86"
+#endif
 #define PROTOCOL_VERSION          1
 #define DEFAULT_PORT              48765
 #define MAX_TOKEN_LEN             128
@@ -612,9 +621,24 @@ static int json_find_string(const char *json, const char *field,
 
 static void print_usage(void)
 {
-    printf("aldo_capture_helper [--port N] [--token TOKEN]\n");
+    printf("aldo_capture_helper [--port N] [--token TOKEN] [--version]\n");
     printf("  Local-only Raw Input mouse telemetry for Aldo Aim Lab.\n");
     printf("  Binds 127.0.0.1 exclusively; serves one authenticated client.\n");
+}
+
+/*
+ * --version: prove-it-runs probe.
+ *
+ * The Windows release pipeline executes the freshly compiled binary with this
+ * flag and requires exit code 0 plus this exact machine-readable line. That is
+ * how CI proves the shipped file is a real, runnable Windows x64 PE and not,
+ * say, a source file that was copied over the .exe name (the rc.1 defect).
+ * It registers no devices, opens no sockets, and creates no windows.
+ */
+static void print_version(void)
+{
+    printf("aldo_capture_helper version=%s protocol=%d arch=%s\n",
+           HELPER_VERSION, PROTOCOL_VERSION, HELPER_ARCH);
 }
 
 int main(int argc, char **argv)
@@ -623,7 +647,10 @@ int main(int argc, char **argv)
     int haveToken = 0;
 
     for (int i = 1; i < argc; i++) {
-        if (!strcmp(argv[i], "--port") && i + 1 < argc) {
+        if (!strcmp(argv[i], "--version")) {
+            print_version();
+            return 0;
+        } else if (!strcmp(argv[i], "--port") && i + 1 < argc) {
             port = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--token") && i + 1 < argc) {
             strncpy(g_expectedToken, argv[++i], MAX_TOKEN_LEN - 1);

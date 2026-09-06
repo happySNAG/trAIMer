@@ -6,10 +6,13 @@
  * these strings so any historical result can be traced to the exact code that
  * produced it.
  *
- * The V1 release candidate is identified as 1.0.0-rc.2 (Pass 8 pre-hardware
- * audit: fail-closed helper-version handshake, per-session experiment
- * identity). rc.1 never shipped to hardware; rc.N increments mark each
- * distinct candidate until hardware validation freezes one. All component
+ * The V1 release candidate is identified as 1.0.0-rc.3 (Pass 9: the Windows
+ * product became an installed desktop application — one AldoAimLab-Setup.exe,
+ * an Electron shell that owns the window, the local frontend and the native
+ * helper's lifecycle — after rc.1 shipped a helper "binary" that was actually
+ * the C source file and rc.2 kept the PowerShell launch path). rc.1 and rc.2
+ * never passed hardware validation; rc.N increments mark each distinct
+ * candidate until hardware validation freezes one. All component
  * versions below are frozen for that release line; see docs/RELEASE.md for
  * the full compatibility matrix describing which builds can read which
  * persisted artifacts.
@@ -18,7 +21,7 @@
 export const APP_NAME = "aldo-aim-lab";
 
 /** Application release version for the V1 release candidate. */
-export const APP_VERSION = "1.0.0-rc.2";
+export const APP_VERSION = "1.0.0-rc.3";
 
 /**
  * Engine contract version: bump when a persisted engine-facing data contract

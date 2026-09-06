@@ -1,6 +1,6 @@
 {
   "name": "aldo-aim-lab",
-  "version": "1.0.0-rc.2",
+  "version": "1.0.0-rc.3",
   "private": true,
   "type": "module",
   "description": "Fortnite-focused aim measurement and sensitivity optimization engine (headless core).",
@@ -8,15 +8,20 @@
     "node": ">=20"
   },
   "scripts": {
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p desktop/tsconfig.json",
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
     "demo": "tsx src/demo/cli.ts",
     "app": "vite",
     "build": "vite build",
+    "build:desktop": "tsc -p desktop/tsconfig.json && node scripts/finalize-desktop-build.mjs",
+    "desktop": "npm run build && npm run build:desktop && electron .",
+    "desktop:smoke": "npm run build && npm run build:desktop && electron . --smoke-test",
+    "dist:win": "npm run build && npm run build:desktop && electron-builder --win --x64 --publish never",
     "package:dry-run": "npm run build && node scripts/package-release.mjs --allow-placeholder-helper",
     "verify:release": "node scripts/verify-release.mjs",
+    "verify:windows-artifacts": "node scripts/verify-windows-artifacts.mjs",
     "audit:no-telemetry": "node scripts/audit-no-telemetry.mjs",
     "demo:help": "tsx src/demo/cli.ts --help",
     "bench": "tsx benchmarks/bench.ts",
@@ -26,11 +31,15 @@
     "@eslint/js": "^9.30.0",
     "@playwright/test": "^1.62.1",
     "@types/node": "^24.0.0",
+    "electron": "^44.2.0",
+    "electron-builder": "^26.15.3",
     "eslint": "^9.30.0",
     "tsx": "^4.19.0",
     "typescript": "^5.8.0",
     "typescript-eslint": "^8.35.0",
     "vite": "^7.3.6",
     "vitest": "^3.2.0"
-  }
+  },
+  "author": "Aldo Aim Lab",
+  "main": "dist-desktop/main.js"
 }

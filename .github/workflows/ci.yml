@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Lets a maintainer rebuild the Windows installer from any ref on demand.
+  workflow_dispatch:
 
 jobs:
   engine:
@@ -72,6 +74,22 @@ jobs:
         run: |
           call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat" || exit /b 1
           scripts\build-native-windows.bat
+      - name: RELEASE GATE - helper is a genuine Windows x64 PE
+        shell: bash
+        run: node scripts/verify-windows-artifacts.mjs --helper native/windows/aldo_capture_helper.exe
+      - name: RELEASE GATE - helper actually executes on Windows x64
+        shell: pwsh
+        run: |
+          # rc.1 shipped a "helper.exe" that was the C source file. A format
+          # check alone would not have caught a cross-compiled or corrupt
+          # binary, so the freshly built artifact is RUN here.
+          $exe = "native/windows/aldo_capture_helper.exe"
+          $out = & $exe --version 2>&1
+          if ($LASTEXITCODE -ne 0) { throw "helper --version exited $LASTEXITCODE : $out" }
+          Write-Host "helper --version -> $out"
+          if ($out -notmatch 'version=helper-1\.0\.0') { throw "unexpected helper version line: $out" }
+          if ($out -notmatch 'protocol=1') { throw "unexpected protocol version: $out" }
+          if ($out -notmatch 'arch=x64') { throw "helper is not the x64 build: $out" }
       - uses: actions/upload-artifact@v4
         with:
           name: aldo_capture_helper
@@ -161,3 +179,148 @@ jobs:
             release/Aldo-Aim-Lab-*-windows-x64.zip
             release/AldoAimLab-*-SHA256SUMS.txt
           retention-days: 90
+
+  # Pass 9: THE shipped Windows product — one double-clickable installer.
+  #
+  # Every gate the rc.1 pipeline was missing lives here: the helper must be a
+  # real x64 PE, it must execute, the installer must exist and be plausible,
+  # the installed layout must be complete, and the installed application must
+  # start and shut down cleanly before the artifact is published.
+  windows-installer:
+    runs-on: windows-latest
+    needs: [native-windows]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+
+      - name: lint + strict typecheck (engine + desktop shell)
+        shell: bash
+        run: |
+          npm run lint
+          npm run typecheck
+      - name: engine + desktop contract test suite
+        shell: bash
+        run: npx vitest run
+      - name: no-telemetry audit (sources)
+        run: node scripts/audit-no-telemetry.mjs
+
+      - name: build frontend bundle
+        run: npm run build
+      - name: build desktop shell (Electron main + preload)
+        run: npm run build:desktop
+      - name: RELEASE GATE - required frontend assets present
+        shell: bash
+        run: node scripts/verify-windows-artifacts.mjs --frontend dist-app
+      - name: release verification (versions, matrix, desktop build inputs)
+        run: node scripts/verify-release.mjs
+      - name: no-telemetry audit (sources + shipped bundle)
+        run: node scripts/audit-no-telemetry.mjs
+      - name: npm audit
+        run: npm audit --audit-level=moderate
+
+      - name: download compiled helper
+        uses: actions/download-artifact@v4
+        with:
+          name: aldo_capture_helper
+          path: native/windows
+      - name: RELEASE GATE - helper is a genuine Windows x64 PE
+        shell: bash
+        run: node scripts/verify-windows-artifacts.mjs --helper native/windows/aldo_capture_helper.exe
+      - name: RELEASE GATE - helper executes before it is bundled
+        shell: pwsh
+        run: |
+          $out = & "native/windows/aldo_capture_helper.exe" --version 2>&1
+          if ($LASTEXITCODE -ne 0) { throw "helper --version exited $LASTEXITCODE : $out" }
+          if ($out -notmatch 'arch=x64') { throw "helper is not the x64 build: $out" }
+          Write-Host "bundling helper: $out"
+
+      - name: build Windows installer (electron-builder / NSIS)
+        shell: bash
+        run: npx electron-builder --win nsis --x64 --publish never
+
+      - name: RELEASE GATE - installer exists and is plausible
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $installer = "release/installer/AldoAimLab-Setup-$version.exe"
+          if (-not (Test-Path $installer)) {
+            Get-ChildItem -Recurse release/installer | ForEach-Object { Write-Host $_.FullName }
+            throw "installer not produced: $installer"
+          }
+          node scripts/verify-windows-artifacts.mjs --installer $installer
+          if ($LASTEXITCODE -ne 0) { throw "installer verification failed" }
+          "INSTALLER_PATH=$installer" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "APP_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: RELEASE GATE - silent install produces a complete application
+        shell: pwsh
+        run: |
+          $target = "C:\aldo-install-test"
+          # /D must be the last argument and unquoted (NSIS convention).
+          $proc = Start-Process -FilePath $env:INSTALLER_PATH -ArgumentList "/S", "/D=$target" -Wait -PassThru
+          if ($proc.ExitCode -ne 0) { throw "silent install exited $($proc.ExitCode)" }
+          if (-not (Test-Path $target)) { throw "installer did not create $target" }
+          Get-ChildItem -Recurse $target | Select-Object -First 40 | ForEach-Object { Write-Host $_.FullName }
+          node scripts/verify-windows-artifacts.mjs --installed-app $target
+          if ($LASTEXITCODE -ne 0) { throw "installed application verification failed" }
+
+      - name: RELEASE GATE - installed app starts and shuts down cleanly
+        shell: pwsh
+        run: |
+          $target = "C:\aldo-install-test"
+          $exe = Join-Path $target "Aldo Aim Lab.exe"
+          # runAfterFinish may have launched a copy; the single-instance lock
+          # would otherwise turn a no-op into a false pass.
+          Get-Process -Name "Aldo Aim Lab" -ErrorAction SilentlyContinue | Stop-Process -Force
+          Start-Sleep -Seconds 2
+          $out = "$env:RUNNER_TEMP\smoke-test-result.json"
+          $proc = Start-Process -FilePath $exe `
+            -ArgumentList "--smoke-test", "--require-helper", "--smoke-out", $out `
+            -Wait -PassThru
+          if (Test-Path $out) { Get-Content $out | Write-Host }
+          $log = "$env:APPDATA\AldoAimLab\logs\desktop.log"
+          if (Test-Path $log) { Write-Host "--- desktop.log ---"; Get-Content $log | Write-Host }
+          if ($proc.ExitCode -ne 0) { throw "installed app smoke test exited $($proc.ExitCode)" }
+          $result = Get-Content $out -Raw | ConvertFrom-Json
+          if (-not $result.pass) { throw "smoke test reported failure" }
+          if ($result.helperState -ne "ready") { throw "capture helper never reached ready: $($result.helperDetail)" }
+          # Nothing may survive the shutdown.
+          Start-Sleep -Seconds 2
+          $stragglers = Get-Process -Name "Aldo Aim Lab", "aldo_capture_helper" -ErrorAction SilentlyContinue
+          if ($stragglers) { throw "processes survived shutdown: $($stragglers.Name -join ', ')" }
+          Write-Host "startup + clean shutdown verified"
+
+      - name: publish installer with checksum
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path release/publish | Out-Null
+          Copy-Item $env:INSTALLER_PATH "release/publish/AldoAimLab-Setup-$env:APP_VERSION.exe"
+          # A stable, version-free name so the flash-drive instructions never
+          # go stale.
+          Copy-Item $env:INSTALLER_PATH "release/publish/AldoAimLab-Setup.exe"
+          $hash = (Get-FileHash -Algorithm SHA256 $env:INSTALLER_PATH).Hash.ToLower()
+          $bytes = (Get-Item $env:INSTALLER_PATH).Length
+          "$hash  AldoAimLab-Setup-$env:APP_VERSION.exe" |
+            Out-File -FilePath "release/publish/AldoAimLab-Setup-SHA256.txt" -Encoding ascii
+          "## Aldo Aim Lab $env:APP_VERSION Windows installer" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "- file: ``AldoAimLab-Setup-$env:APP_VERSION.exe`` ($bytes bytes)" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "- sha256: ``$hash``" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aldo-aim-lab-windows-installer
+          path: |
+            release/publish/AldoAimLab-Setup.exe
+            release/publish/AldoAimLab-Setup-*.exe
+            release/publish/AldoAimLab-Setup-SHA256.txt
+          retention-days: 90
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: windows-installer-diagnostics
+          path: |
+            release/installer/**/*.yml
+            release/installer/builder-*.yml
+          retention-days: 7

@@ -1,0 +1,65 @@
+# Windows installer definition for Aldo Aim Lab.
+#
+# Produces ONE double-clickable file — AldoAimLab-Setup-<version>.exe — that
+# installs the desktop shell, the built frontend, and the compiled Raw Input
+# helper, then creates Start Menu and Desktop shortcuts. The player never sees
+# PowerShell, a terminal, a compiler, or a browser address bar.
+#
+# Build:  npm run dist:win   (Windows host or the windows-installer CI job)
+
+appId: com.aldoaimlab.desktop
+productName: Aldo Aim Lab
+copyright: Aldo Aim Lab — local-only aim measurement
+
+directories:
+  output: release/installer
+  buildResources: build
+
+# Everything the shell needs at runtime, and nothing else: no sources, no
+# tests, no node_modules dev tree, no launcher scripts.
+files:
+  - dist-desktop/**/*
+  - dist-app/**/*
+  - package.json
+  - "!**/*.map"
+
+# The helper must live OUTSIDE the asar archive: a packed archive member
+# cannot be spawned as a child process.
+extraResources:
+  - from: native/windows/aldo_capture_helper.exe
+    to: aldo_capture_helper.exe
+
+asar: true
+compression: maximum
+# Unsigned for V1: Aldo installs from a flash drive we hand him, and a code
+# signing certificate is not yet purchased. SmartScreen shows a "More info ->
+# Run anyway" prompt; docs/INSTALL-WINDOWS.md says so plainly.
+forceCodeSigning: false
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: build/icon.ico
+  artifactName: AldoAimLab-Setup-${version}.${ext}
+  # No elevation: a per-user install keeps the anti-cheat-safe posture (no
+  # admin rights, no services, no drivers, no system mutation).
+  requestedExecutionLevel: asInvoker
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowElevation: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  shortcutName: Aldo Aim Lab
+  menuCategory: false
+  runAfterFinish: true
+  deleteAppDataOnUninstall: false
+  uninstallDisplayName: Aldo Aim Lab ${version}
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+  include: build/installer.nsh
+  differentialPackage: false

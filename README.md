@@ -19,7 +19,26 @@ npm run demo        # simulate a player, optimize, then reveal the hidden optimu
 npm run app         # real-input browser aim lab → http://localhost:5173
 npm run build       # production browser bundle → dist-app/
 npm run test:browser  # Playwright end-to-end suite (starts vite automatically)
+npm run desktop     # run the Windows desktop shell locally (Electron)
+npm run dist:win    # build AldoAimLab-Setup.exe (Windows host / CI)
 ```
+
+## Shipping on Windows
+
+Players get **one installer**: `AldoAimLab-Setup.exe`. It installs an Electron
+desktop shell that owns the app window, serves the built frontend from a
+stable `aldo://app` origin, and starts/stops the native Raw Input helper
+automatically. No PowerShell, no terminal, no browser step, no compiler, no
+admin rights.
+
+- Player instructions: `docs/INSTALL-WINDOWS.md`
+- Architecture and release gates: `docs/DESKTOP-SHELL.md`
+- Packaging paths: `docs/PACKAGING-WINDOWS.md`
+
+The installer is built by the `windows-installer` job in
+`.github/workflows/ci.yml`, which refuses to publish unless the bundled helper
+is a genuine Windows x64 PE that actually executes and the installed
+application passes a startup + clean-shutdown smoke test.
 
 ## Pass 4 headline capabilities
 

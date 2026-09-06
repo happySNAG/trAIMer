@@ -1,9 +1,34 @@
-# Windows packaging (V1 RC approach)
+# Windows packaging
 
-Aldo Aim Lab is a **local-first browser app plus a native capture helper**.
-Pointer Lock requires a secure context, so the shipped product is a small
-portable folder run from disk — no installer, no registry writes, no
-services, no drivers.
+Aldo Aim Lab ships to players as **one Windows installer**.
+
+```
+AldoAimLab-Setup-<version>.exe   ← the product (NSIS + Electron shell)
+```
+
+Double-click, install, launch from the Start Menu / Desktop icon. No
+PowerShell, no terminal, no browser step, no compiler, no admin rights. The
+architecture and the release gates behind it are documented in
+`docs/DESKTOP-SHELL.md`; the player-facing instructions are
+`docs/INSTALL-WINDOWS.md`.
+
+Built by the `windows-installer` job in `.github/workflows/ci.yml`:
+
+1. `native-windows` compiles `aldo_capture_helper.exe` with MSVC `/W4 /WX`.
+2. `windows-installer` downloads it, **verifies it is a real x64 PE**, runs it
+   with `--version` to prove it executes, builds `dist-app/` and
+   `dist-desktop/`, then runs `electron-builder --win nsis --x64`.
+3. The installer is silently installed on the runner, the installed layout is
+   verified, and the installed app is smoke-tested for startup and clean
+   shutdown before the artifact is uploaded.
+
+---
+
+# Portable folder (advanced / diagnostic path)
+
+The pre-Pass-9 portable folder is retained for development and troubleshooting
+only. It is **not** what players receive and it is not produced by the
+installer.
 
 ## Shipped layout
 
@@ -50,13 +75,18 @@ No source tree, tests, node_modules, secrets, or local paths ship.
 State lives ONLY inside the install folder (`.aldo-lab/*.pid`) — uninstall =
 delete the folder.
 
-## Why not an installer / Electron?
+## Why the portable folder is no longer the product
 
-- No admin rights, no system mutation → matches the anti-cheat-safe,
-  audit-friendly posture (docs/SECURITY-REVIEW.md).
-- The browser already provides the rendering stack on the target machine;
-  Electron would triple the binary size for zero benefit in V1.
-- Every artifact stays inside the project folder. Uninstall = delete it.
+The original rationale ("no admin rights, no system mutation, the browser
+already provides the rendering stack") is preserved by the installer, which is
+per-user, needs no elevation, installs no services and no drivers, and keeps
+every artifact under `%LOCALAPPDATA%\Programs\Aldo Aim Lab` and
+`%APPDATA%\AldoAimLab`.
+
+What the portable folder could not preserve was the product experience: it
+required unblocking and running `.ps1` files, keeping a console window open,
+and driving the app through an external browser. Pass 9 moved that whole path
+into the desktop shell.
 
 ## Build & release flow
 

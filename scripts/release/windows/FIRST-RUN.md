@@ -1,4 +1,12 @@
-# Aldo Aim Lab — first run
+# Aldo Aim Lab — portable folder (advanced path)
+
+> **Most people should not use this folder.** The Aldo Aim Lab product is a
+> normal Windows installer: run `AldoAimLab-Setup.exe`, then launch the app
+> from its Start Menu or Desktop icon. See `docs/INSTALL-WINDOWS.md`.
+>
+> This portable folder is kept for development and troubleshooting: it runs
+> the same engine through PowerShell and an external browser, which is useful
+> when you need to isolate a problem to the desktop shell.
 
 Welcome. Everything runs on this PC only: no account, no internet, no
 telemetry. Your data stays in this browser's local storage.

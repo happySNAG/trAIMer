@@ -15,7 +15,7 @@
 import { readdirSync, readFileSync, statSync, existsSync } from "node:fs";
 import { join } from "node:path";
 
-const ROOTS = ["src", "app", "native"];
+const ROOTS = ["src", "app", "native", "desktop"];
 const BUNDLE_DIR = "dist-app";
 const SOURCE_EXT = /\.(ts|tsx|js|mjs|c|md)$/;
 

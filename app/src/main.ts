@@ -36,6 +36,7 @@ import { runPreflightChecks, type PreflightReport } from "../../src/preflight/pr
 import { renderPreflightPanel } from "./preflightView.ts";
 import { buildFinalResult, type FinalResult } from "../../src/results/finalResult.ts";
 import { planNextTest } from "../../src/session/retest.ts";
+import { desktopBridge } from "./desktopBridge.ts";
 import { HistoryApi } from "../../src/history/api.ts";
 import type { Recommendation } from "../../src/domain/recommendation.ts";
 import type { SessionStateName } from "../../src/session/types.ts";
@@ -214,7 +215,14 @@ function activate(tab: string): void {
 }
 
 function sessionToken(): string {
-  // The Windows launcher passes its freshly generated helper token via
+  // Desktop shell (the shipped Windows product): the Electron main process
+  // mints one token per launch and hands it to both the helper and this
+  // renderer over the context bridge. Nothing is stored, nothing is pasted.
+  const bridge = desktopBridge();
+  if (bridge && /^[0-9a-f]{32}$/.test(bridge.sessionToken)) {
+    return bridge.sessionToken;
+  }
+  // The legacy portable launcher passes its freshly generated helper token via
   // ?token= on first open; adopt it once so the Diagnostics capture probe
   // authenticates without manual copying. Shape-checked, never trusted
   // beyond that (it is only ever compared by the loopback helper).

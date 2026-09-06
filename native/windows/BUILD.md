@@ -16,8 +16,12 @@ cl /O2 /W4 /DUNICODE /D_UNICODE aldo_capture_helper.c /Fe:aldo_capture_helper.ex
 ## MinGW-w64
 
 ```bat
-gcc -O2 -Wall -o aldo_capture_helper.exe aldo_capture_helper.c -lws2_32 -luser32
+gcc -O2 -Wall -Werror -o aldo_capture_helper.exe aldo_capture_helper.c -lws2_32 -luser32
 ```
+
+Cross-compiling from macOS/Linux with `x86_64-w64-mingw32-gcc` also works, but
+the shipped binary is always the MSVC `/W4 /WX` build produced by the
+`native-windows` CI job — that is the single build authority for releases.
 
 ## Running
 
@@ -46,6 +50,24 @@ This is functionally identical to what common input-latency/measurement
 utilities do; it observes desktop input without touching any game.
 
 ## Verifying a build
+
+First, prove the file is a real, runnable Windows x64 program. `v1.0.0-rc.1`
+shipped this source file under the `.exe` name and Windows answered *"The
+specified executable is not a valid application for this OS platform."*
+
+```bat
+aldo_capture_helper.exe --version
+rem -> aldo_capture_helper version=helper-1.0.0 protocol=1 arch=x64
+```
+
+`--version` registers no devices, opens no sockets and creates no windows; it
+prints and exits 0. CI runs exactly this, plus a byte-level PE check:
+
+```bash
+node scripts/verify-windows-artifacts.mjs --helper native/windows/aldo_capture_helper.exe
+```
+
+Then exercise the real capture path:
 
 ```bat
 aldo_capture_helper.exe --port 48765 --token test-token

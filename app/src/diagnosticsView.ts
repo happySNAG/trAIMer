@@ -13,6 +13,11 @@ import type { NativeFrame } from "../../src/capture/native.ts";
 import type { LocalJsonStore } from "../../src/persistence/store.ts";
 import { el, clear, downloadJson } from "./dom.ts";
 import {
+  defaultHelperUrl,
+  desktopBridge,
+  type DesktopHelperStatus,
+} from "./desktopBridge.ts";
+import {
   button,
   card,
   detailsBlock,
@@ -139,12 +144,63 @@ export function renderDiagnosticsView(
       ),
     );
   });
+  const bridge = desktopBridge();
+  if (bridge) {
+    // The shell owns the helper process; show what it is actually doing and
+    // offer a one-click retry instead of asking anyone to run a script.
+    const helperTile = diagTile(
+      "Capture helper",
+      "pulse",
+      "neutral",
+      "Checking…",
+      "Started and stopped automatically by Aldo Aim Lab",
+    );
+    statusGrid.append(helperTile);
+    let currentTile = helperTile;
+    const applyStatus = (status: DesktopHelperStatus): void => {
+      const tone: Tone =
+        status.state === "ready"
+          ? "ok"
+          : status.state === "starting"
+            ? "neutral"
+            : status.platformSupported
+              ? "warn"
+              : "neutral";
+      const value =
+        status.state === "ready"
+          ? `Running on port ${status.port ?? "?"}`
+          : status.state === "starting"
+            ? "Starting…"
+            : "Not running";
+      const fresh = diagTile("Capture helper", "pulse", tone, value, status.detail);
+      if (status.state !== "ready" && status.platformSupported) {
+        const retry = button("Restart capture helper", { variant: "secondary", icon: "pulse" });
+        retry.addEventListener("click", () => {
+          retry.disabled = true;
+          void bridge.restartHelper().finally(() => {
+            retry.disabled = false;
+          });
+        });
+        fresh.append(retry);
+      }
+      currentTile.replaceWith(fresh);
+      currentTile = fresh;
+      if (status.url) urlInput.value = status.url;
+    };
+    void bridge.helperStatus().then(applyStatus).catch(() => {
+      /* the neutral tile stays; never claim a state we could not read */
+    });
+    bridge.onHelperStatus(applyStatus);
+  }
+
   container.append(statusGrid);
 
   // ---- guided native capture check ----
   container.append(sectionLabel("Capture check"));
 
-  const urlInput = el("input", { type: "text", value: "ws://127.0.0.1:48765" }) as HTMLInputElement;
+  // In the desktop shell the URL and token are supplied by the process that
+  // started the helper, so there is nothing for the player to configure.
+  const urlInput = el("input", { type: "text", value: defaultHelperUrl() }) as HTMLInputElement;
   const tokenInput = el("input", { type: "text", value: sessionToken }) as HTMLInputElement;
   const durationInput = el("input", { type: "number", value: 3, min: "1", max: "30" }) as HTMLInputElement;
 
@@ -425,7 +481,12 @@ export function renderDiagnosticsView(
         "Connection settings",
         el("div", { class: "form-grid" }, [
           field("Helper URL", urlInput, { hint: "Loopback only — remote URLs are refused." }),
-          field("Session token (must match --token)", tokenInput),
+          field(
+            desktopBridge()
+              ? "Session token (managed by Aldo Aim Lab)"
+              : "Session token (must match --token)",
+            tokenInput,
+          ),
           field("Check duration (seconds)", durationInput),
         ]),
       ),
