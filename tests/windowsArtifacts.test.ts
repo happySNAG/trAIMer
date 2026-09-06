@@ -1,58 +1,8 @@
-import { describe, expect, it } from "vitest";
-import { readFileSync, existsSync } from "node:fs";
-import { resolve } from "node:path";
-import { pathToFileURL } from "node:url";
-
-/**
- * The gate lives in plain .mjs release tooling so `node scripts/...` works
- * with no build step. It is loaded through an explicit file:// URL rather
- * than a bare relative specifier: on Windows a bare specifier to a .mjs
- * outside the Vite root resolves to a bare drive path, which the ESM loader
- * rejects — the suite failed only on the Windows CI runner.
- */
-const gate = (await import(
-  pathToFileURL(resolve("scripts/verify-windows-artifacts.mjs")).href
-)) as {
-  IMAGE_FILE_MACHINE_AMD64: number;
-  IMAGE_FILE_MACHINE_I386: number;
-  MIN_HELPER_BYTES: number;
-  MIN_INSTALLER_BYTES: number;
-  inspectPortableExecutable: (buffer: Buffer) => {
-    sizeBytes: number;
-    hasMzHeader: boolean;
-    hasPeSignature: boolean;
-    peOffset: number | null;
-    machine: number | null;
-    machineName: string | null;
-    isX64: boolean;
-    isExecutableImage: boolean;
-    isDll: boolean;
-    looksLikeSourceText: boolean;
-    problems: string[];
-  };
-  looksLikeSourceText: (buffer: Buffer) => boolean;
-  verifyFrontendAssets: (dir: string) => { ok: boolean; problems: string[] };
-  verifyHelperBinary: (path: string) => {
-    ok: boolean;
-    report: { sizeBytes: number; machineName: string | null } | null;
-    problems: string[];
-  };
-  verifyInstalledApp: (dir: string) => { ok: boolean; problems: string[] };
-  verifyInstaller: (path: string) => { ok: boolean; problems: string[] };
-};
-
-const {
-  IMAGE_FILE_MACHINE_AMD64,
-  IMAGE_FILE_MACHINE_I386,
-  MIN_HELPER_BYTES,
-  MIN_INSTALLER_BYTES,
-  inspectPortableExecutable,
-  looksLikeSourceText,
-  verifyFrontendAssets,
-  verifyHelperBinary,
-  verifyInstalledApp,
-  verifyInstaller,
-} = gate;
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 /**
  * Regression suite for the v1.0.0-rc.1 release-blocking defect: the shipped
@@ -60,19 +10,48 @@ const {
  * Windows answered "The specified executable is not a valid application for
  * this OS platform." Nothing in the pipeline had ever inspected the bytes.
  *
- * These tests run on ANY host (they are pure byte inspection), so the gate is
- * proven on macOS/Linux long before a Windows runner is involved.
+ * The gate is exercised the way CI and the packager actually invoke it — as
+ * the `node scripts/verify-windows-artifacts.mjs` command line — so these
+ * tests cover the real entry point rather than internals that could drift
+ * from it. (Importing the .mjs directly also fails to load under vitest on
+ * Windows, and the repo's other script-facing suite works around that by
+ * keeping a hand-copied "mirror" of the script's logic — a mirror cannot
+ * fail when the script does.)
+ *
+ * Everything here is pure byte inspection, so the gate is proven on macOS and
+ * Linux long before a Windows runner is involved.
  */
 
+const SCRIPT = "scripts/verify-windows-artifacts.mjs";
+const IMAGE_FILE_MACHINE_AMD64 = 0x8664;
+const IMAGE_FILE_MACHINE_I386 = 0x014c;
+
+interface GateResult {
+  ok: boolean;
+  output: string;
+}
+
+/** Runs the gate CLI. Never throws: a non-zero exit is the thing under test. */
+function runGate(...args: string[]): GateResult {
+  try {
+    const stdout = execFileSync(process.execPath, [SCRIPT, ...args], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    return { ok: true, output: stdout };
+  } catch (error) {
+    const err = error as { stdout?: string; stderr?: string };
+    return { ok: false, output: `${err.stdout ?? ""}\n${err.stderr ?? ""}` };
+  }
+}
+
 /** Builds a syntactically valid minimal PE image for a given machine type. */
-function synthesizePe(options: {
-  machine?: number;
-  characteristics?: number;
-  padTo?: number;
-  subsystem?: number;
-}): Buffer {
+function synthesizePe(
+  options: { machine?: number; characteristics?: number; padTo?: number } = {},
+): Buffer {
   const machine = options.machine ?? IMAGE_FILE_MACHINE_AMD64;
-  const characteristics = options.characteristics ?? 0x0022; // EXECUTABLE_IMAGE | LARGE_ADDRESS_AWARE
+  // EXECUTABLE_IMAGE | LARGE_ADDRESS_AWARE
+  const characteristics = options.characteristics ?? 0x0022;
   const peOffset = 0x80;
   const optionalHeaderSize = 240;
   const size = Math.max(options.padTo ?? 0, peOffset + 24 + optionalHeaderSize);
@@ -80,7 +59,7 @@ function synthesizePe(options: {
 
   buffer.write("MZ", 0, "latin1");
   // A real DOS stub is mostly binary; emulate that so the printability
-  // heuristic does not mistake the fixture for text.
+  // heuristic does not mistake the fixture for source text.
   for (let i = 2; i < 0x3c; i++) buffer[i] = i % 7 === 0 ? 0x00 : 0x90;
   buffer.writeUInt32LE(peOffset, 0x3c);
 
@@ -93,123 +72,138 @@ function synthesizePe(options: {
 
   const optional = coff + 20;
   buffer.writeUInt16LE(0x20b, optional); // PE32+
-  buffer.writeUInt16LE(options.subsystem ?? 3, optional + 68); // console
+  buffer.writeUInt16LE(3, optional + 68); // console subsystem
   return buffer;
 }
 
-describe("PE header inspection", () => {
+let workDir: string;
+const fixture = (name: string, contents: Buffer | string): string => {
+  const path = join(workDir, name);
+  writeFileSync(path, contents);
+  return path;
+};
+
+beforeAll(() => {
+  workDir = mkdtempSync(join(tmpdir(), "aldo-gate-"));
+});
+afterAll(() => {
+  rmSync(workDir, { recursive: true, force: true });
+});
+
+describe("helper release gate", () => {
   it("accepts a well-formed 64-bit Windows executable", () => {
-    const report = inspectPortableExecutable(synthesizePe({ padTo: 64 * 1024 }));
-    expect(report.hasMzHeader).toBe(true);
-    expect(report.hasPeSignature).toBe(true);
-    expect(report.isX64).toBe(true);
-    expect(report.isExecutableImage).toBe(true);
-    expect(report.isDll).toBe(false);
-    expect(report.machineName).toContain("x64");
-    expect(report.problems).toEqual([]);
+    const path = fixture("good.exe", synthesizePe({ padTo: 64 * 1024 }));
+    const result = runGate("--helper", path);
+    expect(result.output).toContain("x64 (AMD64)");
+    expect(result.ok).toBe(true);
+  });
+
+  it("REJECTS the exact artifact that shipped on the rc.1 USB stick", () => {
+    // rc.1's aldo_capture_helper.exe was this file, copied verbatim.
+    const result = runGate("--helper", "native/windows/aldo_capture_helper.c");
+    expect(result.ok).toBe(false);
+    expect(result.output).toContain("SOURCE TEXT");
+    expect(result.output).toContain("MZ");
   });
 
   it("rejects a 32-bit binary on an AMD64 target", () => {
-    const report = inspectPortableExecutable(
+    const path = fixture(
+      "x86.exe",
       synthesizePe({ machine: IMAGE_FILE_MACHINE_I386, padTo: 64 * 1024 }),
     );
-    expect(report.isX64).toBe(false);
-    expect(report.problems.join(" ")).toMatch(/wrong architecture/);
+    const result = runGate("--helper", path);
+    expect(result.ok).toBe(false);
+    expect(result.output).toMatch(/wrong architecture/);
   });
 
   it("rejects a DLL masquerading as the helper", () => {
-    const report = inspectPortableExecutable(
+    const path = fixture(
+      "lib.exe",
       synthesizePe({ characteristics: 0x2022, padTo: 64 * 1024 }),
     );
-    expect(report.isDll).toBe(true);
-    expect(report.problems.join(" ")).toMatch(/DLL, not an application/);
+    const result = runGate("--helper", path);
+    expect(result.ok).toBe(false);
+    expect(result.output).toMatch(/DLL, not an application/);
   });
 
   it("rejects an MZ stub whose PE signature is missing", () => {
     const buffer = synthesizePe({ padTo: 64 * 1024 });
     buffer.write("XX\0\0", 0x80, "latin1");
-    const report = inspectPortableExecutable(buffer);
-    expect(report.hasMzHeader).toBe(true);
-    expect(report.hasPeSignature).toBe(false);
-    expect(report.problems.join(" ")).toMatch(/PE.*signature/);
+    const result = runGate("--helper", fixture("stub.exe", buffer));
+    expect(result.ok).toBe(false);
+    expect(result.output).toMatch(/signature/);
   });
 
   it("rejects an e_lfanew pointing past the end of the file", () => {
     const buffer = synthesizePe({ padTo: 64 * 1024 });
     buffer.writeUInt32LE(0x00ff_0000, 0x3c);
-    const report = inspectPortableExecutable(buffer);
-    expect(report.problems.join(" ")).toMatch(/outside the file/);
+    const result = runGate("--helper", fixture("lfanew.exe", buffer));
+    expect(result.ok).toBe(false);
+    expect(result.output).toMatch(/outside the file/);
   });
 
   it("rejects an empty file", () => {
-    const report = inspectPortableExecutable(Buffer.alloc(0));
-    expect(report.hasMzHeader).toBe(false);
-    expect(report.problems.join(" ")).toMatch(/empty or truncated/);
+    const result = runGate("--helper", fixture("empty.exe", Buffer.alloc(0)));
+    expect(result.ok).toBe(false);
+    expect(result.output).toMatch(/zero bytes|empty or truncated/);
   });
-});
 
-describe("source-text detection (the exact rc.1 failure mode)", () => {
-  it("flags the real native helper C source", () => {
-    const source = readFileSync("native/windows/aldo_capture_helper.c");
-    expect(looksLikeSourceText(source)).toBe(true);
+  it("rejects a real PE that is implausibly small", () => {
+    // Structurally valid but far below any compiled Raw Input helper.
+    const result = runGate("--helper", fixture("tiny.exe", synthesizePe()));
+    expect(result.ok).toBe(false);
+    expect(result.output).toMatch(/implausibly small/);
   });
 
   it.each([
-    ["C source", "/* Aldo Aim Lab — Windows native mouse capture helper.\n"],
+    ["c-source", "/* Aldo Aim Lab — Windows native mouse capture helper.\n"],
     ["preprocessor", "#include <winsock2.h>\n"],
-    ["shell script", "#!/usr/bin/env bash\necho hi\n"],
-    ["JSON", '{\n  "name": "aldo"\n}\n'],
-    ["line comment", "// nothing to see here\n"],
-  ])("flags %s", (_label, text) => {
-    expect(looksLikeSourceText(Buffer.from(text.repeat(20), "utf8"))).toBe(true);
-  });
-
-  it("does not flag a genuine PE image", () => {
-    expect(looksLikeSourceText(synthesizePe({ padTo: 64 * 1024 }))).toBe(false);
-  });
-});
-
-describe("helper release gate", () => {
-  it("REJECTS the exact artifact that shipped on the rc.1 USB stick", () => {
-    // The rc.1 helper was this file, copied verbatim under the .exe name.
-    const result = verifyHelperBinary("native/windows/aldo_capture_helper.c");
+    ["shell-script", "#!/usr/bin/env bash\necho hi\n"],
+    ["json", '{\n  "name": "aldo"\n}\n'],
+    ["line-comment", "// nothing to see here\n"],
+  ])("rejects %s wearing an .exe name", (name, text) => {
+    const path = fixture(`${name}.exe`, text.repeat(400));
+    const result = runGate("--helper", path);
     expect(result.ok).toBe(false);
-    expect(result.problems.join(" ")).toMatch(/SOURCE TEXT/);
-    expect(result.problems.join(" ")).toMatch(/MZ/);
+    expect(result.output).toContain("SOURCE TEXT");
   });
 
   it("reports a missing helper rather than passing silently", () => {
-    const result = verifyHelperBinary("native/windows/definitely-not-here.exe");
+    const result = runGate("--helper", join(workDir, "definitely-not-here.exe"));
     expect(result.ok).toBe(false);
-    expect(result.problems.join(" ")).toMatch(/missing/);
-  });
-
-  it("has an honest minimum-size floor", () => {
-    // A compiled Raw Input helper is tens of kilobytes; a few hundred bytes
-    // means a stub or a truncated artifact.
-    expect(MIN_HELPER_BYTES).toBeGreaterThanOrEqual(8 * 1024);
-    expect(MIN_INSTALLER_BYTES).toBeGreaterThanOrEqual(10 * 1024 * 1024);
+    expect(result.output).toMatch(/missing/);
   });
 });
 
-describe("frontend + installed-app gates", () => {
-  it("passes on a built dist-app/ and fails on a missing one", () => {
-    if (existsSync("dist-app")) {
-      expect(verifyFrontendAssets("dist-app").ok).toBe(true);
-    }
-    const missing = verifyFrontendAssets("dist-app-does-not-exist");
-    expect(missing.ok).toBe(false);
-    expect(missing.problems.join(" ")).toMatch(/missing/);
-  });
-
-  it("fails when the installed application directory is absent", () => {
-    const result = verifyInstalledApp("no/such/install");
+describe("frontend, installer and installed-app gates", () => {
+  it("fails when the frontend directory is absent", () => {
+    const result = runGate("--frontend", join(workDir, "no-dist"));
     expect(result.ok).toBe(false);
+    expect(result.output).toMatch(/missing/);
   });
 
   it("fails when the installer file is absent", () => {
-    const result = verifyInstaller("no/such/AldoAimLab-Setup.exe");
+    const result = runGate("--installer", join(workDir, "AldoAimLab-Setup.exe"));
     expect(result.ok).toBe(false);
-    expect(result.problems.join(" ")).toMatch(/missing/);
+    expect(result.output).toMatch(/missing/);
+  });
+
+  it("fails an installer that is a real PE but implausibly small", () => {
+    const path = fixture("Setup.exe", synthesizePe({ padTo: 64 * 1024 }));
+    const result = runGate("--installer", path);
+    expect(result.ok).toBe(false);
+    expect(result.output).toMatch(/implausibly small/);
+  });
+
+  it("fails when the installed application directory is absent", () => {
+    const result = runGate("--installed-app", join(workDir, "no-install"));
+    expect(result.ok).toBe(false);
+    expect(result.output).toMatch(/missing/);
+  });
+
+  it("refuses to pass when given nothing to check", () => {
+    const result = runGate();
+    expect(result.ok).toBe(false);
+    expect(result.output).toMatch(/nothing to verify/);
   });
 });

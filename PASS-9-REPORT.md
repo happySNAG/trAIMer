@@ -238,6 +238,26 @@ reporting line used `"$script:$(...)"`, which PowerShell reads as a
 scope-qualified variable reference, so `pwsh` failed to parse the step before
 executing a line. Fixed with `${script}`.
 
+**Two test suites could not run on Windows at all.** Once the Windows jobs
+finally got far enough to execute the engine suite, they exposed defects that
+had never been observable. `tests/uiContract.test.ts` keyed its source map
+with `join()`, producing `app/src\runController.ts` on Windows while every
+lookup used the POSIX literal — all four `sources.get()` calls returned
+`undefined` and fell through to `?? ""`, so three UI/engine contract tests had
+been asserting against the empty string; and once that was fixed, the
+multi-line assertions still failed because git checks the tree out with CRLF
+on Windows. `tests/windowsArtifacts.test.ts` could not be loaded at all:
+importing a `.mjs` from a test does not work under vitest on Windows (the
+repo's other script-facing suite quietly works around this by keeping a
+hand-copied "mirror" of the script's logic — a mirror cannot fail when the
+script does). It now drives the gate the way CI actually invokes it, as the
+`node scripts/verify-windows-artifacts.mjs` command line, so the tests cover
+the real entry point.
+
+Both fixes were then validated by converting all 255 text sources in the tree
+to CRLF — a full simulation of a Windows checkout — and re-running the suite,
+lint, typecheck, release verification and the telemetry audit. All green.
+
 **A fuzz test was host-dependent.** `tests/schemaFuzz.test.ts` built its
 deeply-nested hostile payload by nesting 100 000 real arrays and calling
 `JSON.stringify`, which recurses once per level. The fixture blew the stack
@@ -259,6 +279,19 @@ Run on macOS at commit `6b17267`:
 | `node scripts/audit-no-telemetry.mjs` (now covers `desktop/`) | clean |
 | `node scripts/verify-release.mjs` | 30 checks passed |
 | `npx electron . --smoke-test` | pass — frontend, app shell, bridge, IndexedDB, clean shutdown |
+| full suite under simulated CRLF checkout | 566 passed; lint, typecheck, verify-release, telemetry audit clean |
+| `zig cc -target x86_64-windows-gnu -O2 -Wall -Wextra -Wshadow` | helper compiles clean; output is `PE32+ x86-64` and passes the release gate |
+| `npx electron-builder --win nsis --x64` (on macOS) | produced `AldoAimLab-Setup-1.0.0-rc.3.exe`, 99.8 MB; installer + installed-layout gates pass |
+
+The local electron-builder run is a packaging rehearsal, not a release: it
+bundles a cross-compiled helper, so it proves the `files`/`extraResources`
+layout, the asar contents, the icon and the NSIS script — nothing about the
+shipped binary. That the custom uninstall script is really applied (rather
+than silently ignored, which would quietly drop requirement 14) was confirmed
+by deliberately inserting a syntax error into `build/installer.nsh` and
+watching `makensis` abort with
+`!include: error in script: ".../build/installer.nsh" on line 31`.
+
 
 New tests (53):
 

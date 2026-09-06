@@ -28,7 +28,15 @@ function listAppSources(dir = APP_SRC): string[] {
   return out;
 }
 
-const sources = new Map(listAppSources().map((p) => [p, readFileSync(p, "utf8")]));
+/**
+ * Line endings are normalised to LF. Git checks the tree out with CRLF on
+ * Windows, which silently broke every multi-line assertion below (they embed
+ * "\n") on the Windows CI runner while passing everywhere else.
+ */
+const readNormalised = (path: string): string =>
+  readFileSync(path, "utf8").replace(/\r\n/g, "\n");
+
+const sources = new Map(listAppSources().map((p) => [p, readNormalised(p)]));
 
 describe("UI/engine contract (static audit of app/src)", () => {
   it("contains no network-capable APIs anywhere in UI code", () => {

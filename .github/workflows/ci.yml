@@ -273,9 +273,11 @@ jobs:
           $target = "C:\aldo-install-test"
           $exe = Join-Path $target "Aldo Aim Lab.exe"
           # runAfterFinish may have launched a copy; the single-instance lock
-          # would otherwise turn a no-op into a false pass.
+          # would otherwise turn a no-op into a false pass, and a leftover
+          # helper would trip the "nothing survives shutdown" check below.
           Get-Process -Name "Aldo Aim Lab" -ErrorAction SilentlyContinue | Stop-Process -Force
-          Start-Sleep -Seconds 2
+          Get-Process -Name "aldo_capture_helper" -ErrorAction SilentlyContinue | Stop-Process -Force
+          Start-Sleep -Seconds 3
           $out = "$env:RUNNER_TEMP\smoke-test-result.json"
           $proc = Start-Process -FilePath $exe `
             -ArgumentList "--smoke-test", "--require-helper", "--smoke-out", $out `
