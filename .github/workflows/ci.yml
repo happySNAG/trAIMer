@@ -71,9 +71,9 @@ jobs:
           bash scripts/build-native-windows.sh
       - name: compile helper (MSVC, warnings are errors)
         shell: cmd
-        run: |
-          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat" || exit /b 1
-          scripts\build-native-windows.bat
+        # The build script locates the MSVC toolset with vswhere; hardcoding a
+        # Visual Studio edition path here is what silently broke this step.
+        run: scripts\build-native-windows.bat
       - name: RELEASE GATE - helper is a genuine Windows x64 PE
         shell: bash
         run: node scripts/verify-windows-artifacts.mjs --helper native/windows/aldo_capture_helper.exe

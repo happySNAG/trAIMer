@@ -41,7 +41,11 @@ win:
     - target: nsis
       arch:
         - x64
-  icon: build/icon.ico
+  # icon, installerIcon, uninstallerIcon and nsis.include are deliberately NOT
+  # set: electron-builder resolves those relative to directories.buildResources
+  # ("build"), and our files already sit at the exact default locations
+  # (build/icon.ico, build/installer.nsh). Naming them explicitly risks
+  # resolving to build/build/... and silently dropping the customisation.
   artifactName: AldoAimLab-Setup-${version}.${ext}
   # No elevation: a per-user install keeps the anti-cheat-safe posture (no
   # admin rights, no services, no drivers, no system mutation).
@@ -59,7 +63,4 @@ nsis:
   runAfterFinish: true
   deleteAppDataOnUninstall: false
   uninstallDisplayName: Aldo Aim Lab ${version}
-  installerIcon: build/icon.ico
-  uninstallerIcon: build/icon.ico
-  include: build/installer.nsh
   differentialPackage: false

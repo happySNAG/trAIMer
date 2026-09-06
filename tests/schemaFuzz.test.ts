@@ -154,10 +154,16 @@ describe("backup fuzzing", () => {
     await expect(importBackupAll(t2, huge)).rejects.toThrow();
 
     // Deeply nested hostile JSON in an entry.
-    let deep: unknown = "leaf";
-    for (let i = 0; i < 100_000; i++) deep = [deep];
+    //
+    // Built as a STRING rather than by nesting real arrays and calling
+    // JSON.stringify: stringify recurses once per level, so constructing the
+    // fixture blew the stack before the assertion below ever ran, and whether
+    // it did depended on the host's stack size (green on macOS, RangeError on
+    // the Linux CI runner). The payload is identical — 100k nested arrays —
+    // and now it is guaranteed to reach importBackupAll.
+    const depth = 100_000;
     const nested = deepClone(backup);
-    nested.entries[0] = JSON.stringify(deep);
+    nested.entries[0] = `${"[".repeat(depth)}"leaf"${"]".repeat(depth)}`;
     const t3 = new InMemoryBackend();
     await expect(importBackupAll(t3, nested)).rejects.toThrow();
   }, 60_000);
