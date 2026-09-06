@@ -19,9 +19,25 @@ cl /O2 /W4 /DUNICODE /D_UNICODE aldo_capture_helper.c /Fe:aldo_capture_helper.ex
 gcc -O2 -Wall -Werror -o aldo_capture_helper.exe aldo_capture_helper.c -lws2_32 -luser32
 ```
 
-Cross-compiling from macOS/Linux with `x86_64-w64-mingw32-gcc` also works, but
-the shipped binary is always the MSVC `/W4 /WX` build produced by the
-`native-windows` CI job — that is the single build authority for releases.
+## Cross-checking the source from macOS/Linux
+
+You cannot ship a cross-built helper — the shipped binary is always the MSVC
+`/W4 /WX` build produced by the `native-windows` CI job, the single build
+authority for releases. But you can prove the source COMPILES without a
+Windows machine, which is worth doing before pushing:
+
+```bash
+# zig bundles the mingw-w64 headers and libs; no toolchain install needed
+zig cc -target x86_64-windows-gnu -O2 -Wall -Wextra -Wshadow \
+  -o /tmp/aldo_capture_helper.exe native/windows/aldo_capture_helper.c \
+  -lws2_32 -luser32
+
+node scripts/verify-windows-artifacts.mjs --helper /tmp/aldo_capture_helper.exe
+```
+
+`x86_64-w64-mingw32-gcc` works the same way. Neither reproduces MSVC-specific
+diagnostics (C4996 deprecation, for instance), so a clean cross-build is a
+smoke check, not a substitute for the CI compile.
 
 ## Running
 

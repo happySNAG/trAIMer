@@ -189,6 +189,51 @@ The smoke test refuses to pass when the single-instance lock is already held
 `native-windows` also gained the PE and execution gates, so a bad helper fails
 at the earliest possible job.
 
+## 5b. Two long-broken CI gates found while proving the pipeline
+
+Pushing the work exposed that the Windows half of CI had not actually been
+running. Both failures predate this pass and both were hiding real breakage.
+
+**The MSVC compile step had never compiled anything.** It hardcoded
+`C:\Program Files\Microsoft Visual Studio\2022\Enterprise\...\vcvars64.bat`,
+a path that does not exist on the current `windows-latest` image — *"The
+system cannot find the path specified."* This is the deeper reason a
+placeholder could travel to a USB stick without anyone noticing: the pipeline
+that was supposed to produce the real helper had been failing at step 6 for
+some time. `scripts/build-native-windows.bat` now locates any Visual Studio
+carrying the x64 C++ toolset via `vswhere`, falls back to MinGW, and fails
+loudly otherwise; it also no longer tests `%errorlevel%` inside a
+parenthesised block, where batch expands it at parse time and reads a stale
+value.
+
+**The helper source had never compiled.** Once `vswhere` found the toolset
+(Visual Studio 18 Enterprise on the current image) and `cl` finally ran, MSVC
+rejected the file outright: `RAWINPUTDEVICE_LIST` is not a Win32 type — the
+real name is `RAWINPUTDEVICELIST`, with no underscore — and `strncpy` trips
+C4996, which `/WX` turns into an error. Four errors and a deprecation in code
+that had been reviewed across four passes and described in docs as compiled by
+CI. This is the strongest confirmation of the root cause: no compiled helper
+had ever existed, so a placeholder was the only thing available to package.
+Fixed by correcting the type name and replacing `strncpy` with an explicit
+always-NUL-terminating `copy_bounded` (rather than hiding the whole
+deprecation class behind `_CRT_SECURE_NO_WARNINGS`). Verified locally by
+cross-compiling with `zig cc -target x86_64-windows-gnu -O2 -Wall -Wextra
+-Wshadow` — clean, and the resulting PE32+ x86-64 binary passes the new
+release gate, which also still rejects the `.c` file.
+
+**The PowerShell-parse step had never parsed anything.** Its own error
+reporting line used `"$script:$(...)"`, which PowerShell reads as a
+scope-qualified variable reference, so `pwsh` failed to parse the step before
+executing a line. Fixed with `${script}`.
+
+**A fuzz test was host-dependent.** `tests/schemaFuzz.test.ts` built its
+deeply-nested hostile payload by nesting 100 000 real arrays and calling
+`JSON.stringify`, which recurses once per level. The fixture blew the stack
+*before the assertion ran* — green on macOS, `RangeError` on the Linux
+runner. The payload is now built directly as a string: identical nesting
+depth, no recursion, and it is now guaranteed to actually reach
+`importBackupAll`. Stricter, not weaker.
+
 ## 6. Tests
 
 Run on macOS at commit `6b17267`:

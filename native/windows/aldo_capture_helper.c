@@ -63,6 +63,28 @@
 #define WS_TX_BUF_SIZE            4096
 
 /* ------------------------------------------------------------------ */
+/* Small bounded string copy                                           */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Always-NUL-terminating bounded copy.
+ *
+ * Used instead of strncpy, which MSVC reports as C4996 ("may be unsafe") and
+ * which /WX turns into an error. Silencing the warning with
+ * _CRT_SECURE_NO_WARNINGS would hide the whole deprecation class, so the
+ * copy is written out instead.
+ */
+static void copy_bounded(char *dst, size_t dstSize, const char *src)
+{
+    size_t i = 0;
+    if (dst == NULL || dstSize == 0) return;
+    if (src != NULL) {
+        for (; i + 1 < dstSize && src[i] != '\0'; i++) dst[i] = src[i];
+    }
+    dst[i] = '\0';
+}
+
+/* ------------------------------------------------------------------ */
 /* Monotonic high-resolution clock                                     */
 /* ------------------------------------------------------------------ */
 
@@ -653,7 +675,7 @@ int main(int argc, char **argv)
         } else if (!strcmp(argv[i], "--port") && i + 1 < argc) {
             port = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--token") && i + 1 < argc) {
-            strncpy(g_expectedToken, argv[++i], MAX_TOKEN_LEN - 1);
+            copy_bounded(g_expectedToken, sizeof(g_expectedToken), argv[++i]);
             haveToken = 1;
         } else {
             print_usage();
@@ -706,15 +728,15 @@ int main(int argc, char **argv)
     }
     /* Enumerate currently attached mice so metadata is available immediately. */
     UINT devCount = 0;
-    if (GetRawInputDeviceList(NULL, &devCount, sizeof(RAWINPUTDEVICE_LIST)) ==
+    if (GetRawInputDeviceList(NULL, &devCount, sizeof(RAWINPUTDEVICELIST)) ==
             (UINT)-1) {
         devCount = 0;
     }
     if (devCount > 0) {
-        RAWINPUTDEVICE_LIST *list =
-            (RAWINPUTDEVICE_LIST *)malloc(sizeof(RAWINPUTDEVICE_LIST) * devCount);
+        RAWINPUTDEVICELIST *list =
+            (RAWINPUTDEVICELIST *)malloc(sizeof(RAWINPUTDEVICELIST) * devCount);
         if (list && GetRawInputDeviceList(list, &devCount,
-                                          sizeof(RAWINPUTDEVICE_LIST)) !=
+                                          sizeof(RAWINPUTDEVICELIST)) !=
                         (UINT)-1) {
             for (UINT i = 0; i < devCount; i++) {
                 if (list[i].dwType == RIM_TYPEMOUSE) {
