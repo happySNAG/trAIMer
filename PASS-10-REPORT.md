@@ -203,13 +203,17 @@ clock work — see `docs/NATIVE-CAPTURE.md`.
   ready-but-unvalidated → rejected, browser self-test never counts as native
   validation.
 
-`tests/browser/captureEntry.spec.ts` — 9 tests, real DOM, **without** `?e2e=1`
+`tests/browser/captureEntry.spec.ts` — 11 tests, real DOM, **without** `?e2e=1`
 - the arena centre hit-target is the canvas; overlay `pointer-events: none`;
 - Pause and End session are hit-testable (overlay does not cover controls);
-- a refused lock produces a visible diagnostic **in under 4 s** (the source's
-  own timeout is 5 s, so this proves the refusal was observed, not waited out)
-  and does not silently drop to setup;
-- both diagnostic exits work; retry re-arms the arena;
+- the click always **resolves** within 6 s — live or diagnosed — which is the
+  host-agnostic contract (macOS headless refuses Pointer Lock, the Linux CI
+  runner grants it, Aldo's PC grants it; the rc.3 symptom was neither);
+- a refusal and a never-answered request are **forced** by overriding
+  `Element.prototype.requestPointerLock`, so both diagnostics are exercised
+  identically on every host rather than depending on the runner's mood;
+- a refusal is not silently treated as a cancellation (it stays on the arena
+  and explains itself); both diagnostic exits work; retry re-arms the arena;
 - End session, Pause and Esc all work while preparing;
 - the capture caption is derived and carries a reason.
 
@@ -238,7 +242,7 @@ the element fails 8 of the 25 unit tests.
 | `npm run lint` | clean |
 | `npm run typecheck` (engine + desktop) | clean |
 | `npx vitest run` | **68 files, 595 tests passed** (was 67/566) |
-| `npm run test:browser` | **83 passed** (was 74) |
+| `npm run test:browser` | **85 passed** (was 74) |
 | `npm run build` / `build:desktop` | clean |
 | `node scripts/verify-release.mjs` | all gates passed |
 | `node scripts/audit-no-telemetry.mjs` | CLEAN |

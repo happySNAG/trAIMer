@@ -83,7 +83,62 @@ test.describe("arena capture entry", () => {
     for (const c of covered) expect(c.topIsSelf, c.label).toBe(true);
   });
 
+  /**
+   * Whether a host grants Pointer Lock is not ours to control: the macOS
+   * headless shell refuses, the Linux CI runner grants, and Aldo's Windows PC
+   * grants. So the host-agnostic contract is that the click RESOLVES — the
+   * release-blocking symptom was neither outcome, but neither ever arriving.
+   */
+  test("the arena click always resolves, one way or the other", async ({ page }) => {
+    await openArena(page);
+    const startedAt = Date.now();
+    await clickArenaCentre(page);
+    const resolved = await page
+      .waitForFunction(
+        () => {
+          const live = [
+            "candidate-transition",
+            "warmup",
+            "trial-ready",
+            "trial-active",
+            "inter-trial",
+          ].includes(
+            document.querySelector(".run-screen")?.getAttribute("data-session-state") ?? "",
+          );
+          const diagnosed =
+            document.querySelector(".overlay-title")?.textContent ===
+              "Could not capture your mouse" &&
+            (document.querySelector(".overlay-message") as HTMLElement | null)?.hidden === false;
+          return live || diagnosed;
+        },
+        undefined,
+        { timeout: 15_000 },
+      )
+      .then(() => true)
+      .catch(() => false);
+    expect(resolved, "the arena neither started nor explained itself").toBe(true);
+    // The source's own lock timeout is 5 s. Resolving well inside that proves
+    // the outcome was OBSERVED rather than waited out.
+    expect(Date.now() - startedAt).toBeLessThan(6000);
+  });
+
+  /**
+   * A refusal is forced here rather than hoped for, so the diagnostic path is
+   * exercised identically on every host. The override matches what Chromium
+   * does when it refuses: a rejected promise and no lock event.
+   */
+  async function forceLockRefusal(page: Page): Promise<void> {
+    await page.addInitScript(() => {
+      Element.prototype.requestPointerLock = function requestPointerLock() {
+        return Promise.reject(
+          new DOMException("forced refusal (regression test)", "NotAllowedError"),
+        );
+      } as typeof Element.prototype.requestPointerLock;
+    });
+  }
+
   test("a refused pointer lock reports a diagnostic instead of hanging", async ({ page }) => {
+    await forceLockRefusal(page);
     await openArena(page);
     const startedAt = Date.now();
     await clickArenaCentre(page);
@@ -93,8 +148,7 @@ test.describe("arena capture entry", () => {
     await expect(page.locator(".overlay-title")).toHaveText("Could not capture your mouse", {
       timeout: 15_000,
     });
-    // Fast, not "eventually": the source's own lock timeout is 5 s, so a
-    // result inside 4 s proves the refusal was OBSERVED, not waited out.
+    // Observed, not waited out: the source's own timeout is 5 s.
     expect(Date.now() - startedAt).toBeLessThan(4000);
     // A refusal is NOT a cancellation: it must be explained on the arena, not
     // quietly dropped back to setup as if the player had asked to leave.
@@ -107,7 +161,28 @@ test.describe("arena capture entry", () => {
     await expect(page.locator(".overlay-actions button")).toHaveCount(2);
   });
 
+  /**
+   * The rc.3 failure shape exactly: a request that is never answered. It must
+   * end in a diagnostic at the timeout, never in an arena that waits forever.
+   */
+  test("a pointer lock that is never answered times out into a diagnostic", async ({ page }) => {
+    await page.addInitScript(() => {
+      Element.prototype.requestPointerLock = function requestPointerLock() {
+        // Never settles, and no pointerlockchange/pointerlockerror is fired.
+        return new Promise(() => undefined);
+      } as typeof Element.prototype.requestPointerLock;
+    });
+    await openArena(page);
+    await clickArenaCentre(page);
+    await expect(page.locator(".overlay-message")).toBeVisible({ timeout: 20_000 });
+    await expect(page.locator(".overlay-title")).toHaveText("Could not capture your mouse", {
+      timeout: 20_000,
+    });
+    await expect(page.locator(".overlay-actions button")).toHaveCount(2);
+  });
+
   test("the diagnostic's way out actually works", async ({ page }) => {
+    await forceLockRefusal(page);
     await openArena(page);
     await clickArenaCentre(page);
     await expect(page.locator(".overlay-message")).toBeVisible({ timeout: 15_000 });
@@ -120,6 +195,7 @@ test.describe("arena capture entry", () => {
   });
 
   test("the diagnostic's retry starts a fresh attempt", async ({ page }) => {
+    await forceLockRefusal(page);
     await openArena(page);
     await clickArenaCentre(page);
     await expect(page.locator(".overlay-message")).toBeVisible({ timeout: 15_000 });
