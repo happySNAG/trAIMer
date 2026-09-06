@@ -311,12 +311,60 @@ in `tests/securityRoundTwo.test.ts` still run unchanged, and every hardware-
 validation requirement is untouched — a successful compile is still explicitly
 not hardware validation.
 
-## 7. Honesty notes
+## 7. Result
+
+CI run [`34059151722`](https://github.com/happySNAG/Aldo-Aim-Lab/actions/runs/34059151722)
+— every job green: `engine`, `browser`, `native-windows`, `windows-release`,
+`windows-installer`.
+
+The `windows-installer` job's own record of the installed application
+starting and stopping on Windows x64:
+
+```json
+{ "smokeTest": "aldo-aim-lab-desktop", "pass": true,
+  "frontendLoaded": true, "appShellRendered": true,
+  "desktopBridgeReady": true, "persistentStorage": true,
+  "helperState": "ready", "helperPort": 48765, "helperRequired": true,
+  "appVersion": "1.0.0-rc.3" }
+```
+
+```
+shell-start        packaged=true platform=win32 arch=x64
+helper-spawned     pid=2296 port=48765 C:\aldo-install-test\resources\aldo_capture_helper.exe
+helper-stdout      helper-1.0.0 listening on 127.0.0.1:48765
+helper-ready       port=48765
+frontend-loaded    origin=aldo://app
+shell-shutdown-begin
+helper-stopped
+shell-shutdown-complete exitCode=0
+→ startup + clean shutdown verified   (no surviving processes)
+```
+
+| Artifact | SHA-256 | Size |
+| --- | --- | --- |
+| `AldoAimLab-Setup-1.0.0-rc.3.exe` | `339849f2b5e1d5ab39560ab1826190cecc23d0b9b678824f5b83e65d7d39dcb6` | 100 452 113 |
+| `aldo_capture_helper.exe` (MSVC `/W4 /WX`) | `a6f6b2d538431b1e92f93a74a03a7cc84ff3cfb7c27a3c51dc84cf9697221204` | 164 864 |
+
+For contrast, the artifact that failed on Aldo's PC:
+
+| rc.1 `aldo_capture_helper.exe` | `5af4339191f8da715c9b05d6061fb0ebf2e08a649ecbab8914cc5813c16e3330` | 29 831 |
+
+— which is the SHA-256 of `native/windows/aldo_capture_helper.c`.
+
+Both CI artifacts were re-verified locally after download:
+`PE32+ executable (console) x86-64` for the helper, NSIS self-extracting
+installer for the setup program, checksums matching CI's published values.
+The installer is on `/Volumes/NO NAME/AldoAimLab-Setup.exe`, checksum
+re-verified after the copy.
+
+## 8. Honesty notes
 
 - **The installer has not been validated on Aldo's PC.** CI proves the helper
   is a real x64 PE that executes, that the installer installs, and that the
-  installed app starts and shuts down cleanly on a Windows runner. It does not
-  prove Raw Input quality on Aldo's mouse. The Diagnostics capture self-test
+  installed app starts, reaches helper-ready and shuts down cleanly on a
+  Windows x64 runner. It does not prove Raw Input quality on Aldo's mouse: the
+  runner has no physical mouse moving, so the helper was proven to *run and
+  serve*, not to *measure well*. The Diagnostics capture self-test
   still gates tier-1 confidence, exactly as before.
 - **The installer is unsigned.** SmartScreen will show "More info → Run
   anyway". `docs/INSTALL-WINDOWS.md` says so plainly rather than hiding it.
