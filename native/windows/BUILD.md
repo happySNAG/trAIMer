@@ -42,7 +42,7 @@ smoke check, not a substitute for the CI compile.
 ## Running
 
 ```bat
-aldo_capture_helper.exe --port 48765 --token <random-secret>
+aldo_capture_helper.exe --port 48765 --token <random-secret> [--parent-pid PID]
 ```
 
 - The token MUST be supplied and must match the token configured in the Aim Lab
@@ -50,6 +50,10 @@ aldo_capture_helper.exe --port 48765 --token <random-secret>
   consuming each other's stream.
 - The helper binds **127.0.0.1 only**. It never opens a firewall prompt and is
   unreachable from the network.
+- `--parent-pid` makes the helper watch the process that launched it and exit
+  when that process does. The desktop shell passes its own PID, so a helper
+  can never be orphaned holding the port if the shell is killed hard. Omit it
+  and the helper runs until stopped, as before.
 - Press Ctrl+C or close the console to stop it.
 
 ## What it does / does not do

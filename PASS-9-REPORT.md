@@ -221,6 +221,18 @@ cross-compiling with `zig cc -target x86_64-windows-gnu -O2 -Wall -Wextra
 -Wshadow` — clean, and the resulting PE32+ x86-64 binary passes the new
 release gate, which also still rejects the `.c` file.
 
+Fixing those exposed one more MSVC-only diagnostic: C4702, *unreachable code*
+at `WSACleanup()`. It was correct — the accept loop was `for (;;)` with no
+`break`, so the helper's own teardown could never run. Rather than delete the
+dead cleanup, the helper was given a real shutdown path: an optional
+`--parent-pid`, a watchdog thread waiting on the launching process's handle,
+and a `g_shuttingDown` flag both loops now test. The desktop shell passes its
+own PID. This is a genuine strengthening of requirement 12 rather than a
+warning silenced: the shell already stops the helper on quit, and this covers
+the case the shell cannot — being killed hard (Task Manager "End task", a
+crash), after which an orphaned helper would otherwise hold the loopback port
+and shadow the next launch.
+
 **The PowerShell-parse step had never parsed anything.** Its own error
 reporting line used `"$script:$(...)"`, which PowerShell reads as a
 scope-qualified variable reference, so `pwsh` failed to parse the step before

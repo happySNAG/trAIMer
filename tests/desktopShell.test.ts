@@ -136,8 +136,10 @@ describe("renderer isolation", () => {
 
 describe("native helper lifecycle", () => {
   it("spawns the helper with an argument array and never through a shell", () => {
-    expect(helperSource).toMatch(/spawn\(\s*this\.exePath,\s*\[/);
-    expect(helperSource).toMatch(/"--port",\s*String\(port\),\s*"--token",\s*this\.sessionToken/);
+    expect(helperSource).toMatch(/spawn\(this\.exePath, args,/);
+    expect(helperSource).toMatch(/const args = \[\s*"--port",\s*String\(port\),\s*"--token",\s*this\.sessionToken,/);
+    // Backstop against an orphaned helper if the shell is killed hard.
+    expect(helperSource).toMatch(/"--parent-pid",\s*String\(process\.pid\),/);
     expect(helperSource).toMatch(/shell:\s*false/);
     expect(helperSource).not.toMatch(/shell:\s*true/);
     expect(helperSource).toMatch(/windowsHide:\s*true/);

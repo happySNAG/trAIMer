@@ -175,7 +175,20 @@ export class CaptureHelper {
 
     // Argument ARRAY, no shell: the token can never be reinterpreted by a
     // command interpreter.
-    const child = spawn(this.exePath, ["--port", String(port), "--token", this.sessionToken], {
+    //
+    // --parent-pid lets the helper watch THIS process and exit on its own if
+    // the shell is killed hard (Task Manager, crash) rather than quitting
+    // cleanly. stop() below is the normal path; this is the backstop that
+    // makes an orphaned helper holding the loopback port impossible.
+    const args = [
+      "--port",
+      String(port),
+      "--token",
+      this.sessionToken,
+      "--parent-pid",
+      String(process.pid),
+    ];
+    const child = spawn(this.exePath, args, {
       windowsHide: true,
       stdio: ["ignore", "pipe", "pipe"],
       shell: false,

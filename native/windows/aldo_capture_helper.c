@@ -215,6 +215,24 @@ static SOCKET g_clientSocket = INVALID_SOCKET;
 static char   g_expectedToken[MAX_TOKEN_LEN] = { 0 };
 static volatile LONG g_clientAccepted = 0;
 
+/*
+ * Shutdown flag and parent-process watchdog.
+ *
+ * The desktop shell that spawns this helper stops it explicitly when the app
+ * quits. The watchdog covers the case the shell CANNOT cover: if the shell is
+ * killed hard (Task Manager "End task", a crash, a power-management kill), a
+ * helper left running would hold the loopback port and shadow the next
+ * launch. Waiting on the parent's process handle makes an orphaned helper
+ * impossible, and gives the accept loop a real exit — without one, the
+ * WSACleanup() at the end of main() was literally unreachable (MSVC C4702).
+ */
+static volatile LONG g_shuttingDown = 0;
+
+static int shutting_down(void)
+{
+    return InterlockedCompareExchange(&g_shuttingDown, 0, 0) != 0;
+}
+
 static int ws_send_all(SOCKET sock, const char *data, int len)
 {
     int sent = 0;
@@ -643,7 +661,8 @@ static int json_find_string(const char *json, const char *field,
 
 static void print_usage(void)
 {
-    printf("aldo_capture_helper [--port N] [--token TOKEN] [--version]\n");
+    printf("aldo_capture_helper [--port N] [--token TOKEN]\n");
+    printf("                    [--parent-pid PID] [--version]\n");
     printf("  Local-only Raw Input mouse telemetry for Aldo Aim Lab.\n");
     printf("  Binds 127.0.0.1 exclusively; serves one authenticated client.\n");
 }
@@ -663,10 +682,23 @@ static void print_version(void)
            HELPER_VERSION, PROTOCOL_VERSION, HELPER_ARCH);
 }
 
+/* Waits for the launching process to exit, then unblocks accept(). */
+static DWORD WINAPI parent_watch_thread(LPVOID param)
+{
+    HANDLE parent = (HANDLE)param;
+    WaitForSingleObject(parent, INFINITE);
+    InterlockedExchange(&g_shuttingDown, 1);
+    /* Closing the listener makes the blocking accept() return immediately. */
+    SOCKET listener = g_listenSocket;
+    if (listener != INVALID_SOCKET) closesocket(listener);
+    return 0;
+}
+
 int main(int argc, char **argv)
 {
     int port = DEFAULT_PORT;
     int haveToken = 0;
+    DWORD parentPid = 0;
 
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--version")) {
@@ -677,6 +709,8 @@ int main(int argc, char **argv)
         } else if (!strcmp(argv[i], "--token") && i + 1 < argc) {
             copy_bounded(g_expectedToken, sizeof(g_expectedToken), argv[++i]);
             haveToken = 1;
+        } else if (!strcmp(argv[i], "--parent-pid") && i + 1 < argc) {
+            parentPid = (DWORD)strtoul(argv[++i], NULL, 10);
         } else {
             print_usage();
             return 0;
@@ -773,8 +807,25 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    for (;;) {
+    if (parentPid != 0) {
+        HANDLE parent = OpenProcess(SYNCHRONIZE, FALSE, parentPid);
+        if (parent != NULL) {
+            HANDLE watcher = CreateThread(NULL, 0, parent_watch_thread, parent,
+                                          0, NULL);
+            if (watcher != NULL) {
+                CloseHandle(watcher);
+            } else {
+                CloseHandle(parent);
+            }
+        }
+    }
+
+    while (!shutting_down()) {
         SOCKET client = accept(g_listenSocket, NULL, NULL);
+        if (shutting_down()) {
+            if (client != INVALID_SOCKET) closesocket(client);
+            break;
+        }
         if (client == INVALID_SOCKET) continue;
 
         /* One client at a time. */
@@ -849,7 +900,7 @@ int main(int argc, char **argv)
 
         /* ---- streaming epoch: pump windows messages until disconnect ---- */
         MSG msg;
-        for (;;) {
+        while (!shutting_down()) {
             DWORD waitResult = MsgWaitForMultipleObjectsEx(
                 0, NULL, 200, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
 
@@ -908,6 +959,10 @@ int main(int argc, char **argv)
         fflush(stdout);
     }
 
+    if (g_listenSocket != INVALID_SOCKET) {
+        closesocket(g_listenSocket);
+        g_listenSocket = INVALID_SOCKET;
+    }
     WSACleanup();
     return 0;
 }
