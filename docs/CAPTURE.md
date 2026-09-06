@@ -27,6 +27,30 @@ events → 3. basic mouse events.** Rules enforced in
   fallback happens only BETWEEN trials,
 - mid-trial source mixing without invalidation throws.
 
+## Capture-entry contract (Pass 10)
+
+The session must never be able to sit in a state the player cannot leave:
+
+- a failed or unavailable Pointer Lock aborts the run with a named reason,
+  which is written to the audit trail (`capture-unavailable`), the checkpoint
+  phase log, and an on-arena diagnostic offering "Try again" / "Back to setup";
+- **End session works in every state**, including before the runner exists;
+- Pause while capture is being requested withdraws the request rather than
+  waiting for a trial boundary that will never arrive;
+- Esc cancels a pending request, and (via Chromium's own unlock) ends a running
+  session; losing the lock BETWEEN trials also ends the session honestly rather
+  than continuing with no capture;
+- the arena overlay is `pointer-events: none` — it is information, never a
+  shield — and the start click listens on the stage so it is seen wherever in
+  the arena it lands;
+- the run screen reports the capture path actually in use
+  (`app/src/captureTiers.ts`), including why native high-rate capture is not
+  carrying the session.
+
+Gates: `tests/captureEntry.test.ts`, `tests/browser/captureEntry.spec.ts`,
+`tests/uiContract.test.ts`, and `scripts/verify-arena-entry.mjs` (which drives
+the real Electron shell, and the installed application in CI).
+
 ## Session capture quality (Pass 4)
 
 Per-trial `computeInputQuality` reports remain, but confidence gating now
@@ -42,8 +66,24 @@ native client (never synthesized into recorded streams).
 
 ## PointerLockCaptureSource
 
-- Wraps `requestPointerLock()` on the canvas; resolves a promise on
-  `pointerlockchange`/`pointerlockerror`, with a hard timeout (default 5 s).
+- Wraps `requestPointerLock()` on the canvas. **`pointerlockchange` and
+  `pointerlockerror` are listened for on the DOCUMENT**, which is where the
+  Pointer Lock spec dispatches them — binding them to the canvas (as rc.3 did)
+  means they never fire and every request times out. Chromium ≥ 111 also
+  returns a Promise from `requestPointerLock()`; it is awaited for the refusal
+  reason and always handled, so a denial never surfaces as an unhandled
+  rejection.
+- `requestLock()` returns a STRUCTURED `LockOutcome`
+  (`acquired` | `denied` | `timeout` | `cancelled` | `unsupported` |
+  `source-stopped` | `released-before-start`), never a bare boolean, so the
+  runner can abort with a diagnostic and the UI can explain it. A hard timeout
+  (default 5 s) bounds every request.
+- `requestLock()` must be called SYNCHRONOUSLY from a user gesture: Chromium
+  requires user activation for a document's first lock. The arena click issues
+  it before any `await`, and the session runner's execution gate joins the same
+  in-flight request rather than issuing a second, gesture-less one.
+- `abortPendingLock()` settles a pending request immediately (Esc, Pause, End
+  session) so a cancellation never waits out the timeout.
 - `mousemove` handlers read `movementX/movementY`; events are timestamped with
   `performance.now()` **at handler time**, never frame time.
 - Button 0 down/up become press/release events; other buttons ignored;

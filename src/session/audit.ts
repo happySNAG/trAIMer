@@ -10,6 +10,8 @@ export const AUDIT_CATEGORIES = [
   "resumed",
   "session-resumed",
   "capture-source-changed",
+  /** The session could not obtain the input path it needs (Pass 10). */
+  "capture-unavailable",
   "boundary-expansion-proposed",
   "adaptive-allocation-decision",
   "extra-block-requested",

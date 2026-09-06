@@ -1,3 +1,4 @@
+import { LOCK_GRANTED } from "../src/capture/browserSource.ts";
 import { describe, expect, it } from "vitest";
 import { SessionRunner } from "../src/session/runner.ts";
 import type { SessionRunnerPorts } from "../src/session/types.ts";
@@ -71,7 +72,7 @@ function basePorts(): { ports: SessionRunnerPorts; backend: InMemoryBackend } {
     nowIso: () => new Date(0).toISOString(),
     store,
     execution: {
-      requestLock: async () => true,
+      requestLock: async () => LOCK_GRANTED,
       executeTrial: async (spec, round, repIndex): Promise<TrialRecord> => ({
         id: `trial-r${round}-${spec.sequenceNumber}` as never,
         sessionId: "session-x" as never,

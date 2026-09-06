@@ -112,4 +112,57 @@ describe("UI/engine contract (static audit of app/src)", () => {
     const api = readFileSync("src/history/api.ts", "utf8");
     expect(api).toContain("confidenceLabel");
   });
+
+  /**
+   * Pass 10. The arena overlay is information, never a shield. rc.3 shipped it
+   * at `inset: 0` over the canvas with the default `pointer-events: auto`, so
+   * it silently ate every "click to lock in" click on real Windows hardware.
+   * Only the explicit action row inside it may accept pointer events.
+   */
+  it("arena overlay cannot intercept pointer events", () => {
+    const css = readNormalised("app/styles.css");
+    const rule = /\.overlay-message\s*\{([^}]*)\}/.exec(css);
+    expect(rule, ".overlay-message rule missing").not.toBeNull();
+    expect(rule![1]).toContain("pointer-events: none");
+    const actions = /\.overlay-actions\s*\{([^}]*)\}/.exec(css);
+    expect(actions, ".overlay-actions rule missing").not.toBeNull();
+    expect(actions![1]).toContain("pointer-events: auto");
+  });
+
+  /**
+   * The click that starts a test must reach a listener that also sees clicks
+   * landing on the overlay, and it must request Pointer Lock inside the user
+   * gesture — Chromium refuses gesture-less requests.
+   */
+  it("the arena start click listens on the stage and locks inside the gesture", () => {
+    const main = sources.get("app/src/main.ts") ?? "";
+    expect(main).toContain('stageInner.addEventListener("click"');
+    expect(main).not.toContain('canvas.addEventListener("click"');
+    expect(main).toContain("c.requestCaptureFromUserGesture()");
+  });
+
+  /**
+   * The run screen reports the capture path it is ACTUALLY on. A hardcoded
+   * caption cannot tell the player that a ready native helper is sitting idle.
+   */
+  it("the capture caption is derived, never hardcoded in the view", () => {
+    const main = sources.get("app/src/main.ts") ?? "";
+    expect(main).toContain("reportCaptureTier");
+    const captionLiterals = main.match(/"browser capture · pointer lock"/g) ?? [];
+    // The only permitted literal is the degraded fallback when the report
+    // itself fails; the caption otherwise comes from captureTiers.ts.
+    expect(captionLiterals.length).toBeLessThanOrEqual(1);
+    const tiers = sources.get("app/src/captureTiers.ts") ?? "";
+    expect(tiers).toContain("decideCaptureTier");
+  });
+
+  /** Neither control may depend on a runner that does not exist yet. */
+  it("Pause and End session never forward blindly to a missing runner", () => {
+    const rc = sources.get("app/src/runController.ts") ?? "";
+    expect(rc).toContain("#cancelledBeforeStart");
+    expect(rc).toContain("abortPendingLock");
+    const main = sources.get("app/src/main.ts") ?? "";
+    // End session must have a path that works with no controller at all.
+    expect(main).toContain("if (!controller) {");
+  });
 });

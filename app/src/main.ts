@@ -1,5 +1,5 @@
 import { renderSetupView } from "./setupView.ts";
-import { loadSettings } from "./state.ts";
+import { loadSettings, type AppSettings } from "./state.ts";
 import { BrowserRunController, type RunControllerCallbacks } from "./runController.ts";
 import { renderResultsView } from "./resultsView.ts";
 import { renderDataView } from "./dataView.ts";
@@ -40,6 +40,11 @@ import { desktopBridge } from "./desktopBridge.ts";
 import { HistoryApi } from "../../src/history/api.ts";
 import type { Recommendation } from "../../src/domain/recommendation.ts";
 import type { SessionStateName } from "../../src/session/types.ts";
+import {
+  LOCK_FAILURE_GUIDANCE,
+  type LockOutcomeCode,
+} from "../../src/capture/browserSource.ts";
+import { reportCaptureTier } from "./captureTiers.ts";
 
 const view = (id: string): HTMLElement => {
   const node = document.getElementById(id);
@@ -367,10 +372,18 @@ async function renderResults(): Promise<void> {
 interface RunView {
   canvas: HTMLCanvasElement;
   overlay: HTMLElement;
-  showOverlay(iconName: IconName, title: string, body: string): void;
+  showOverlay(
+    iconName: IconName,
+    title: string,
+    body: string,
+    actions?: { label: string; onClick: () => void; danger?: boolean }[],
+  ): void;
   hideOverlay(): void;
+  /** Caption for the capture path this session actually runs on. */
+  setCaptureNote(caption: string, detail: string): void;
   setState(state: SessionStateName, label: string, tone: Tone, detail: string): void;
   setProgress(measured: number, upperBound: number | null): void;
+  /** Arena click handler (start / retry capture). Cleared once consumed. */
   setPendingStart(fn: () => void): void;
   /** Reflects the engine's paused/running state on the pause control. */
   setPaused(paused: boolean): void;
@@ -421,10 +434,13 @@ function buildRunView(): RunView {
   const overlayIcon = el("div", { class: "overlay-icon" });
   const overlayTitle = el("div", { class: "overlay-title" });
   const overlayBody = el("div", { class: "overlay-body" });
+  const overlayActions = el("div", { class: "overlay-actions" });
+  overlayActions.hidden = true;
   const overlay = el("div", { class: "overlay-message" }, [
     overlayIcon,
     overlayTitle,
     overlayBody,
+    overlayActions,
   ]);
   const stageInner = el("div", { class: "run-stage-inner" }, [canvas, overlay]);
   const stage = el("div", { class: "run-stage" }, [stageInner]);
@@ -441,7 +457,20 @@ function buildRunView(): RunView {
   const pauseButton = button("Pause", { icon: "pause", variant: "secondary" });
   let engingPaused = false;
   pauseButton.addEventListener("click", () => {
-    if (!controller) return;
+    if (!controller) {
+      // Still opening storage. Nothing has been captured, so the honest
+      // response is to leave rather than to sit on a dead button.
+      exitSessionChrome();
+      activate("setup");
+      return;
+    }
+    if (!controller.started) {
+      // Preparing: there is no trial boundary to pause at, so Pause withdraws
+      // the capture request and hands control back immediately.
+      controller.pause();
+      hintEl.textContent = "Capture request withdrawn — click the arena to start.";
+      return;
+    }
     if (engingPaused) {
       controller.resume();
       hintEl.textContent = "";
@@ -453,30 +482,59 @@ function buildRunView(): RunView {
   });
   const cancelButton = button("End session", { variant: "danger" });
   cancelButton.addEventListener("click", () => {
+    // End session must work in EVERY state, including before the controller
+    // exists. Its handler therefore never depends on a runner being present.
+    const started = controller?.started ?? false;
     void confirmDialog({
       title: "End this session?",
-      body: "Completed trials stay saved and the session can be reviewed, but the search will stop before a recommendation is reached.",
+      body: started
+        ? "Completed trials stay saved and the session can be reviewed, but the search will stop before a recommendation is reached."
+        : "Nothing has been measured yet, so nothing is lost. You will go back to session setup.",
       confirmLabel: "End session",
       danger: true,
     }).then((confirmed) => {
       if (!confirmed) return;
-      controller?.cancel();
-      hintEl.textContent = "Ending after this trial…";
+      if (!controller) {
+        exitSessionChrome();
+        activate("setup");
+        return;
+      }
+      controller.cancel();
+      hintEl.textContent = started
+        ? "Ending after this trial…"
+        : "Ending session…";
     });
   });
+  // The caption is filled in from the session's ACTUAL capture path once the
+  // controller reports it (app/src/captureTiers.ts) — never hardcoded.
   const captureNote = el("span", { class: "run-capture-note" });
-  captureNote.append(icon("mouse", 13), el("span", { text: "browser capture · pointer lock" }));
+  const captureNoteLabel = el("span", { text: "selecting capture path…" });
+  captureNote.append(icon("mouse", 13), captureNoteLabel);
+  // While the pointer is locked the arena owns the cursor, so these buttons
+  // cannot be reached with the mouse — Esc is the way out and the bar has to
+  // say so rather than leave the player clicking at an unreachable control.
+  const escHint = el("span", { class: "run-capture-note" });
+  escHint.append(el("kbd", { class: "kbd", text: "Esc" }), el("span", { text: "releases the mouse" }));
   const hintEl = el("span", { class: "run-capture-note", text: "" });
-  const controls = el("div", { class: "run-controls" }, [hintEl, pauseButton, cancelButton]);
+  const controls = el("div", { class: "run-controls" }, [hintEl, escHint, pauseButton, cancelButton]);
   const bottombar = el("div", { class: "run-bottombar" }, [progressWrap, captureNote, controls]);
 
   screen.append(topbar, stage, bottombar);
   views.run.append(screen);
 
+  // The click that starts the test listens on the STAGE, not the canvas: the
+  // overlay is a sibling of the canvas, so a canvas-only listener never sees a
+  // click aimed at the arena while any overlay text is showing. Combined with
+  // `pointer-events: none` on the overlay this makes "click the arena" work
+  // wherever inside the arena the player actually clicks.
+  //
+  // The handler is deliberately synchronous: it runs inside the user gesture
+  // so requestPointerLock() is issued with user activation still live.
   let pendingStart: (() => void) | null = null;
-  canvas.addEventListener("click", () => {
-    pendingStart?.();
+  stageInner.addEventListener("click", () => {
+    const fn = pendingStart;
     pendingStart = null;
+    fn?.();
   });
 
   // Measurement-safety side-effect guards: no accidental selection, drag
@@ -490,15 +548,33 @@ function buildRunView(): RunView {
   return {
     canvas,
     overlay,
-    showOverlay(iconName, title, body) {
+    showOverlay(iconName, title, body, actions) {
       overlay.hidden = false;
       clear(overlayIcon);
       overlayIcon.append(icon(iconName, 24));
       overlayTitle.textContent = title;
       overlayBody.textContent = body;
+      clear(overlayActions);
+      overlayActions.hidden = !actions || actions.length === 0;
+      for (const action of actions ?? []) {
+        const b = button(action.label, {
+          variant: action.danger ? "danger" : "primary",
+        });
+        b.addEventListener("click", (event) => {
+          // The stage-level start handler must not also fire for a click that
+          // was aimed at this button.
+          event.stopPropagation();
+          action.onClick();
+        });
+        overlayActions.append(b);
+      }
     },
     hideOverlay() {
       overlay.hidden = true;
+    },
+    setCaptureNote(caption, detail) {
+      captureNoteLabel.textContent = caption;
+      captureNote.title = detail;
     },
     setState(state, label, tone, detail) {
       screen.setAttribute("data-session-state", state);
@@ -530,8 +606,16 @@ function buildRunView(): RunView {
   };
 }
 
+/**
+ * Removed when the run screen goes away: leaving the Esc handler bound would
+ * make a later Escape cancel a session that is no longer on screen.
+ */
+let runScreenTeardown: (() => void) | null = null;
+
 function exitSessionChrome(): void {
   document.body.classList.remove("session-active");
+  runScreenTeardown?.();
+  runScreenTeardown = null;
 }
 
 /**
@@ -568,10 +652,13 @@ function makeCallbacks(run: RunView): RunControllerCallbacks {
       diagnosticLog.sessionTransition(previousState, state);
       previousState = state;
       if (state === "awaiting-lock") {
+        // Distinct from the pre-click "Click to lock in" prompt: the request
+        // is now in flight, and the player should be able to tell the two
+        // apart at a glance if it stalls.
         run.showOverlay(
           "crosshair",
-          "Click to lock in",
-          "Click the arena to capture your mouse. Press Esc at any time to stop — every completed trial is already saved.",
+          "Capturing your mouse…",
+          "Windows is handing the mouse to the arena. Press Esc to stop — every completed trial is already saved.",
         );
       } else if (state === "rest") {
         run.showOverlay(
@@ -602,7 +689,50 @@ function makeCallbacks(run: RunView): RunControllerCallbacks {
       }
       run.setProgress(lastTrialsAnalyzed.count, plannedTrialBound(controller));
     },
-    async onExperimentFinished(status) {
+    async onExperimentFinished(status, abortReason) {
+      // A session that never captured the mouse measured nothing: sending it
+      // to the results screen ("partial data was saved") would be a lie, and
+      // leaving it on the arena would be the trap. Explain what happened and
+      // offer the two things that always work.
+      if (status === "aborted" && abortReason && lastTrialsAnalyzed.count === 0) {
+        diagnosticLog.error(
+          "CAPTURE_UNAVAILABLE",
+          `${abortReason.code}: ${abortReason.detail}`,
+        );
+        if (abortReason.code === "cancelled") {
+          exitSessionChrome();
+          activate("setup");
+          return;
+        }
+        const guidance =
+          LOCK_FAILURE_GUIDANCE[
+            abortReason.code as Exclude<LockOutcomeCode, "acquired">
+          ] ?? abortReason.detail;
+        run.setState("aborted", "Capture failed", "danger", abortReason.code);
+        run.showOverlay(
+          "flag",
+          "Could not capture your mouse",
+          `${guidance} Nothing was recorded, and no settings were changed.`,
+          [
+            {
+              label: "Try again",
+              onClick: () => {
+                exitSessionChrome();
+                startSession(loadSettings());
+              },
+            },
+            {
+              label: "Back to setup",
+              danger: true,
+              onClick: () => {
+                exitSessionChrome();
+                activate("setup");
+              },
+            },
+          ],
+        );
+        return;
+      }
       run.showOverlay(
         status === "complete" ? "check" : "flag",
         status === "complete" ? "Session complete" : "Session ended",
@@ -671,79 +801,134 @@ function makeCallbacks(run: RunView): RunControllerCallbacks {
   };
 }
 
-renderSetupView(views.setup, {
-  onStart(settings) {
-    clear(views.run);
-    lastTrialsAnalyzed.count = 0; // per-session counter (progress + results)
-    const run = buildRunView();
-    activate("run");
-    run.showOverlay(
-      "crosshair",
-      "Click to lock in",
-      "Candidates are blinded during play. Click the arena to capture your mouse and begin.",
-    );
+/**
+ * Starts a live session on the run screen.
+ *
+ * The order here is load-bearing:
+ *
+ *  1. the arena shows "Preparing…" and accepts no start click until the
+ *     controller (and its capture source) exist — a click that arrives too
+ *     early cannot request Pointer Lock inside its own user gesture, and
+ *     Chromium refuses gesture-less requests;
+ *  2. the arena click then calls requestCaptureFromUserGesture()
+ *     SYNCHRONOUSLY, before any await, so the request carries user
+ *     activation;
+ *  3. start() joins that same in-flight request at its execution gate.
+ *
+ * Escape and both bottom-bar controls stay live throughout: no state on this
+ * screen may be a dead end.
+ */
+function startSession(settings: AppSettings): void {
+  clear(views.run);
+  lastTrialsAnalyzed.count = 0; // per-session counter (progress + results)
+  const run = buildRunView();
+  activate("run");
+  run.showOverlay(
+    "clock",
+    "Preparing the arena",
+    "Opening local storage and the capture path. This takes a moment.",
+  );
 
-    diagnosticLog.setCaptureMode(`browser ${settings.yExploration ? "+jointXY" : ""} seed=${settings.experimentSeed}`);
+  diagnosticLog.setCaptureMode(`browser ${settings.yExploration ? "+jointXY" : ""} seed=${settings.experimentSeed}`);
 
-    const e2e = testModeEnabled();
-    const created = BrowserRunController.create(
-      run.canvas,
-      settings,
-      makeCallbacks(run),
-      {
-        virtualLock: e2e,
-        ...(e2e ? { restBetweenCandidatesMs: 250 } : {}),
-      },
-    );
-    if (e2e) {
-      installTestHooks(created, {
-        // Result-state torture automation: render through the exact
-        // production results path (same view + navigation as a real finish).
-        renderResultsForTesting: ({ recommendation, finalResult, trialsAnalyzed }) => {
-          lastRecommendation = recommendation;
-          lastFinalResult = finalResult;
-          lastTrialsAnalyzed.count = trialsAnalyzed;
-          exitSessionChrome();
-          renderResultsView(views.results, {
-            recommendation,
-            trialsAnalyzed,
-            finalResult,
-            onStartTest: () => activate("setup"),
-          });
-          activate("results");
-        },
-      });
-    }
-    void created
-      .then((c) => {
-        controller = c;
-        run.setProgress(0, plannedTrialBound(c));
-        run.setPendingStart(() => {
-          void c.start().catch((err) => {
-            // A rejected run() (e.g. storage died mid-session) must never
-            // leave the app trapped behind the session chrome.
-            diagnosticLog.error("SESSION_RUN_FAILED", String(err));
-            exitSessionChrome();
-            renderSessionFailure(views.results, err);
-            activate("results");
-          });
-        });
-        // E2E adapter: no real pointer-lock gesture is possible; start directly
-        // (unless the spec asked for a hooks-only controller).
-        if (e2e && !new URLSearchParams(window.location.search).has("nostart")) {
-          void c.start().catch((err) => {
-            diagnosticLog.error("SESSION_RUN_FAILED", String(err));
-          });
-        }
-      })
-      .catch((err) => {
-        // create() opens IndexedDB; in private mode / blocked storage it
-        // rejects and the arena would otherwise sit dead with no explanation.
-        diagnosticLog.error("CONTROLLER_CREATE_FAILED", String(err));
+  const e2e = testModeEnabled();
+  const created = BrowserRunController.create(
+    run.canvas,
+    settings,
+    makeCallbacks(run),
+    {
+      virtualLock: e2e,
+      ...(e2e ? { restBetweenCandidatesMs: 250 } : {}),
+    },
+  );
+  if (e2e) {
+    installTestHooks(created, {
+      // Result-state torture automation: render through the exact
+      // production results path (same view + navigation as a real finish).
+      renderResultsForTesting: ({ recommendation, finalResult, trialsAnalyzed }) => {
+        lastRecommendation = recommendation;
+        lastFinalResult = finalResult;
+        lastTrialsAnalyzed.count = trialsAnalyzed;
         exitSessionChrome();
-        renderStorageFailure(views.run, err);
+        renderResultsView(views.results, {
+          recommendation,
+          trialsAnalyzed,
+          finalResult,
+          onStartTest: () => activate("setup"),
+        });
+        activate("results");
+      },
+    });
+  }
+
+  // Esc is the universal escape hatch. While the pointer is locked the
+  // browser consumes Esc itself (which unlocks, and the capture source turns
+  // that into a fatal interruption). While a lock is merely PENDING the key
+  // reaches us, and it must cancel rather than leave the request hanging.
+  const onKeyDown = (event: KeyboardEvent): void => {
+    if (event.key !== "Escape") return;
+    if (!controller || controller.started) return;
+    event.preventDefault();
+    diagnosticLog.log("info", "capture-cancelled", { via: "escape" });
+    controller.cancel();
+  };
+  document.addEventListener("keydown", onKeyDown);
+  runScreenTeardown = () => document.removeEventListener("keydown", onKeyDown);
+
+  void created
+    .then((c) => {
+      controller = c;
+      run.setProgress(0, plannedTrialBound(c));
+      run.showOverlay(
+        "crosshair",
+        "Click to lock in",
+        "Candidates are blinded during play. Click the arena to capture your mouse and begin. Press Esc at any time to stop.",
+      );
+      void reportCaptureTier(c.store, run.canvas)
+        .then((report) => {
+          run.setCaptureNote(report.caption, report.detail);
+          diagnosticLog.log("info", "capture-tier", {
+            activeTier: report.activeTier,
+            activeKind: report.activeKind,
+            helperState: report.native.helperState,
+            nativeRejectedBecause: report.native.rejectedBecause ?? "",
+          });
+        })
+        .catch(() => {
+          // The caption is informational; never block a session on it.
+          run.setCaptureNote("browser capture · pointer lock", "capture path report unavailable");
+        });
+      run.setPendingStart(() => {
+        // SYNCHRONOUS: inside the click's user activation.
+        void c.requestCaptureFromUserGesture();
+        void c.start().catch((err) => {
+          // A rejected run() (e.g. storage died mid-session) must never
+          // leave the app trapped behind the session chrome.
+          diagnosticLog.error("SESSION_RUN_FAILED", String(err));
+          exitSessionChrome();
+          renderSessionFailure(views.results, err);
+          activate("results");
+        });
       });
-  },
+      // E2E adapter: no real pointer-lock gesture is possible; start directly
+      // (unless the spec asked for a hooks-only controller).
+      if (e2e && !new URLSearchParams(window.location.search).has("nostart")) {
+        void c.start().catch((err) => {
+          diagnosticLog.error("SESSION_RUN_FAILED", String(err));
+        });
+      }
+    })
+    .catch((err) => {
+      // create() opens IndexedDB; in private mode / blocked storage it
+      // rejects and the arena would otherwise sit dead with no explanation.
+      diagnosticLog.error("CONTROLLER_CREATE_FAILED", String(err));
+      exitSessionChrome();
+      renderStorageFailure(views.run, err);
+    });
+}
+
+renderSetupView(views.setup, {
+  onStart: startSession,
 });
 
 // ---- shared resume list mount (contract: renderResumeList seam) ----

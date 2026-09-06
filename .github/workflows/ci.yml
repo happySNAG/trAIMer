@@ -211,6 +211,14 @@ jobs:
         run: npm run build
       - name: build desktop shell (Electron main + preload)
         run: npm run build:desktop
+      - name: RELEASE GATE - the arena can actually be started (dev tree)
+        # rc.3 passed every other gate here and still could not run one trial
+        # on real hardware: the overlay swallowed the arena click and pointer
+        # lock events were bound to the wrong target. The automated session
+        # suite missed it because ?e2e=1 grants the lock virtually and starts
+        # without any click. This gate clicks the arena for real.
+        shell: bash
+        run: node scripts/verify-arena-entry.mjs
       - name: RELEASE GATE - required frontend assets present
         shell: bash
         run: node scripts/verify-windows-artifacts.mjs --frontend dist-app
@@ -294,6 +302,18 @@ jobs:
           $stragglers = Get-Process -Name "Aldo Aim Lab", "aldo_capture_helper" -ErrorAction SilentlyContinue
           if ($stragglers) { throw "processes survived shutdown: $($stragglers.Name -join ', ')" }
           Write-Host "startup + clean shutdown verified"
+
+      - name: RELEASE GATE - the INSTALLED app can start a test
+        shell: pwsh
+        run: |
+          $exe = "C:\aldo-install-test\Aldo Aim Lab.exe"
+          Get-Process -Name "Aldo Aim Lab" -ErrorAction SilentlyContinue | Stop-Process -Force
+          Get-Process -Name "aldo_capture_helper" -ErrorAction SilentlyContinue | Stop-Process -Force
+          Start-Sleep -Seconds 2
+          node scripts/verify-arena-entry.mjs --exe $exe
+          if ($LASTEXITCODE -ne 0) { throw "arena entry gate failed on the installed app" }
+          Get-Process -Name "Aldo Aim Lab" -ErrorAction SilentlyContinue | Stop-Process -Force
+          Get-Process -Name "aldo_capture_helper" -ErrorAction SilentlyContinue | Stop-Process -Force
 
       - name: publish installer with checksum
         shell: pwsh

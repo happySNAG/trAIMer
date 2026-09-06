@@ -1,3 +1,7 @@
+import {
+  LOCK_GRANTED,
+  type LockOutcome,
+} from "../src/capture/browserSource.ts";
 import { afterAll, describe, expect, it } from "vitest";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -39,8 +43,10 @@ class ScriptedExecutionPort implements TrialExecutionPort {
     this.outcomesByCandidate.set(candidateId, outcome);
   }
 
-  async requestLock(): Promise<boolean> {
-    return this.lockResult;
+  async requestLock(): Promise<LockOutcome> {
+    return this.lockResult
+      ? LOCK_GRANTED
+      : { granted: false, reasonCode: "denied", detail: "scripted denial" };
   }
 
   async releaseCapture(): Promise<void> {}

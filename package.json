@@ -1,6 +1,6 @@
 {
   "name": "aldo-aim-lab",
-  "version": "1.0.0-rc.3",
+  "version": "1.0.0-rc.4",
   "private": true,
   "type": "module",
   "description": "Fortnite-focused aim measurement and sensitivity optimization engine (headless core).",
@@ -22,6 +22,7 @@
     "package:dry-run": "npm run build && node scripts/package-release.mjs --allow-placeholder-helper",
     "verify:release": "node scripts/verify-release.mjs",
     "verify:windows-artifacts": "node scripts/verify-windows-artifacts.mjs",
+    "verify:arena-entry": "node scripts/verify-arena-entry.mjs",
     "audit:no-telemetry": "node scripts/audit-no-telemetry.mjs",
     "demo:help": "tsx src/demo/cli.ts --help",
     "bench": "tsx benchmarks/bench.ts",

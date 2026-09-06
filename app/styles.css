@@ -1446,7 +1446,14 @@ pre.json {
   display: none;
 }
 
+/*
+ * The arena overlay is INFORMATION, never a shield. It sits over the canvas
+ * at inset:0, so with the default `pointer-events: auto` it silently ate
+ * every "click to lock in" click — the rc.3 Windows hardware failure. Only
+ * the explicit action row inside it may take pointer events.
+ */
 .overlay-message {
+  pointer-events: none;
   position: absolute;
   inset: 0;
   z-index: 5;
@@ -1475,6 +1482,15 @@ pre.json {
   line-height: 1.6;
 }
 
+.overlay-actions {
+  pointer-events: auto;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: center;
+  margin-top: 6px;
+}
+
 .overlay-icon {
   color: var(--accent);
   display: grid;
@@ -1485,6 +1501,19 @@ pre.json {
   border: 1px solid var(--line-2);
   background: var(--bg-2);
   margin-bottom: 4px;
+}
+
+/* Keyboard-key chip used in the run bar's "Esc releases the mouse" hint. */
+.kbd {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  line-height: 1;
+  padding: 3px 5px;
+  border: 1px solid var(--line-2);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--bg-2);
+  color: var(--text-2);
 }
 
 .run-bottombar {

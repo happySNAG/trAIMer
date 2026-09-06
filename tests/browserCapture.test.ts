@@ -41,7 +41,10 @@ function makeHarness() {
   });
   documentLike.exitPointerLock = () => {
     element.pointerLockElementValue = null;
-    element.emit("pointerlockchange", {});
+    // Pointer Lock dispatches lock events at the DOCUMENT, never at the
+    // element. The harness models that faithfully: a fake that emitted them
+    // on the element is exactly what let the rc.3 bug ship.
+    docLike.emit("pointerlockchange", {});
   };
   let hiddenFlag = false;
   Object.defineProperty(documentLike, "hidden", {
@@ -91,7 +94,7 @@ describe("pointer lock capture source", () => {
   it("emits clamped pointer samples and button presses while locked", () => {
     const harness = makeHarness();
     harness.element.pointerLockElementValue = {};
-    harness.element.emit("pointerlockchange", {});
+    harness.docLike.emit("pointerlockchange", {});
 
     harness.element.emit("mousemove", { movementX: 12, movementY: -5 });
     harness.element.emit("mousedown", { button: 0 });
@@ -116,11 +119,11 @@ describe("pointer lock capture source", () => {
   it("emits a fatal lock-change event on unexpected lock loss", async () => {
     const harness = makeHarness();
     harness.element.pointerLockElementValue = {};
-    harness.element.emit("pointerlockchange", {});
+    harness.docLike.emit("pointerlockchange", {});
     harness.events.length = 0;
 
     harness.element.pointerLockElementValue = null;
-    harness.element.emit("pointerlockchange", {});
+    harness.docLike.emit("pointerlockchange", {});
 
     const lockEvents = harness.events.filter((e) => e.kind === "lock-change");
     expect(lockEvents.length).toBe(1);
@@ -128,32 +131,41 @@ describe("pointer lock capture source", () => {
     void harness;
   });
 
-  it("resolves requestLock(false) on pointerlockerror denial", async () => {
+  it("reports a denial with reasonCode on pointerlockerror", async () => {
     const harness = makeHarness();
     const promise = harness.source.requestLock();
-    harness.element.emit("pointerlockerror", {});
-    await expect(promise).resolves.toBe(false);
+    harness.docLike.emit("pointerlockerror", {});
+    await expect(promise).resolves.toMatchObject({
+      granted: false,
+      reasonCode: "denied",
+    });
   });
 
-  it("resolves requestLock(true) on successful acquisition", async () => {
+  it("reports a grant on successful acquisition", async () => {
     const harness = makeHarness();
     const promise = harness.source.requestLock();
     harness.element.pointerLockElementValue = {};
-    harness.element.emit("pointerlockchange", {});
-    await expect(promise).resolves.toBe(true);
+    harness.docLike.emit("pointerlockchange", {});
+    await expect(promise).resolves.toMatchObject({
+      granted: true,
+      reasonCode: "acquired",
+    });
   });
 
-  it("resolves requestLock(false) when the source is stopped before grant", async () => {
+  it("reports source-stopped when the source is torn down before a grant", async () => {
     const harness = makeHarness();
     const promise = harness.source.requestLock();
     harness.source.stop();
-    await expect(promise).resolves.toBe(false);
+    await expect(promise).resolves.toMatchObject({
+      granted: false,
+      reasonCode: "source-stopped",
+    });
   });
 
   it("records tab-hidden and window-blur focus interruptions", () => {
     const harness = makeHarness();
     harness.element.pointerLockElementValue = {};
-    harness.element.emit("pointerlockchange", {});
+    harness.docLike.emit("pointerlockchange", {});
 
     harness.setHidden(true);
     harness.docLike.emit("visibilitychange", {});

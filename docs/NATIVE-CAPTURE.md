@@ -41,6 +41,28 @@ TrialRecorder → validation → metrics → optimizer   (unchanged pipeline)
 | reconnects | helper stays resident; client exponential backoff; epoch resets on welcome |
 | cross-talk protection | one accepted sessionToken at a time; second client rejected |
 
+## Why live sessions still measure through Pointer Lock (Pass 10)
+
+The run screen reports `browser capture · pointer lock` on a Windows machine
+whose helper is `ready`. That is accurate, and it is not the whole story:
+
+- the live run path builds a `PointerLockCaptureSource` directly; the
+  negotiator and `NativeTransportCaptureSource` are wired to the Diagnostics
+  probe only, so tier 1 was never even evaluated for a session;
+- `app/src/captureTiers.ts` now evaluates it for real and prints the reason
+  tier 1 is not carrying the session (no shell / unsupported platform / helper
+  not ready / helper unvalidated / clock origins unaligned);
+- the remaining blocker is **clock-origin alignment**. The helper timestamps
+  frames in milliseconds since its own start (QueryPerformanceCounter origin);
+  the recorder compares sample times against target spawn times taken from the
+  renderer's `performance.now()` origin. Feeding one clock's samples into the
+  other's timeline shifts every reaction time by an unknown constant, silently.
+  Aligning the origins is a measurement change, not a UI change.
+
+Even once native frames carry the samples, Pointer Lock stays mandatory: the
+helper reads Raw Input globally, so without a lock the OS cursor would leave
+the arena and click other windows.
+
 ## Diagnostics mode
 
 Diagnostics tab → "Run native capture probe". Reports requested vs observed

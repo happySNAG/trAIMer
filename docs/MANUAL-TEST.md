@@ -61,9 +61,15 @@ attach it to the report.
 
 | # | Check | Expected | Gate | Evidence |
 |---|-------|----------|------|----------|
-| E1 | Start a short session; click arena | OS cursor disappears; reticle appears; HUD counts trials | HARD | |
+| E1 | Start a short session; click anywhere in the arena | OS cursor disappears; reticle appears; state chip goes Live; HUD counts trials | HARD | |
+| E1a | Click the arena ON the overlay text itself | Same as E1 — the overlay never blocks the start click (rc.3 regression) | HARD | |
+| E1b | While the arena still says "Click to lock in", press **End session** | Confirmation appears; confirming returns to Session setup | HARD | |
+| E1c | While the arena still says "Click to lock in", press **Esc** | Returns to Session setup; nothing recorded | HARD | |
+| E1d | While the arena still says "Click to lock in", press **Pause** | Bar says the capture request was withdrawn; arena still startable | | |
+| E1e | Read the capture caption in the bottom bar | Names the path in use; hovering shows why native high-rate capture is or is not carrying the session | | |
 | E2 | Move mouse slowly then fast | Reticle tracks raw movement; targets clickable; hit ring feedback only | | |
 | E3 | Press Esc mid-trial | Session ends visibly ("Session ended"), completed trials saved, no silent continuation | HARD | |
+| E3a | Press Esc during a rest / between trials | Session ends visibly; it never continues with the mouse released | HARD | |
 | E4 | Alt+Tab mid-session, return | Trial invalidated (POINTER_LOCK_LOST/focus), session aborts honestly — restart session afterwards | HARD | |
 | E5 | Resize/window-drag during a trial | Trial flagged RESIZE_DURING_TRIAL (or aborted); never silently kept | | |
 | E6 | Unplug/replug the mouse between trials | Next trials still capture; if not, preflight/diagnostics says so | | |

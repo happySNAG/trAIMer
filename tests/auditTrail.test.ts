@@ -1,3 +1,4 @@
+import { LOCK_GRANTED } from "../src/capture/browserSource.ts";
 import { describe, expect, it } from "vitest";
 import {
   SessionRunner,
@@ -17,7 +18,7 @@ import { equalXy } from "../src/domain/settings.ts";
 class QuickPort implements TrialExecutionPort {
   constructor(private clock: ManualClock) {}
   async requestLock() {
-    return true;
+    return LOCK_GRANTED;
   }
   async releaseCapture() {}
   async executeTrial(spec: TrialPlanSpec, _round: number, repIndex: number | null): Promise<TrialRecord> {

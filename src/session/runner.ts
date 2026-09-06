@@ -1,3 +1,4 @@
+import type { LockOutcome } from "../capture/browserSource.ts";
 import type { ExperimentDefinition } from "../domain/experiment.ts";
 import type { SessionId } from "../domain/ids.ts";
 import { makeSessionId } from "../domain/ids.ts";
@@ -27,6 +28,20 @@ import {
 import { APP_VERSION, ENGINE_VERSION, OPTIMIZER_VERSION_V4 } from "../version.ts";
 
 const SEQUENCE_KEY = (round: number, seq: number): string => `${round}:${seq}`;
+
+/** Machine-readable reason a session ended without reaching a recommendation. */
+export interface SessionAbortReason {
+  code: string;
+  detail: string;
+}
+
+export interface SessionRunOutcome {
+  status: "complete" | "aborted";
+  trials: TrialRecord[];
+  auditTrail: readonly AuditEntry[];
+  /** Present only when the run aborted for a reason the UI must explain. */
+  abortReason?: SessionAbortReason;
+}
 
 export class SessionRunner {
   readonly #definition: ExperimentDefinition;
@@ -149,11 +164,7 @@ export class SessionRunner {
     this.#ports.onStateChange?.(next, detail);
   }
 
-  async run(): Promise<{
-    status: "complete" | "aborted";
-    trials: TrialRecord[];
-    auditTrail: readonly AuditEntry[];
-  }> {
+  async run(): Promise<SessionRunOutcome> {
     if (this.#state !== "idle" && this.#state !== "setup") {
       throw new Error("runner already used");
     }
@@ -175,9 +186,19 @@ export class SessionRunner {
     });
     await this.#persistCheckpoint(this.#resumedFrom ? "running" : "running");
 
-    const locked = await this.#executionGate();
-    if (!locked) {
-      return this.#abortRun("pointer lock denied");
+    const lock = await this.#executionGate();
+    if (!lock.granted) {
+      // Fail closed, but never silently: the reason travels into the audit
+      // trail, the checkpoint phase log, and the returned abortReason so the
+      // UI can show the player something actionable.
+      this.#audit.append(this.#ports.nowIso(), "capture-unavailable", {
+        reasonCode: lock.reasonCode,
+        detail: lock.detail,
+      });
+      return this.#abortRun(`pointer lock ${lock.reasonCode}: ${lock.detail}`, {
+        code: lock.reasonCode,
+        detail: lock.detail,
+      });
     }
     this.#setState("candidate-transition", "lock acquired");
 
@@ -233,9 +254,26 @@ export class SessionRunner {
     return { status: "complete", trials: this.#allTrials, auditTrail: this.auditEntries() };
   }
 
-  async #executionGate(): Promise<boolean> {
+  async #executionGate(): Promise<LockOutcome> {
+    // A cancel that arrived during setup must be honoured before the player
+    // is asked for the mouse at all.
+    if (this.#cancelRequested) {
+      return {
+        granted: false,
+        reasonCode: "cancelled",
+        detail: "the session was ended before capture was requested",
+      };
+    }
     this.#setState("awaiting-lock");
-    return this.#ports.execution.requestLock();
+    const outcome = await this.#ports.execution.requestLock();
+    if (this.#cancelRequested) {
+      return {
+        granted: false,
+        reasonCode: "cancelled",
+        detail: "the session was ended while capture was being requested",
+      };
+    }
+    return outcome;
   }
 
   async #runPlan(plan: readonly TrialPlanSpec[], round: number): Promise<void> {
@@ -438,13 +476,21 @@ export class SessionRunner {
     this.#ports.onStateChange?.(state);
   }
 
-  async #abortRun(reason: string): Promise<{ status: "aborted"; trials: TrialRecord[]; auditTrail: readonly AuditEntry[] }> {
+  async #abortRun(
+    reason: string,
+    abortReason?: SessionAbortReason,
+  ): Promise<SessionRunOutcome> {
     this.#cancelRequested = true;
     this.#forceState("aborted");
     this.#phaseLog.push({ state: "aborted-detail", tIso: this.#ports.nowIso(), detail: reason });
     await this.#persistCheckpoint("aborted");
     await this.#ports.execution.releaseCapture().catch(() => undefined);
-    return { status: "aborted", trials: this.#allTrials, auditTrail: this.auditEntries() };
+    return {
+      status: "aborted",
+      trials: this.#allTrials,
+      auditTrail: this.auditEntries(),
+      ...(abortReason ? { abortReason } : {}),
+    };
   }
 
   async #persistCheckpoint(status: "running" | "complete" | "aborted"): Promise<void> {

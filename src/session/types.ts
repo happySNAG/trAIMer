@@ -1,3 +1,4 @@
+import type { LockOutcome } from "../capture/browserSource.ts";
 import type { MonotonicClock } from "../capture/clock.ts";
 import type { CaptureSourceMetadata } from "../capture/negotiation.ts";
 import type { TrialRecord } from "../domain/trial.ts";
@@ -10,7 +11,12 @@ export interface PlannedTrial {
 }
 
 export interface TrialExecutionPort {
-  requestLock(): Promise<boolean>;
+  /**
+   * Acquires the input path the session needs. Returns a STRUCTURED outcome:
+   * a refusal must always name its reason so the runner can abort with a
+   * diagnostic instead of a bare "denied".
+   */
+  requestLock(): Promise<LockOutcome>;
   executeTrial(
     spec: TrialPlanSpec,
     round: number,

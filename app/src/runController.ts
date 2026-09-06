@@ -1,11 +1,16 @@
 import { SystemMonotonicClock } from "../../src/capture/clock.ts";
 import {
+  LOCK_GRANTED,
   PointerLockCaptureSource,
   type BrowserDocumentLike,
   type DomEventTargetLike,
+  type LockOutcome,
   type LockRequestableElement,
 } from "../../src/capture/browserSource.ts";
-import type { CaptureEvent } from "../../src/capture/events.ts";
+import {
+  POINTER_LOCK_LOSS_REASON,
+  type CaptureEvent,
+} from "../../src/capture/events.ts";
 import { ScenarioDirector } from "../../src/scenarios/director.ts";
 import {
   createInstanceRng,
@@ -17,7 +22,7 @@ import { buildExperimentDefinition, type TrialPlanSpec } from "../../src/experim
 import { LocalJsonStore } from "../../src/persistence/store.ts";
 import { IndexedDbBackend } from "../../src/persistence/backends.ts";
 import { openAimLabDb } from "./idb.ts";
-import { SessionRunner } from "../../src/session/runner.ts";
+import { SessionRunner, type SessionRunOutcome } from "../../src/session/runner.ts";
 import type { SessionStateName } from "../../src/session/types.ts";
 import { makeExperimentId, makeSessionId, makeTrialId } from "../../src/domain/ids.ts";
 import type { AppSettings } from "./state.ts";
@@ -42,7 +47,10 @@ const SCENARIO_INSTRUCTIONS: Record<string, string> = {
 export interface RunControllerCallbacks {
   onHud(state: SessionStateName, detail: string): void;
   onTrialPersisted(trial: TrialRecord): void;
-  onExperimentFinished(status: "complete" | "aborted"): void;
+  onExperimentFinished(
+    status: "complete" | "aborted",
+    abortReason?: { code: string; detail: string },
+  ): void;
 }
 
 type DirectorRecorder = InstanceType<typeof ScenarioDirector>["recorder"];
@@ -75,6 +83,14 @@ export class BrowserRunController {
   #capture: PointerLockCaptureSource | null = null;
   #store: LocalJsonStore | null = null;
   #runner: SessionRunner | null = null;
+  /**
+   * A cancel can arrive BEFORE the runner exists (End session while the arena
+   * still says "Click to lock in"). Without this flag the request landed on a
+   * null runner and did nothing at all — which is exactly how rc.3 trapped a
+   * player in the preparing state.
+   */
+  #cancelledBeforeStart = false;
+  #started = false;
   #active: ActiveTrial | null = null;
   #rafHandle: number | null = null;
   #fatalInterruptionSeen = false;
@@ -129,6 +145,17 @@ export class BrowserRunController {
     const controller = new BrowserRunController(canvas, settings, callbacks, options);
     const backend = new IndexedDbBackend(await openAimLabDb());
     controller.#store = new LocalJsonStore(backend);
+    // The capture source exists BEFORE start(): the arena click must be able
+    // to call requestPointerLock() synchronously inside the user gesture, and
+    // start() does async storage work before it reaches its execution gate.
+    const capture = new PointerLockCaptureSource({
+      element: canvas as unknown as LockRequestableElement,
+      document: window.document as unknown as BrowserDocumentLike,
+      window: window as unknown as DomEventTargetLike,
+      viewportProvider: () => ({ ...LOGICAL_VIEWPORT }),
+    });
+    capture.start({ onEvent: (event) => controller.#handleCaptureEvent(event) });
+    controller.#capture = capture;
     return controller;
   }
 
@@ -136,15 +163,49 @@ export class BrowserRunController {
     return this.#definition;
   }
 
-  async start(): Promise<{ status: "complete" | "aborted"; trials: TrialRecord[] }> {
-    const capture = new PointerLockCaptureSource({
-      element: this.#canvas as unknown as LockRequestableElement,
-      document: window.document as unknown as BrowserDocumentLike,
-      window: window as unknown as DomEventTargetLike,
-      viewportProvider: () => ({ ...LOGICAL_VIEWPORT }),
-    });
-    capture.start({ onEvent: (event) => this.#handleCaptureEvent(event) });
-    this.#capture = capture;
+  /** Local store handle (used to read the persisted capture self-test). */
+  get store(): LocalJsonStore | null {
+    return this.#store;
+  }
+
+  /** Metadata for the capture path this session actually runs on. */
+  get captureDescriptor(): { kind: string; description: string } {
+    return this.#capture?.descriptor ?? {
+      kind: "unavailable",
+      description: "no capture source",
+    };
+  }
+
+  /** The last settled pointer-lock outcome (the UI's failure diagnostic). */
+  get lastLockOutcome(): LockOutcome | null {
+    return this.#capture?.lastLockOutcome ?? null;
+  }
+
+  /**
+   * Starts acquiring the mouse. MUST be called synchronously from the arena
+   * click handler: Chromium requires user activation for the first Pointer
+   * Lock of a document, so issuing the request after any `await` is what turns
+   * a legitimate click into a silent refusal.
+   *
+   * start() joins this same request through the capture source rather than
+   * issuing a second, gesture-less one.
+   */
+  requestCaptureFromUserGesture(): Promise<LockOutcome> {
+    if (this.#virtualLock) return Promise.resolve(LOCK_GRANTED);
+    if (!this.#capture) {
+      return Promise.resolve({
+        granted: false,
+        reasonCode: "unsupported",
+        detail: "capture source was not initialised",
+      });
+    }
+    return this.#capture.requestLock();
+  }
+
+  async start(): Promise<SessionRunOutcome> {
+    const capture = this.#capture;
+    if (!capture) throw new Error("capture source unavailable");
+    this.#started = true;
 
     if (!this.#store) throw new Error("store unavailable");
     this.#sessionId = makeSessionId(`live-${Date.now()}`);
@@ -155,8 +216,20 @@ export class BrowserRunController {
       nowIso: () => new Date().toISOString(),
       store: this.#store,
       execution: {
-        requestLock: () =>
-          this.#virtualLock ? Promise.resolve(true) : capture.requestLock(),
+        requestLock: async () => {
+          if (this.#virtualLock) return LOCK_GRANTED;
+          const outcome = await capture.requestLock();
+          // Granted, but gone again already (Esc during setup, focus loss):
+          // the session must NOT enter running on a lock it no longer holds.
+          if (outcome.granted && !capture.isLocked) {
+            return {
+              granted: false,
+              reasonCode: "released-before-start" as const,
+              detail: "the mouse was released before the first trial started",
+            };
+          }
+          return outcome;
+        },
         executeTrial: (spec, round, repIndex) =>
           this.#executeTrial(spec, round, repIndex),
         releaseCapture: async () => {
@@ -173,6 +246,9 @@ export class BrowserRunController {
       },
     });
     this.#runner = runner;
+    // A cancel that landed while create()/the click were still in flight must
+    // be honoured by the runner rather than lost.
+    if (this.#cancelledBeforeStart) runner.cancel();
 
     const outcome = await runner.run();
     capture.stop();
@@ -235,7 +311,10 @@ export class BrowserRunController {
       this.#humanSessionPersistFailed = true;
     }
 
-    this.#callbacks.onExperimentFinished(outcome.status);
+    this.#callbacks.onExperimentFinished(
+      outcome.status,
+      outcome.abortReason,
+    );
     return outcome;
   }
 
@@ -245,16 +324,48 @@ export class BrowserRunController {
     return this.#humanSessionPersistFailed;
   }
 
+  /**
+   * Pause. While capture is still being requested there is no trial boundary
+   * to pause at, so the honest action is to withdraw the capture request:
+   * control returns to the player immediately instead of the button appearing
+   * dead. Resume re-arms the arena for a fresh click.
+   */
   pause(): void {
     this.#runner?.pause();
+    if (this.#capture?.lockPending || (!this.#started && !this.#cancelledBeforeStart)) {
+      this.#capture?.abortPendingLock("paused while capture was being requested");
+    }
   }
 
   resume(): void {
     this.#runner?.resume();
   }
 
+  /**
+   * Ends the session. This MUST work in every state, including before the
+   * runner exists — "End session" that silently does nothing is the trap this
+   * whole path is meant to make impossible.
+   */
   cancel(): void {
+    this.#cancelledBeforeStart = true;
     this.#runner?.cancel();
+    // Settle any in-flight lock request immediately so nothing waits out the
+    // timeout, and give the mouse back if it was already captured.
+    this.#capture?.abortPendingLock("ended by the player");
+    if (!this.#started) {
+      // No runner will ever report a finish for this session: report it here
+      // so the UI always leaves the arena.
+      this.#capture?.stop();
+      this.#callbacks.onExperimentFinished("aborted", {
+        code: "cancelled",
+        detail: "the session was ended before the first trial started",
+      });
+    }
+  }
+
+  /** True once start() has been entered (a runner exists or is being built). */
+  get started(): boolean {
+    return this.#started;
   }
 
   /** E2E adapter seam: feed a capture event through the production recorder. */
@@ -375,7 +486,27 @@ export class BrowserRunController {
 
   #handleCaptureEvent(event: CaptureEvent): void {
     const active = this.#active;
-    if (!active) return;
+    if (!active) {
+      // Losing the mouse BETWEEN trials has no trial to invalidate, but the
+      // session cannot simply carry on: the next trial would run with no
+      // capture at all and time out forever with no explanation. End honestly
+      // — every completed trial is already persisted.
+      //
+      // Only a genuine locked→unlocked transition counts. A *refused* request
+      // also emits lock-change{locked:false}, and treating that as a loss
+      // would relabel every denial as "cancelled by the player" and hide the
+      // real diagnostic.
+      if (
+        event.kind === "lock-change" &&
+        !event.locked &&
+        event.reason === POINTER_LOCK_LOSS_REASON &&
+        this.#started
+      ) {
+        this.#fatalInterruptionSeen = true;
+        this.#runner?.cancel();
+      }
+      return;
+    }
     active.recorder.add(event);
 
     if (

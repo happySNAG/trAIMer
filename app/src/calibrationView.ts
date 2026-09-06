@@ -4,10 +4,13 @@ import {
   type CalibrationMeasurement,
 } from "../../src/calibration/core.ts";
 import {
+  LOCK_FAILURE_GUIDANCE,
   PointerLockCaptureSource,
-  type LockRequestableElement,
   type BrowserDocumentLike,
   type DomEventTargetLike,
+  type LockOutcome,
+  type LockOutcomeCode,
+  type LockRequestableElement,
 } from "../../src/capture/browserSource.ts";
 import { LocalJsonStore } from "../../src/persistence/store.ts";
 import { IndexedDbBackend } from "../../src/persistence/backends.ts";
@@ -162,7 +165,7 @@ export function renderCalibrationView(container: HTMLElement): void {
     );
   }
 
-  async function lock(): Promise<boolean> {
+  async function lock(): Promise<LockOutcome> {
     capture = new PointerLockCaptureSource({
       element: canvas as unknown as LockRequestableElement,
       document: window.document as unknown as BrowserDocumentLike,
@@ -185,8 +188,8 @@ export function renderCalibrationView(container: HTMLElement): void {
 
   startButton.addEventListener("click", async () => {
     if (!capture) {
-      const granted = await lock();
-      if (!granted) {
+      const outcome = await lock();
+      if (!outcome.granted) {
         // Lock denied (e.g. browser cooldown right after a session): do not
         // silently accumulate zero counts. Reset so the next click retries.
         capture = null;
@@ -195,7 +198,7 @@ export function renderCalibrationView(container: HTMLElement): void {
           inlineAlert(
             "danger",
             "Mouse capture was not granted.",
-            "What happened: the page could not lock the pointer for this rep. Is your data safe: yes — nothing was recorded or changed. What to do next: click anywhere on this page once, then press Start rep again.",
+            `What happened: ${LOCK_FAILURE_GUIDANCE[outcome.reasonCode as Exclude<LockOutcomeCode, "acquired">] ?? outcome.detail} Is your data safe: yes — nothing was recorded or changed. What to do next: click anywhere on this page once, then press Start rep again.`,
           ),
         );
         return;
