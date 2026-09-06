@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { join, sep } from "node:path";
 
 /**
  * UI/engine contract audit (Pass 7, requirement C).
@@ -18,7 +18,12 @@ function listAppSources(dir = APP_SRC): string[] {
   for (const entry of readdirSync(dir)) {
     const full = join(dir, entry);
     if (statSync(full).isDirectory()) out.push(...listAppSources(full));
-    else if (full.endsWith(".ts")) out.push(full);
+    // Keys are normalised to POSIX separators so the lookups below
+    // ("app/src/runController.ts") resolve on Windows too. Without this,
+    // join() yields "app/src\\runController.ts" there, every sources.get()
+    // returns undefined, and three contract tests silently compare against
+    // the empty string.
+    else if (full.endsWith(".ts")) out.push(full.split(sep).join("/"));
   }
   return out;
 }

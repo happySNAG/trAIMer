@@ -1,6 +1,47 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync, existsSync } from "node:fs";
-import {
+import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
+
+/**
+ * The gate lives in plain .mjs release tooling so `node scripts/...` works
+ * with no build step. It is loaded through an explicit file:// URL rather
+ * than a bare relative specifier: on Windows a bare specifier to a .mjs
+ * outside the Vite root resolves to a bare drive path, which the ESM loader
+ * rejects — the suite failed only on the Windows CI runner.
+ */
+const gate = (await import(
+  pathToFileURL(resolve("scripts/verify-windows-artifacts.mjs")).href
+)) as {
+  IMAGE_FILE_MACHINE_AMD64: number;
+  IMAGE_FILE_MACHINE_I386: number;
+  MIN_HELPER_BYTES: number;
+  MIN_INSTALLER_BYTES: number;
+  inspectPortableExecutable: (buffer: Buffer) => {
+    sizeBytes: number;
+    hasMzHeader: boolean;
+    hasPeSignature: boolean;
+    peOffset: number | null;
+    machine: number | null;
+    machineName: string | null;
+    isX64: boolean;
+    isExecutableImage: boolean;
+    isDll: boolean;
+    looksLikeSourceText: boolean;
+    problems: string[];
+  };
+  looksLikeSourceText: (buffer: Buffer) => boolean;
+  verifyFrontendAssets: (dir: string) => { ok: boolean; problems: string[] };
+  verifyHelperBinary: (path: string) => {
+    ok: boolean;
+    report: { sizeBytes: number; machineName: string | null } | null;
+    problems: string[];
+  };
+  verifyInstalledApp: (dir: string) => { ok: boolean; problems: string[] };
+  verifyInstaller: (path: string) => { ok: boolean; problems: string[] };
+};
+
+const {
   IMAGE_FILE_MACHINE_AMD64,
   IMAGE_FILE_MACHINE_I386,
   MIN_HELPER_BYTES,
@@ -11,8 +52,7 @@ import {
   verifyHelperBinary,
   verifyInstalledApp,
   verifyInstaller,
-  // @ts-expect-error — plain .mjs release tooling, intentionally untyped.
-} from "../scripts/verify-windows-artifacts.mjs";
+} = gate;
 
 /**
  * Regression suite for the v1.0.0-rc.1 release-blocking defect: the shipped
