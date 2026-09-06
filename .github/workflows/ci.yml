@@ -58,7 +58,7 @@ jobs:
             $parseErrors = $null
             [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $script), [ref]$null, [ref]$parseErrors)
             if ($parseErrors -and $parseErrors.Count -gt 0) {
-              $parseErrors | ForEach-Object { Write-Host "##[error]$script:$($_.Extent.StartLineNumber): $($_.Message)" }
+              $parseErrors | ForEach-Object { Write-Host "##[error]${script}:$($_.Extent.StartLineNumber): $($_.Message)" }
               throw "PowerShell parse errors in $script"
             }
             Write-Host "parsed OK: $script"
@@ -84,7 +84,7 @@ jobs:
           # check alone would not have caught a cross-compiled or corrupt
           # binary, so the freshly built artifact is RUN here.
           $exe = "native/windows/aldo_capture_helper.exe"
-          $out = & $exe --version 2>&1
+          $out = (& $exe --version 2>&1 | Out-String).Trim()
           if ($LASTEXITCODE -ne 0) { throw "helper --version exited $LASTEXITCODE : $out" }
           Write-Host "helper --version -> $out"
           if ($out -notmatch 'version=helper-1\.0\.0') { throw "unexpected helper version line: $out" }
@@ -113,7 +113,7 @@ jobs:
             $parseErrors = $null
             [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $script), [ref]$null, [ref]$parseErrors)
             if ($parseErrors -and $parseErrors.Count -gt 0) {
-              $parseErrors | ForEach-Object { Write-Host "##[error]$script:$($_.Extent.StartLineNumber): $($_.Message)" }
+              $parseErrors | ForEach-Object { Write-Host "##[error]${script}:$($_.Extent.StartLineNumber): $($_.Message)" }
               throw "PowerShell parse errors in $script"
             }
             Write-Host "parsed OK: $script"
@@ -232,7 +232,7 @@ jobs:
       - name: RELEASE GATE - helper executes before it is bundled
         shell: pwsh
         run: |
-          $out = & "native/windows/aldo_capture_helper.exe" --version 2>&1
+          $out = (& "native/windows/aldo_capture_helper.exe" --version 2>&1 | Out-String).Trim()
           if ($LASTEXITCODE -ne 0) { throw "helper --version exited $LASTEXITCODE : $out" }
           if ($out -notmatch 'arch=x64') { throw "helper is not the x64 build: $out" }
           Write-Host "bundling helper: $out"
