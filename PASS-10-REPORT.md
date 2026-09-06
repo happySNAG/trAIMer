@@ -285,6 +285,49 @@ Both accept a granted lock *or* a fast, diagnosed refusal (a CI runner may not
 grant Pointer Lock); what they refuse to accept is the hang that shipped in
 rc.3.
 
+### CI result — run 34063084266 (commit `5282e17`), all five jobs green
+
+| Job | Result |
+| --- | --- |
+| engine | ✓ 1m22s |
+| browser | ✓ 3m52s |
+| native-windows | ✓ 1m0s |
+| windows-release | ✓ 2m50s |
+| windows-installer | ✓ 5m6s |
+
+The **installed** Windows application — real Windows, native helper running,
+launched from `C:\aldo-install-test\Aldo Aim Lab.exe`:
+
+```
+arena entry gate: installed app at C:\aldo-install-test\Aldo Aim Lab.exe
+  ok   arena centre receives clicks — run-canvas
+  ok   overlay does not take pointer events — none
+  ok   control is clickable: Pause
+  ok   control is clickable: End session
+  ok   capture path is reported — browser capture · pointer lock ::
+         Measured samples come from browser Pointer Lock (pointermove-coalesced).
+         Native high-rate capture is not carrying this session:
+         helper is ready but unvalidated — run the capture check in Diagnostics.
+  ok   End session works while the arena is preparing
+  ok   the arena click resolves instead of hanging
+         state="trial-active" locked=true after 213 ms
+  ok   losing the pointer lock ends the session visibly
+  note capture GRANTED — the session went live in 213 ms
+```
+
+That caption line is also the tier logic answering §3 against a genuinely
+ready Windows helper: it is present and ready, it is *not* carrying the
+session, and it says why.
+
+### Installer
+
+| | |
+| --- | --- |
+| File | `AldoAimLab-Setup-1.0.0-rc.4.exe` (also `AldoAimLab-Setup.exe`) |
+| Size | 100,453,253 bytes |
+| SHA-256 | `369d7692d016e9ee1fbcf303f0bb49a32bd1dd0cfb7b040010324a7c3e7f0ef3` |
+| Flash drive | copied to `/Volumes/NO NAME`, both names re-hashed **after** the copy and matching |
+
 ---
 
 ## 7. Not done in this pass, deliberately
