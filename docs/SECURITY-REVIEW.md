@@ -1,6 +1,6 @@
 # Security review & anti-cheat boundary (V1 RC)
 
-Scope: local threat model. Aldo Aim Lab has **no network attack surface by
+Scope: local threat model. trAIMer has **no network attack surface by
 design** — the no-telemetry audit (`scripts/audit-no-telemetry.mjs`, run in
 CI against sources AND the shipped bundle) fails the build on `fetch`,
 `XMLHttpRequest`, `sendBeacon`, `EventSource`, non-loopback WebSocket, or any
@@ -74,7 +74,7 @@ All regression-tested in `tests/securityRoundTwo.test.ts` and
 
 | # | Finding | Severity | Resolution |
 |---|---|---|---|
-| S15 | Stored settings blob was trusted on load and at submit (`Number(...) || default` only); a corrupt/hostile/old `aldo-aim-lab-settings` could poison DPI/sensitivity in session definitions (e.g. dpi = -99999 or 1e9) | medium | `sanitizeSettings()` clamps every numeric field to engine bounds (`PREFLIGHT_THRESHOLDS`, `DEFAULT_SAFE_RANGE`), caps name length, hardens seed; applied on BOTH load and save; browser-tested |
+| S15 | Stored settings blob was trusted on load and at submit (`Number(...) || default` only); a corrupt/hostile/old settings blob (`traimer-settings`, `aldo-aim-lab-settings` before the rename) could poison DPI/sensitivity in session definitions (e.g. dpi = -99999 or 1e9) | medium | `sanitizeSettings()` clamps every numeric field to engine bounds (`PREFLIGHT_THRESHOLDS`, `DEFAULT_SAFE_RANGE`), caps name length, hardens seed; applied on BOTH load and save; browser-tested |
 | S16 | Launcher scripts referenced by tests/packaging did not exist in the repository (integration defect) | high (build integrity, not runtime) | real launcher scripts committed with the S12 static contract enforced by tests: RNG token + shape check, loopback-only HttpListener prefix, GetFullPath+StartsWith traversal guard, MIME allowlist, TryParse-guarded PID kills, no shell-interpolation sinks |
 | S17 | Presentation-layer XSS re-audit of merged UI | clean | no innerHTML/outerHTML/insertAdjacentHTML/document.write anywhere in app/src (static contract test); hostile display names/ids render as inert text; prototype-pollution shapes via JSON are inert; oversized strings capped at ingest |
 | S18 | Token hand-off from launcher to app | info | token travels once via `?token=` query param on first open, shape-validated (`^[0-9a-f]{32}$`) before adoption into localStorage; used solely for the loopback helper handshake |

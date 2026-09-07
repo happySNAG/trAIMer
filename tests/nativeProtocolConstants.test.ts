@@ -14,7 +14,7 @@ import {
  * C source directly — no Windows toolchain required.
  */
 
-const C_SOURCE_PATH = "native/windows/aldo_capture_helper.c";
+const C_SOURCE_PATH = "native/windows/traimer_capture_helper.c";
 
 function readCHelper(): string {
   return readFileSync(new URL(`../${C_SOURCE_PATH}`, import.meta.url), "utf8");

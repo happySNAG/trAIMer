@@ -1,6 +1,10 @@
 import { renderSetupView } from "./setupView.ts";
 import { loadSettings, type AppSettings } from "./state.ts";
-import { BrowserRunController, type RunControllerCallbacks } from "./runController.ts";
+import {
+  BrowserRunController,
+  type ResumeInput,
+  type RunControllerCallbacks,
+} from "./runController.ts";
 import { renderResultsView } from "./resultsView.ts";
 import { renderDataView } from "./dataView.ts";
 import { renderCalibrationView } from "./calibrationView.ts";
@@ -22,9 +26,13 @@ import {
 } from "./ui.ts";
 import { LocalJsonStore } from "../../src/persistence/store.ts";
 import { IndexedDbBackend } from "../../src/persistence/backends.ts";
-import { openAimLabDb } from "./idb.ts";
-import type { ResumeCheckpoint } from "../../src/session/resume.ts";
-import { APP_VERSION, ENGINE_VERSION } from "../../src/version.ts";
+import { openTraimerDb } from "./idb.ts";
+import {
+  planContinuation,
+  type ResumeCheckpoint,
+} from "../../src/session/resume.ts";
+import { planCandidateBlocks } from "../../src/experiments/protocol.ts";
+import { APP_VERSION, ENGINE_VERSION, PRODUCT_NAME } from "../../src/version.ts";
 import { toAimLabError } from "../../src/errors/types.ts";
 import { LocalDiagnosticLog } from "../../src/diagnostics/localLog.ts";
 import { installTestHooks, testModeEnabled } from "./testHooks.ts";
@@ -35,11 +43,13 @@ import {
 import { runPreflightChecks, type PreflightReport } from "../../src/preflight/preflight.ts";
 import { renderPreflightPanel } from "./preflightView.ts";
 import { buildFinalResult, type FinalResult } from "../../src/results/finalResult.ts";
+import type { SessionOutcomeReport } from "../../src/results/sessionOutcome.ts";
 import { planNextTest } from "../../src/session/retest.ts";
 import { desktopBridge } from "./desktopBridge.ts";
 import { HistoryApi } from "../../src/history/api.ts";
 import type { Recommendation } from "../../src/domain/recommendation.ts";
 import type { SessionStateName } from "../../src/session/types.ts";
+import type { CalibrationProgressSnapshot } from "../../src/results/sessionOutcome.ts";
 import {
   LOCK_FAILURE_GUIDANCE,
   type LockOutcomeCode,
@@ -83,10 +93,12 @@ diagnosticLog.log("info", "app-boot", {
 let controller: BrowserRunController | null = null;
 let lastRecommendation: Recommendation | null = null;
 let lastFinalResult: FinalResult | null = null;
+/** The most recent session's outcome report — what happened, and what it proves. */
+let lastOutcomeReport: SessionOutcomeReport | null = null;
 const lastTrialsAnalyzed = { count: 0 };
 
 async function store(): Promise<LocalJsonStore> {
-  return new LocalJsonStore(new IndexedDbBackend(await openAimLabDb()));
+  return new LocalJsonStore(new IndexedDbBackend(await openTraimerDb()));
 }
 
 /**
@@ -219,6 +231,10 @@ function activate(tab: string): void {
   if (tab === "results") void renderResults();
 }
 
+const SESSION_TOKEN_KEY = "traimer-session-token";
+/** The key builds up to and including 1.0.0-rc.6 stored the token under. */
+const LEGACY_SESSION_TOKEN_KEY = "aldo-session-token";
+
 function sessionToken(): string {
   // Desktop shell (the shipped Windows product): the Electron main process
   // mints one token per launch and hands it to both the helper and this
@@ -234,7 +250,7 @@ function sessionToken(): string {
   const params = new URLSearchParams(window.location.search);
   const injected = params.get("token");
   if (injected && /^[0-9a-f]{32}$/.test(injected)) {
-    localStorage.setItem("aldo-session-token", injected);
+    localStorage.setItem(SESSION_TOKEN_KEY, injected);
     // Strip the credential from the URL/history immediately: the token lives
     // in localStorage from here on, and the address bar (screenshots, session
     // history, reloads) should not keep advertising it.
@@ -249,11 +265,15 @@ function sessionToken(): string {
     }
     return injected;
   }
-  let token = localStorage.getItem("aldo-session-token");
+  // Current key first, then the pre-rename key, so an upgraded install keeps
+  // talking to the same helper session instead of minting a new token.
+  let token =
+    localStorage.getItem(SESSION_TOKEN_KEY) ??
+    localStorage.getItem(LEGACY_SESSION_TOKEN_KEY);
   if (!token) {
     token = `tok-${Math.random().toString(36).slice(2)}${Date.now().toString(36)}`;
-    localStorage.setItem("aldo-session-token", token);
   }
+  localStorage.setItem(SESSION_TOKEN_KEY, token);
   return token;
 }
 
@@ -304,6 +324,24 @@ async function renderHome(): Promise<void> {
 // ---- results (in-memory result, or latest persisted recommendation) ----
 
 async function renderResults(): Promise<void> {
+  // A session that ran THIS launch always renders its own outcome report,
+  // recommendation or not — including when the player navigates away and back.
+  if (lastOutcomeReport) {
+    const experimentId = lastOutcomeReport.experimentId;
+    renderResultsView(views.results, {
+      recommendation: lastOutcomeReport.recommendationAvailable
+        ? lastRecommendation
+        : null,
+      trialsAnalyzed: lastTrialsAnalyzed.count,
+      finalResult: lastOutcomeReport.recommendationAvailable ? lastFinalResult : null,
+      outcome: lastOutcomeReport,
+      onStartTest: () => activate("setup"),
+      onContinueCalibration: lastOutcomeReport.recommendationAvailable
+        ? null
+        : () => void continueCalibration(experimentId),
+    });
+    return;
+  }
   if (lastRecommendation) {
     renderResultsView(views.results, {
       recommendation: lastRecommendation,
@@ -382,9 +420,15 @@ interface RunView {
   /** Caption for the capture path this session actually runs on. */
   setCaptureNote(caption: string, detail: string): void;
   /** Where the current drill sits in the session (round · block · drill) and what to do. */
-  setDrill(structure: string, instruction: string): void;
+  setDrill(
+    structure: string,
+    instruction: string,
+    mode: "shoot" | "track" | null,
+  ): void;
   setState(state: SessionStateName, label: string, tone: Tone, detail: string): void;
   setProgress(measured: number, upperBound: number | null): void;
+  /** Truthful "Calibration NN %" from the engine's own plan. */
+  setCalibrationProgress(progress: CalibrationProgressSnapshot): void;
   /** Arena click handler (start / retry capture). Cleared once consumed. */
   setPendingStart(fn: () => void): void;
   /** Reflects the engine's paused/running state on the pause control. */
@@ -425,11 +469,21 @@ function buildRunView(): RunView {
   stateChip.append(stateDotHolder, stateLabel);
   const detailEl = el("span", { class: "run-detail", text: "" });
   const brand = el("span", { class: "run-brand" });
-  brand.append(icon("crosshair", 14), el("span", { text: "Aldo Aim Lab" }));
+  brand.append(icon("crosshair", 14), el("span", { text: PRODUCT_NAME }));
 
+  // The single most important word on the screen: is this drill shot at, or
+  // followed? rc.6 had no such indicator and a real player shot the tracking
+  // drill for its whole six-second window.
+  const modeChip = el("span", { class: "run-mode-chip", text: "" });
+  modeChip.hidden = true;
   const drillEl = el("span", { class: "run-drill", text: "" });
   const instructionEl = el("span", { class: "run-instruction", text: "" });
-  const topLeft = el("div", { class: "run-topbar-left" }, [brand, drillEl, instructionEl]);
+  const topLeft = el("div", { class: "run-topbar-left" }, [
+    brand,
+    modeChip,
+    drillEl,
+    instructionEl,
+  ]);
   const topRight = el("div", { class: "run-topbar-right" }, [detailEl, stateChip]);
   const topbar = el("div", { class: "run-topbar" }, [topLeft, topRight]);
 
@@ -450,12 +504,14 @@ function buildRunView(): RunView {
   const stage = el("div", { class: "run-stage" }, [stageInner]);
 
   // -- bottom bar --
+  const calibrationLabel = el("span", { class: "run-calibration-label", text: "Calibration 0%" });
   const progressLabel = el("span", { class: "run-progress-label", text: "" });
-  const progressMeter = meter(0, { tone: "accent", label: "session progress" });
+  const progressMeter = meter(0, { tone: "accent", label: "calibration progress" });
   progressMeter.style.flex = "1";
   const progressWrap = el("div", { class: "run-progress-wrap" }, [
-    progressLabel,
+    calibrationLabel,
     progressMeter,
+    progressLabel,
   ]);
 
   const pauseButton = button("Pause", { icon: "pause", variant: "secondary" });
@@ -580,9 +636,26 @@ function buildRunView(): RunView {
       captureNoteLabel.textContent = caption;
       captureNote.title = detail;
     },
-    setDrill(structure, instruction) {
+    setDrill(structure, instruction, mode) {
       drillEl.textContent = structure;
       instructionEl.textContent = instruction;
+      modeChip.hidden = mode === null;
+      if (mode !== null) {
+        modeChip.textContent = mode === "track" ? "TRACK" : "SHOOT";
+        modeChip.dataset.mode = mode;
+      }
+    },
+    setCalibrationProgress(progress) {
+      const percent = Math.round(progress.fraction * 100);
+      if (fillEl) fillEl.style.width = `${percent}%`;
+      calibrationLabel.textContent = `Calibration ${percent}%`;
+      progressLabel.textContent =
+        `Round ${progress.roundIndex}/${progress.roundsPlanned} · ` +
+        `block ${progress.blockIndex}/${progress.blocksPerRound} · ` +
+        `${progress.stepsCompleted}/${progress.stepsPlanned} drills`;
+      calibrationLabel.title =
+        `${progress.measuredCompleted} of ${progress.measuredPlanned} measured drills done. ` +
+        "Adaptive allocation can shorten later rounds, so this can only ever move forward.";
     },
     setState(state, label, tone, detail) {
       screen.setAttribute("data-session-state", state);
@@ -595,10 +668,12 @@ function buildRunView(): RunView {
         const frac = Math.max(0, Math.min(1, measured / upperBound));
         fillEl.style.width = `${(frac * 100).toFixed(1)}%`;
       }
-      progressLabel.textContent =
-        upperBound && upperBound > 0
-          ? `${measured} / ≤${upperBound} measured trials`
-          : `${measured} measured trials`;
+      if (progressLabel.textContent === "") {
+        progressLabel.textContent =
+          upperBound && upperBound > 0
+            ? `${measured} / ≤${upperBound} measured drills`
+            : `${measured} measured drills`;
+      }
     },
     setPendingStart(fn) {
       pendingStart = fn;
@@ -623,6 +698,9 @@ let runScreenTeardown: (() => void) | null = null;
 function exitSessionChrome(): void {
   document.body.classList.remove("session-active");
   document.body.classList.remove("capture-suspended");
+  document.body.classList.remove("drill-tracking");
+  // The arena's audio graph belongs to the session, not the app.
+  controller?.disposeAudio();
   runScreenTeardown?.();
   runScreenTeardown = null;
 }
@@ -744,7 +822,11 @@ function makeCallbacks(run: RunView): RunControllerCallbacks {
     },
     onDrill(info) {
       const structure = `Round ${info.round}/${info.rounds} · Block ${info.block}/${info.blocks} · Drill ${info.drill}/${info.drillsPlanned}${info.phase === "warmup" ? " (warm-up)" : ""}`;
-      run.setDrill(structure, info.instruction);
+      run.setDrill(structure, info.instruction, info.mode);
+      document.body.classList.toggle("drill-tracking", info.mode === "track");
+    },
+    onCalibrationProgress(progress) {
+      run.setCalibrationProgress(progress);
     },
     onTrialPersisted(trial) {
       if (trial.phase === "measured") {
@@ -755,16 +837,31 @@ function makeCallbacks(run: RunView): RunControllerCallbacks {
       }
       run.setProgress(lastTrialsAnalyzed.count, plannedTrialBound(controller));
     },
-    async onExperimentFinished(status, abortReason) {
-      // A session that never captured the mouse measured nothing: sending it
+    async onExperimentFinished(outcome) {
+      const { status, abortReason, outcomeReport } = outcome;
+      lastOutcomeReport = outcomeReport;
+      const endedEarly = status === "aborted";
+
+      if (endedEarly && abortReason) {
+        diagnosticLog.error(
+          "SESSION_ENDED_EARLY",
+          `${abortReason.code}: ${abortReason.detail}`,
+        );
+      }
+
+      // A session that NEVER CAPTURED the mouse measured nothing: sending it
       // to the results screen ("partial data was saved") would be a lie, and
       // leaving it on the arena would be the trap. Explain what happened and
       // offer the two things that always work.
-      if (status === "aborted" && abortReason && lastTrialsAnalyzed.count === 0) {
-        diagnosticLog.error(
-          "CAPTURE_UNAVAILABLE",
-          `${abortReason.code}: ${abortReason.detail}`,
-        );
+      //
+      // This is narrower than "ended early with nothing measured": a session
+      // that captured the mouse and then LOST it has a real reason of its own
+      // and goes to the results screen with it, rather than being mislabelled
+      // as a capture that never worked.
+      const captureNeverStarted =
+        abortReason !== undefined &&
+        Object.prototype.hasOwnProperty.call(LOCK_FAILURE_GUIDANCE, abortReason.code);
+      if (endedEarly && abortReason && captureNeverStarted && lastTrialsAnalyzed.count === 0) {
         if (abortReason.code === "cancelled") {
           exitSessionChrome();
           activate("setup");
@@ -799,19 +896,23 @@ function makeCallbacks(run: RunView): RunControllerCallbacks {
         );
         return;
       }
+
+      // EVERY other ending — complete or early — goes to the results screen
+      // with the exact reason it ended. rc.6 showed one generic sentence for
+      // both a finished calibration and a session its own break had killed,
+      // which is how a broken session read as a normal one.
       run.showOverlay(
         status === "complete" ? "check" : "flag",
-        status === "complete" ? "Session complete" : "Session ended",
+        status === "complete" ? "Calibration complete" : "Calibration stopped early",
         status === "complete"
           ? "Opening your results…"
-          : "Partial data was saved. You can review what completed or start again.",
+          : `${outcomeReport.endReasonText} Everything measured so far is saved — opening your results…`,
       );
-      let finalResult = null;
+      let finalResult: FinalResult | null = null;
       let resultLoadFailed: unknown = null;
+      lastRecommendation = outcome.recommendation;
       try {
-        const s = await store();
-        lastRecommendation = await s.loadRecommendation(controller!.definition.id);
-        if (lastRecommendation) {
+        if (outcomeReport.recommendationAvailable && lastRecommendation) {
           const settingsNow = loadSettings();
           const definition = controller!.definition;
           const retestPlan = planNextTest(definition, lastRecommendation, {
@@ -831,34 +932,38 @@ function makeCallbacks(run: RunView): RunControllerCallbacks {
             action: finalResult.recommendedNextAction,
             edpi: Math.round(finalResult.immediateRecommended.edpi),
           });
+        } else {
+          diagnosticLog.log("info", "evidence-insufficient", {
+            measured: outcomeReport.performance.validMeasuredTrials,
+            moreNeeded: outcomeReport.sufficiency.additionalMeasuredTrialsNeeded,
+            endKind: outcomeReport.endKind,
+          });
         }
       } catch (err) {
         const aimErr = toAimLabError(err);
         diagnosticLog.error(aimErr.code, aimErr.message);
-        lastRecommendation = null;
         resultLoadFailed = err;
       }
       lastFinalResult = finalResult;
+      const continueTarget = controller
+        ? { experimentId: String(controller.definition.id) }
+        : null;
       setTimeout(() => {
         exitSessionChrome();
-        if (lastRecommendation) {
-          renderResultsView(views.results, {
-            recommendation: lastRecommendation,
-            trialsAnalyzed: lastTrialsAnalyzed.count,
-            finalResult,
-            onStartTest: () => activate("setup"),
-          });
-        } else if (resultLoadFailed !== null) {
-          // A completed session whose result could not be loaded must not
-          // render the misleading "No results yet" empty state — the trials
-          // exist; say what happened and how to get them back.
+        if (resultLoadFailed !== null) {
           renderSessionFailure(views.results, resultLoadFailed);
         } else {
           renderResultsView(views.results, {
-            recommendation: null,
+            recommendation: outcomeReport.recommendationAvailable
+              ? lastRecommendation
+              : null,
             trialsAnalyzed: lastTrialsAnalyzed.count,
-            finalResult: null,
+            finalResult,
+            outcome: outcomeReport,
             onStartTest: () => activate("setup"),
+            onContinueCalibration: continueTarget
+              ? () => void continueCalibration(continueTarget.experimentId)
+              : null,
           });
         }
         activate("results");
@@ -884,15 +989,99 @@ function makeCallbacks(run: RunView): RunControllerCallbacks {
  * Escape and both bottom-bar controls stay live throughout: no state on this
  * screen may be a dead end.
  */
-function startSession(settings: AppSettings): void {
+/**
+ * Continues an unfinished calibration instead of starting a new one.
+ *
+ * Reads the newest checkpoint for `experimentId`, the original experiment
+ * definition and every trial already recorded against it, then hands all
+ * three to the engine's resume path. Completed drills are never repeated and
+ * the candidate blinding is preserved, so the continued session is the SAME
+ * calibration, not a second one.
+ */
+async function continueCalibration(experimentId: string): Promise<void> {
+  try {
+    const s = await store();
+    const definition = await s.loadExperiment(experimentId);
+    if (!definition) {
+      void infoDialog("This calibration cannot be continued", [
+        "What happened: the original session plan could not be found in local storage, so there is nothing to continue.",
+        "Is your data safe: yes — every completed drill is still in History and Data.",
+        "What to do next: start a new calibration from the Test tab.",
+      ]);
+      return;
+    }
+    const checkpoint = await newestCheckpointFor(s, experimentId);
+    if (!checkpoint) {
+      void infoDialog("This calibration cannot be continued", [
+        "What happened: no saved checkpoint was found for this session.",
+        "Is your data safe: yes — every completed drill is still in History and Data.",
+        "What to do next: start a new calibration from the Test tab.",
+      ]);
+      return;
+    }
+    const trials = await s.loadAllTrials(experimentId);
+    // A plan can be COMPLETE and still short of the evidence a recommendation
+    // needs. Continuing then has to add a round, or the button would replay
+    // nothing and show the same "more data needed" screen again.
+    const continuation = planContinuation(checkpoint, definition, (round) =>
+      planCandidateBlocks(definition, round),
+    );
+    diagnosticLog.log("info", "calibration-continued", {
+      experimentId,
+      completedSteps: checkpoint.completedSequenceKeys.length,
+      restoredTrials: trials.length,
+      remainingSteps: continuation.remainingSteps,
+      addedRound: continuation.addedRound ? 1 : 0,
+    });
+    startSession(loadSettings(), {
+      definition: continuation.definition,
+      checkpoint,
+      trials,
+    });
+  } catch (err) {
+    diagnosticLog.error("CONTINUE_CALIBRATION_FAILED", String(err));
+    void infoDialog("Could not continue this calibration", [
+      "What happened: the saved session could not be read back from local storage.",
+      "Is your data safe: yes — nothing was deleted; completed drills remain in History.",
+      `Detail: ${String(err).slice(0, 200)}`,
+    ]);
+  }
+}
+
+/** Newest checkpoint written for one experiment, or null. */
+async function newestCheckpointFor(
+  s: LocalJsonStore,
+  experimentId: string,
+): Promise<ResumeCheckpoint | null> {
+  const paths = await s.listByPrefix("sessions/checkpoints");
+  let newest: ResumeCheckpoint | null = null;
+  for (const path of paths) {
+    try {
+      const loaded = await s.loadRawAt<ResumeCheckpoint>("session-checkpoint", path);
+      const payload = loaded?.payload;
+      if (!payload || payload.experimentId !== experimentId) continue;
+      if (newest === null || payload.updatedAtIso > newest.updatedAtIso) {
+        newest = payload;
+      }
+    } catch {
+      // One unreadable checkpoint must not hide a readable one.
+    }
+  }
+  return newest;
+}
+
+function startSession(settings: AppSettings, resume?: ResumeInput): void {
   clear(views.run);
   lastTrialsAnalyzed.count = 0; // per-session counter (progress + results)
+  lastOutcomeReport = null;
   const run = buildRunView();
   activate("run");
   run.showOverlay(
     "clock",
-    "Preparing the arena",
-    "Opening local storage and the capture path. This takes a moment.",
+    resume ? "Picking up where you left off" : "Preparing the arena",
+    resume
+      ? "Restoring your completed drills, candidate order and search state. Nothing already measured is repeated."
+      : "Opening local storage and the capture path. This takes a moment.",
   );
 
   diagnosticLog.setCaptureMode(`browser ${settings.yExploration ? "+jointXY" : ""} seed=${settings.experimentSeed}`);
@@ -907,6 +1096,7 @@ function startSession(settings: AppSettings): void {
       // E2E: short rests so automated sessions finish quickly, unless a spec
       // asks for a long one (?rest=<ms>) to exercise the break UI itself.
       ...(e2e ? { restBetweenCandidatesMs: e2eRestMs() } : {}),
+      ...(resume ? { resume } : {}),
     },
   );
   if (e2e) {

@@ -6,7 +6,12 @@
  * these strings so any historical result can be traced to the exact code that
  * produced it.
  *
- * The V1 release candidate is identified as 1.0.0-rc.6 (Pass 12: three
+ * The V1 release candidate is identified as 1.0.0-rc.7 (Pass 13: the product
+ * is publicly named trAIMer; the first break silently ended the whole
+ * calibration because a deliberate pointer-lock release was misreported as a
+ * loss; the tracking drill was indistinguishable from a shooting drill; shots
+ * had no game feel; and a session that stopped early returned to the main UI
+ * with nothing but a count). rc.6 (Pass 12: three
  * gameplay defects from the second hardware session — the strafing target was
  * hit-tested at a stale keyframe and swept too little of the field to be
  * shootable, a click on the tracking target deleted it and left the arena
@@ -29,10 +34,26 @@
  * persisted artifacts.
  */
 
-export const APP_NAME = "aldo-aim-lab";
+/**
+ * Machine name embedded in every persisted artifact.
+ *
+ * Renamed with the product (Pass 13). Artifacts written by earlier builds
+ * carry `aldo-aim-lab`; nothing compares this field for compatibility (only
+ * `engineVersion` is gated), so older artifacts keep loading unchanged.
+ */
+export const APP_NAME = "traimer";
+
+/** Machine name used by builds up to and including 1.0.0-rc.6. */
+export const LEGACY_APP_NAME = "aldo-aim-lab";
+
+/** THE public product name. Every user-facing surface renders exactly this. */
+export const PRODUCT_NAME = "trAIMer";
+
+/** The product tagline, shown beside the wordmark. */
+export const PRODUCT_TAGLINE = "Train. Measure. Tune.";
 
 /** Application release version for the V1 release candidate. */
-export const APP_VERSION = "1.0.0-rc.6";
+export const APP_VERSION = "1.0.0-rc.7";
 
 /**
  * Engine contract version: bump when a persisted engine-facing data contract
@@ -58,7 +79,7 @@ export const SCORING_MODEL_VERSION = "scoring-v1";
 
 /**
  * Native transport protocol version. Must equal PROTOCOL_VERSION embedded in
- * native/windows/aldo_capture_helper.c — enforced by
+ * native/windows/traimer_capture_helper.c — enforced by
  * tests/nativeProtocolConstants.test.ts and CI.
  */
 export const NATIVE_PROTOCOL_VERSION = 1;

@@ -46,7 +46,7 @@ test.describe("security round three", () => {
   test("corrupt/hostile stored settings cannot poison the app", async ({ page }) => {
     await page.addInitScript(() => {
       localStorage.setItem(
-        "aldo-aim-lab-settings",
+        "traimer-settings",
         JSON.stringify({
           dpi: -99999,
           sensX: Number.POSITIVE_INFINITY,
@@ -63,7 +63,7 @@ test.describe("security round three", () => {
     });
     await page.goto("/");
     const sane = await page.evaluate(() =>
-      localStorage.getItem("aldo-aim-lab-settings"),
+      localStorage.getItem("traimer-settings"),
     );
     // Nothing was written back by merely loading; but loading itself must
     // not crash and settings must sanitize on use.
@@ -86,7 +86,7 @@ test.describe("security round three", () => {
     await page.locator("#setup-sensx").fill("-40");
     await page.locator("#view-setup button[type=submit]").click();
     const stored = await page.evaluate(() =>
-      JSON.parse(localStorage.getItem("aldo-aim-lab-settings") ?? "{}"),
+      JSON.parse(localStorage.getItem("traimer-settings") ?? "{}"),
     );
     expect(stored.dpi).toBeLessThanOrEqual(26000);
     expect(stored.sensX).toBeGreaterThanOrEqual(1);
@@ -96,13 +96,13 @@ test.describe("security round three", () => {
     const token = "a".repeat(32);
     await page.goto(`/?token=${token}`);
     // Adopted into localStorage for the Diagnostics probe...
-    const adopted = await page.evaluate(() => localStorage.getItem("aldo-session-token"));
+    const adopted = await page.evaluate(() => localStorage.getItem("traimer-session-token"));
     expect(adopted).toBe(token);
     // ...and removed from the visible URL / history entry immediately.
     expect(new URL(page.url()).searchParams.get("token")).toBeNull();
     // A reload must NOT re-adopt anything weird; the stored token persists.
     await page.reload();
-    const after = await page.evaluate(() => localStorage.getItem("aldo-session-token"));
+    const after = await page.evaluate(() => localStorage.getItem("traimer-session-token"));
     expect(after).toBe(token);
   });
 });

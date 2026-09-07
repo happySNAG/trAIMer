@@ -1,9 +1,9 @@
 {
-  "name": "aldo-aim-lab",
-  "version": "1.0.0-rc.6",
+  "name": "traimer",
+  "version": "1.0.0-rc.7",
   "private": true,
   "type": "module",
-  "description": "Fortnite-focused aim measurement and sensitivity optimization engine (headless core).",
+  "description": "trAIMer — Train. Measure. Tune. Fortnite-focused aim measurement and sensitivity optimization engine (headless core).",
   "engines": {
     "node": ">=20"
   },
@@ -18,11 +18,12 @@
     "build:desktop": "tsc -p desktop/tsconfig.json && node scripts/finalize-desktop-build.mjs",
     "desktop": "npm run build && npm run build:desktop && electron .",
     "desktop:smoke": "npm run build && npm run build:desktop && electron . --smoke-test",
-    "dist:win": "npm run build && npm run build:desktop && node scripts/verify-windows-artifacts.mjs --helper native/windows/aldo_capture_helper.exe && electron-builder --win --x64 --publish never",
+    "dist:win": "npm run build && npm run build:desktop && node scripts/verify-branding.mjs && node scripts/verify-branding.mjs --bundle dist-app && node scripts/verify-windows-artifacts.mjs --helper native/windows/traimer_capture_helper.exe && electron-builder --win --x64 --publish never",
     "package:dry-run": "npm run build && node scripts/package-release.mjs --allow-placeholder-helper",
     "verify:release": "node scripts/verify-release.mjs",
     "verify:windows-artifacts": "node scripts/verify-windows-artifacts.mjs",
     "verify:arena-entry": "node scripts/verify-arena-entry.mjs",
+    "verify:branding": "node scripts/verify-branding.mjs",
     "audit:no-telemetry": "node scripts/audit-no-telemetry.mjs",
     "demo:help": "tsx src/demo/cli.ts --help",
     "bench": "tsx benchmarks/bench.ts",
@@ -41,6 +42,6 @@
     "vite": "^7.3.6",
     "vitest": "^3.2.0"
   },
-  "author": "Aldo Aim Lab",
+  "author": "trAIMer",
   "main": "dist-desktop/main.js"
 }

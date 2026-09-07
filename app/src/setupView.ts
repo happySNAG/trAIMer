@@ -145,20 +145,36 @@ export function renderSetupView(
   );
   form.append(formCard);
 
+  /**
+   * Reads a numeric field, falling back only when the value is genuinely
+   * unusable.
+   *
+   * `Number(input.value) || fallback` treats a legitimate ZERO as "empty":
+   * a player who set warm-up trials to 0 — a documented, in-range choice —
+   * silently got 2 instead, and the automated suites inherited the same
+   * surprise.
+   */
+  const numberField = (input: HTMLElement, fallback: number): number => {
+    const raw = (input as HTMLInputElement).value.trim();
+    if (raw === "") return fallback;
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
+
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     const next: AppSettings = {
       playerName: (nameInput.value || "player").trim(),
-      dpi: Number(dpiInput.value) || 800,
-      sensX: Number(sensXInput.value) || 7,
-      sensY: Number(sensYInput.value) || 7,
-      experimentSeed: Number(seedInput.value) || 20260822,
-      rounds: Math.max(1, Math.min(4, Number(roundsInput.value) || 2)),
-      repsPerCandidate: Math.max(3, Math.min(20, Number(repsInput.value) || 8)),
-      warmupTrials: Math.max(0, Math.min(5, Number(warmupsInput.value) || 2)),
+      dpi: numberField(dpiInput, 800),
+      sensX: numberField(sensXInput, 7),
+      sensY: numberField(sensYInput, 7),
+      experimentSeed: numberField(seedInput, 20260822),
+      rounds: Math.max(1, Math.min(4, numberField(roundsInput, 2))),
+      repsPerCandidate: Math.max(3, Math.min(20, numberField(repsInput, 8))),
+      warmupTrials: Math.max(0, Math.min(5, numberField(warmupsInput, 2))),
       yExploration: yCheck.checked,
       autoBreaks: breaksCheck.checked,
-      breakSeconds: Math.max(5, Math.min(60, Number(breakSecondsInput.value) || 10)),
+      breakSeconds: Math.max(5, Math.min(60, numberField(breakSecondsInput, 10))),
     };
     saveSettings(next);
     callbacks.onStart(next);

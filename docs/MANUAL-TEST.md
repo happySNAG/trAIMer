@@ -8,8 +8,8 @@ stop and fix before continuing.
 Setup on the day:
 
 ```
-1. Copy Aldo-Aim-Lab-v*-windows-x64.zip to the desktop; extract it.
-2. Double-click start-aldo-lab.ps1 ("Run with PowerShell").
+1. Copy trAIMer-v*-windows-x64.zip to the desktop; extract it.
+2. Double-click start-traimer.ps1 ("Run with PowerShell").
 3. Keep the launcher window open for the whole session.
 ```
 
@@ -23,17 +23,17 @@ attach it to the report.
 |---|-------|----------|------|----------|
 | A1 | Zip SHA-256 matches the value printed by CI (`SHA256:` line in the windows-release job summary) | identical | HARD | |
 | A2 | `manifest.json` next to `app/` lists every release file + `helperBinaryIsPlaceholder: false` | true/false flag correct | HARD | |
-| A3 | `aldo_capture_helper.exe` exists beside `start-aldo-lab.ps1`, is a real exe (>100 KB) | present | HARD | |
+| A3 | `traimer_capture_helper.exe` exists beside `start-traimer.ps1`, is a real exe (>100 KB) | present | HARD | |
 | A4 | `verify-release.mjs --release-dir .` passes inside the extracted folder (run from a Node prompt if available; optional on-site) | all ✓ | soft | |
 
 ## B — Launcher start/stop
 
 | # | Check | Expected | Gate | Evidence |
 |---|-------|----------|------|----------|
-| B1 | Run `start-aldo-lab.ps1` | Browser opens automatically to `http://127.0.0.1:488xx/index.html?token=…`; launcher shows "capture helper : ws://127.0.0.1:48765" | HARD | |
+| B1 | Run `start-traimer.ps1` | Browser opens automatically to `http://127.0.0.1:488xx/index.html?token=…`; launcher shows "capture helper : ws://127.0.0.1:48765" | HARD | |
 | B2 | SmartScreen/firewall prompts | Approve once; helper allowed on loopback only | HARD | |
-| B3 | Run `start-aldo-lab.ps1` again while running | Clear "already running" message, no second helper | | |
-| B4 | Run `stop-aldo-lab.ps1` from another terminal (or close launcher window) | Helper + server stop; window prints "Stopped" | HARD | |
+| B3 | Run `start-traimer.ps1` again while running | Clear "already running" message, no second helper | | |
+| B4 | Run `stop-traimer.ps1` from another terminal (or close launcher window) | Helper + server stop; window prints "Stopped" | HARD | |
 | B5 | Start again after stop | Works cleanly (no port conflicts) | | |
 
 ## C — Machine facts

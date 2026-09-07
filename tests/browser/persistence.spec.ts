@@ -122,6 +122,9 @@ test.describe("resume checkpoint UI", () => {
         payload: checkpoint,
       });
       await new Promise<void>((resolve) => {
+        // The training database keeps its pre-rename name on purpose: IndexedDB is
+        // keyed by (origin, name) and has no rename, so renaming it would orphan
+        // every existing player's history (app/src/idb.ts).
         const req = indexedDB.open("aldo-aim-lab", 1);
         req.onupgradeneeded = () => {
           if (!req.result.objectStoreNames.contains("kv")) {

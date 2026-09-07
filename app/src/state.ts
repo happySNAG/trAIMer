@@ -17,7 +17,18 @@ export interface AppSettings {
   breakSeconds: number;
 }
 
-export const SETTINGS_KEY = "aldo-aim-lab-settings";
+export const SETTINGS_KEY = "traimer-settings";
+
+/**
+ * The key builds up to and including 1.0.0-rc.6 wrote settings under, when
+ * the product was called Aldo Aim Lab.
+ *
+ * `loadSettings()` still reads it when the new key is absent, so a player who
+ * upgrades keeps their name, DPI, sensitivity, seed and break preferences.
+ * The old value is left in place rather than deleted: it costs nothing, and
+ * it means rolling back to rc.6 is not a data-loss event either.
+ */
+export const LEGACY_SETTINGS_KEY = "aldo-aim-lab-settings";
 
 export const DEFAULT_SETTINGS: AppSettings = {
   playerName: "Aldo",
@@ -93,7 +104,12 @@ export function sanitizeSettings(raw: unknown): AppSettings {
 
 export function loadSettings(): AppSettings {
   try {
-    const raw = localStorage.getItem(SETTINGS_KEY);
+    // Current key first, then the pre-rename key. Everything still goes
+    // through sanitizeSettings(), so a stale or hostile legacy blob is
+    // clamped exactly like a current one.
+    const raw =
+      localStorage.getItem(SETTINGS_KEY) ??
+      localStorage.getItem(LEGACY_SETTINGS_KEY);
     if (!raw) return { ...DEFAULT_SETTINGS };
     return sanitizeSettings(JSON.parse(raw));
   } catch {

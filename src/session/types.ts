@@ -4,6 +4,7 @@ import type { CaptureSourceMetadata } from "../capture/negotiation.ts";
 import type { TrialRecord } from "../domain/trial.ts";
 import type { TrialPlanSpec } from "../experiments/protocol.ts";
 import type { LocalJsonStore } from "../persistence/store.ts";
+import type { CalibrationProgressSnapshot } from "../results/sessionOutcome.ts";
 
 export interface PlannedTrial {
   spec: TrialPlanSpec;
@@ -50,6 +51,12 @@ export interface SessionRunnerPorts {
   execution: TrialExecutionPort;
   onStateChange?: ((state: SessionStateName, detail?: string) => void) | undefined;
   onProgress?: ((progress: SessionProgressSnapshot) => void) | undefined;
+  /**
+   * Truthful position in the CALIBRATION plan (not just this block). Fired
+   * whenever the plan or the completed-step count changes, so the UI can show
+   * "Calibration 28 %" from the engine's own numbers rather than guessing.
+   */
+  onCalibrationProgress?: ((progress: CalibrationProgressSnapshot) => void) | undefined;
   /**
    * A break started (with its planned length) or ended (null). Breaks are
    * always skippable through SessionRunner.skipRest().

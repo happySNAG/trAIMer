@@ -7,6 +7,7 @@ import type { TrialRecord } from "../domain/trial.ts";
 import { validateTrial, DEFAULT_VALIDATION_CONFIG } from "../validation/validateTrial.ts";
 import { planCandidateBlocks, type TrialPlanSpec } from "../experiments/protocol.ts";
 import { SensitivityOptimizer } from "../optimizer/optimizer.ts";
+import type { Recommendation } from "../domain/recommendation.ts";
 import {
   nextSessionState,
   IllegalTransitionError,
@@ -26,6 +27,13 @@ import {
   type ResumeCheckpoint,
 } from "./resume.ts";
 import { APP_VERSION, ENGINE_VERSION, OPTIMIZER_VERSION_V4 } from "../version.ts";
+import {
+  assessEvidenceSufficiency,
+  buildSessionOutcomeReport,
+  type CalibrationProgressSnapshot,
+  type SessionEndKind,
+  type SessionOutcomeReport,
+} from "../results/sessionOutcome.ts";
 
 const SEQUENCE_KEY = (round: number, seq: number): string => `${round}:${seq}`;
 
@@ -39,8 +47,20 @@ export interface SessionRunOutcome {
   status: "complete" | "aborted";
   trials: TrialRecord[];
   auditTrail: readonly AuditEntry[];
-  /** Present only when the run aborted for a reason the UI must explain. */
+  /**
+   * Present on EVERY aborted run. rc.6 returned an aborted outcome with no
+   * reason whenever the abort came from `cancel()`, so a broken break and a
+   * deliberate exit were indistinguishable and both rendered as the generic
+   * "Session ended · partial data was saved".
+   */
   abortReason?: SessionAbortReason;
+  /**
+   * Always present: what happened, how far the calibration got, what evidence
+   * exists, and whether that evidence supports a recommendation.
+   */
+  outcomeReport: SessionOutcomeReport;
+  /** The optimizer's recommendation, when the run produced one. */
+  recommendation: Recommendation | null;
 }
 
 export class SessionRunner {
@@ -69,6 +89,17 @@ export class SessionRunner {
   #startedAtIso = new Date().toISOString();
   #currentRound = -1;
   #pendingTrial: NonNullable<ResumeCheckpoint["interruptedTrial"]> | null = null;
+  /**
+   * Engine-detected abort reason (capture lost, resume refused). Kept apart
+   * from a player cancel on purpose: relabelling an engine failure as "the
+   * player ended it" is exactly how rc.6 hid a broken break.
+   */
+  #engineAbort: SessionAbortReason | null = null;
+  /** Steps (warm-up + measured drills) in each round's ACTUAL plan. */
+  #plannedStepsByRound = new Map<number, number>();
+  /** 1-based candidate block within the current round, for progress display. */
+  #blockIndexInRound = 0;
+  #lastCandidateIdForProgress: string | null = null;
 
   constructor(definition: ExperimentDefinition, ports: SessionRunnerPorts) {
     this.#definition = definition;
@@ -201,10 +232,11 @@ export class SessionRunner {
         reasonCode: lock.reasonCode,
         detail: lock.detail,
       });
-      return this.#abortRun(`pointer lock ${lock.reasonCode}: ${lock.detail}`, {
-        code: lock.reasonCode,
-        detail: lock.detail,
-      });
+      return this.#abortRun(
+        `pointer lock ${lock.reasonCode}: ${lock.detail}`,
+        { code: lock.reasonCode, detail: lock.detail },
+        lock.reasonCode === "cancelled" ? "ended-by-player" : "capture-unavailable",
+      );
     }
     this.#setState("candidate-transition", "lock acquired");
 
@@ -215,6 +247,14 @@ export class SessionRunner {
       if (this.#cancelRequested) break;
       const allocation = this.#allocationForRound(round);
       const plan = planCandidateBlocks(this.#definition, round, undefined, allocation);
+      // The plan for a round is only knowable once adaptive allocation has
+      // run, so the denominator is refined round by round. Recording the
+      // ACTUAL length (rather than a constant guess) is what keeps the
+      // "Calibration NN %" readout truthful.
+      this.#plannedStepsByRound.set(round, plan.length);
+      this.#blockIndexInRound = 0;
+      this.#lastCandidateIdForProgress = null;
+      this.#emitCalibrationProgress();
       const remaining = plan.filter(
         (spec) => !this.#completedKeys.has(SEQUENCE_KEY(round, spec.sequenceNumber)),
       );
@@ -236,15 +276,85 @@ export class SessionRunner {
         return this.#abortRun(
           `capture could not be resumed: ${this.#resumeFailure.detail}`,
           this.#resumeFailure,
+          "resume-failed",
         );
       }
-      return this.#abortRun("cancelled by user");
+      if (this.#engineAbort) {
+        return this.#abortRun(
+          `session aborted: ${this.#engineAbort.detail}`,
+          this.#engineAbort,
+          "capture-lost",
+        );
+      }
+      // A player cancel is still an explicit outcome, and it still carries a
+      // reason. An aborted run with no reason at all is what let rc.6 render
+      // a broken session as an ordinary finish.
+      return this.#abortRun(
+        "cancelled by user",
+        {
+          code: "cancelled",
+          detail: "you ended the session from the arena controls",
+        },
+        "ended-by-player",
+      );
     }
 
     this.#setState("analyzing");
+    const { recommendation } = await this.#analyze();
+    this.#setState("complete");
+    await this.#persistCheckpoint("complete");
+    await this.#ports.execution.releaseCapture();
+    return {
+      status: "complete",
+      trials: this.#allTrials,
+      auditTrail: this.auditEntries(),
+      recommendation,
+      outcomeReport: buildSessionOutcomeReport({
+        definition: this.#definition,
+        trials: this.#allTrials,
+        endKind: "completed",
+        progress: this.calibrationProgress(),
+        recommendation,
+      }),
+    };
+  }
+
+  /**
+   * Runs the optimizer over everything measured so far and persists a
+   * recommendation ONLY when the evidence supports one.
+   *
+   * A session that stopped short still gets analysed — the player must be able
+   * to see what their partial data says — but an under-powered run must not
+   * leave a bogus eDPI sitting in History as if it were a finding.
+   */
+  async #analyze(): Promise<{
+    recommendation: Recommendation | null;
+    sufficient: boolean;
+  }> {
+    const measured = this.#allTrials.filter((t) => t.phase === "measured");
+    if (measured.length === 0) {
+      this.#audit.append(this.#ports.nowIso(), "evidence-insufficient", {
+        reason: "no measured trials were completed",
+        measuredTrials: 0,
+      });
+      return { recommendation: null, sufficient: false };
+    }
     const optimizer = new SensitivityOptimizer(this.#definition);
     for (const trial of this.#allTrials) optimizer.addTrials([trial]);
     const recommendation = optimizer.recommend();
+    const sufficiency = assessEvidenceSufficiency(
+      this.#definition,
+      this.#allTrials,
+      recommendation,
+    );
+    if (!sufficiency.sufficient) {
+      this.#audit.append(this.#ports.nowIso(), "evidence-insufficient", {
+        reason: sufficiency.reasons.join(" | ").slice(0, 400),
+        measuredTrials: measured.length,
+        moreMeasuredTrialsNeeded: sufficiency.additionalMeasuredTrialsNeeded,
+      });
+      return { recommendation, sufficient: false };
+    }
     for (const line of recommendation.rationaleLines.slice(0, 3)) {
       this.#audit.append(this.#ports.nowIso(), "recommendation-created", {
         edpi: Math.round(recommendation.recommendedEdpi),
@@ -260,10 +370,50 @@ export class SessionRunner {
       utilityWeights: recommendation.utilityWeights as unknown as Record<string, number>,
       config: {},
     });
-    this.#setState("complete");
-    await this.#persistCheckpoint("complete");
-    await this.#ports.execution.releaseCapture();
-    return { status: "complete", trials: this.#allTrials, auditTrail: this.auditEntries() };
+    return { recommendation, sufficient: true };
+  }
+
+  /**
+   * Where this session sits in its own plan. Rounds that have not been planned
+   * yet are estimated from the first round's actual length — the only honest
+   * estimate available before adaptive allocation runs — and the estimate is
+   * replaced with the real number the moment that round is planned.
+   */
+  calibrationProgress(): CalibrationProgressSnapshot {
+    const d = this.#definition;
+    const roundsPlanned = Math.max(1, d.stoppingCriteria.maxSearchRounds);
+    const perRoundFallback =
+      this.#plannedStepsByRound.get(0) ??
+      d.candidates.length *
+        (d.warmupTrialsPerCandidateBlock + d.measuredRepsPerCandidatePerRound);
+    let stepsPlanned = 0;
+    for (let round = 0; round < roundsPlanned; round++) {
+      stepsPlanned += this.#plannedStepsByRound.get(round) ?? perRoundFallback;
+    }
+    const stepsCompleted = this.#allTrials.length;
+    const measuredCompleted = this.#allTrials.filter(
+      (t) => t.phase === "measured",
+    ).length;
+    const measuredPlanned = Math.min(
+      d.candidates.length * d.measuredRepsPerCandidatePerRound * roundsPlanned,
+      d.stoppingCriteria.maxTotalMeasuredTrials,
+    );
+    return {
+      stepsCompleted,
+      stepsPlanned: Math.max(stepsPlanned, stepsCompleted),
+      fraction:
+        stepsPlanned > 0 ? Math.min(1, stepsCompleted / stepsPlanned) : 0,
+      roundIndex: Math.max(1, this.#currentRound + 1),
+      roundsPlanned,
+      blockIndex: Math.max(1, this.#blockIndexInRound),
+      blocksPerRound: d.candidates.length,
+      measuredCompleted,
+      measuredPlanned,
+    };
+  }
+
+  #emitCalibrationProgress(): void {
+    this.#ports.onCalibrationProgress?.(this.calibrationProgress());
   }
 
   async #executionGate(): Promise<LockOutcome> {
@@ -306,6 +456,10 @@ export class SessionRunner {
         this.#setState("candidate-transition");
       }
       lastCandidateId = spec.candidateId;
+      if (spec.candidateId !== this.#lastCandidateIdForProgress) {
+        this.#lastCandidateIdForProgress = spec.candidateId;
+        this.#blockIndexInRound++;
+      }
 
       const scenario = scenarioById(spec.scenarioId);
       const label = this.#blindLabelFor(spec.candidateId);
@@ -386,6 +540,7 @@ export class SessionRunner {
       this.#pendingTrial = null;
       await this.#persistCheckpoint("running");
       this.#ports.onTrialPersisted?.(record);
+      this.#emitCalibrationProgress();
 
       this.#setState("inter-trial", outcomeDetail(record));
       await this.#ports.sleep(this.#interTrialDelayMs(scenario));
@@ -468,11 +623,36 @@ export class SessionRunner {
     this.#pauseRequested = false;
   }
 
+  /** The player asked to leave. Always an honest, named outcome. */
   cancel(): void {
     this.#cancelRequested = true;
     this.#pauseRequested = false;
     // Never make the player wait out a break to leave.
     this.#restSkip?.();
+  }
+
+  /**
+   * The ENGINE cannot continue: capture was lost mid-session, or something
+   * else made further measurement impossible.
+   *
+   * Separate from `cancel()` on purpose. rc.6 routed every internal failure
+   * through `cancel()`, which produced an aborted run with no reason at all —
+   * so a break that broke the session and a player pressing "End session"
+   * were literally the same outcome object, and both were rendered as
+   * "Session ended · partial data was saved".
+   */
+  abort(reason: SessionAbortReason): void {
+    if (this.#engineAbort === null) this.#engineAbort = reason;
+    this.#audit.append(this.#ports.nowIso(), "session-aborted", {
+      code: reason.code,
+      detail: reason.detail,
+    });
+    this.cancel();
+  }
+
+  /** The engine-detected abort reason, if one has been raised. */
+  get engineAbortReason(): SessionAbortReason | null {
+    return this.#engineAbort;
   }
 
   /**
@@ -596,9 +776,21 @@ export class SessionRunner {
 
   async #abortRun(
     reason: string,
-    abortReason?: SessionAbortReason,
+    abortReason: SessionAbortReason,
+    endKind: SessionEndKind,
   ): Promise<SessionRunOutcome> {
     this.#cancelRequested = true;
+    // Everything measured before the abort is still evidence, and the player
+    // is entitled to see what it says. Analysis persists a recommendation
+    // only when the evidence actually supports one.
+    let recommendation: Recommendation | null = null;
+    try {
+      recommendation = (await this.#analyze()).recommendation;
+    } catch {
+      // A failed analysis must never turn an explained abort into a crash;
+      // the outcome report simply reports no recommendation.
+      recommendation = null;
+    }
     this.#forceState("aborted");
     this.#phaseLog.push({ state: "aborted-detail", tIso: this.#ports.nowIso(), detail: reason });
     await this.#persistCheckpoint("aborted");
@@ -607,7 +799,16 @@ export class SessionRunner {
       status: "aborted",
       trials: this.#allTrials,
       auditTrail: this.auditEntries(),
-      ...(abortReason ? { abortReason } : {}),
+      abortReason,
+      recommendation,
+      outcomeReport: buildSessionOutcomeReport({
+        definition: this.#definition,
+        trials: this.#allTrials,
+        endKind,
+        abortReason,
+        progress: this.calibrationProgress(),
+        recommendation,
+      }),
     };
   }
 

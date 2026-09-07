@@ -1,15 +1,20 @@
-# Windows installer definition for Aldo Aim Lab.
+# Windows installer definition for trAIMer.
 #
-# Produces ONE double-clickable file — AldoAimLab-Setup-<version>.exe — that
+# Produces ONE double-clickable file — trAIMer-Setup-<version>.exe — that
 # installs the desktop shell, the built frontend, and the compiled Raw Input
 # helper, then creates Start Menu and Desktop shortcuts. The player never sees
 # PowerShell, a terminal, a compiler, or a browser address bar.
 #
 # Build:  npm run dist:win   (Windows host or the windows-installer CI job)
 
+# appId is DELIBERATELY unchanged across the rename. electron-builder derives
+# the NSIS uninstall registry key from it, so keeping it makes rc.7 an in-place
+# UPGRADE of an rc.6 install: the old "Aldo Aim Lab" entry is replaced rather
+# than left behind next to a new one, which is the worst possible branding
+# outcome in Windows' Apps list. It is never displayed to a player.
 appId: com.aldoaimlab.desktop
-productName: Aldo Aim Lab
-copyright: Aldo Aim Lab — local-only aim measurement
+productName: trAIMer
+copyright: trAIMer — local-only aim measurement
 
 directories:
   output: release/installer
@@ -33,8 +38,8 @@ files:
 # helper it cannot verify. Never invoke electron-builder directly for a
 # release build.
 extraResources:
-  - from: native/windows/aldo_capture_helper.exe
-    to: aldo_capture_helper.exe
+  - from: native/windows/traimer_capture_helper.exe
+    to: traimer_capture_helper.exe
 
 asar: true
 compression: maximum
@@ -53,7 +58,7 @@ win:
   # ("build"), and our files already sit at the exact default locations
   # (build/icon.ico, build/installer.nsh). Naming them explicitly risks
   # resolving to build/build/... and silently dropping the customisation.
-  artifactName: AldoAimLab-Setup-${version}.${ext}
+  artifactName: trAIMer-Setup-${version}.${ext}
   # No elevation: a per-user install keeps the anti-cheat-safe posture (no
   # admin rights, no services, no drivers, no system mutation).
   requestedExecutionLevel: asInvoker
@@ -65,9 +70,9 @@ nsis:
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: always
   createStartMenuShortcut: true
-  shortcutName: Aldo Aim Lab
+  shortcutName: trAIMer
   menuCategory: false
   runAfterFinish: true
   deleteAppDataOnUninstall: false
-  uninstallDisplayName: Aldo Aim Lab ${version}
+  uninstallDisplayName: trAIMer ${version}
   differentialPackage: false

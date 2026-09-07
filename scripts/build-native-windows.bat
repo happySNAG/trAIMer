@@ -1,7 +1,7 @@
 @echo off
 rem Native build pipeline - Windows target.
 rem
-rem Builds aldo_capture_helper.exe. Locates the MSVC toolset itself via
+rem Builds traimer_capture_helper.exe. Locates the MSVC toolset itself via
 rem vswhere when `cl` is not already on PATH, so this works from a plain
 rem command prompt and from CI without hardcoding a Visual Studio edition
 rem path (the previous hardcoded ...\2022\Enterprise\... path did not exist on
@@ -12,8 +12,8 @@ rem Batch expands %errorlevel% when it PARSES the block, not when it runs it,
 rem which would silently read a stale value.
 
 setlocal
-set C_SRC=native\windows\aldo_capture_helper.c
-set EXE=native\windows\aldo_capture_helper.exe
+set C_SRC=native\windows\traimer_capture_helper.c
+set EXE=native\windows\traimer_capture_helper.exe
 
 if not exist "%C_SRC%" (
   echo missing %C_SRC%

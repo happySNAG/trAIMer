@@ -139,7 +139,7 @@ export async function importBackupAll(
 ): Promise<RestoreResult> {
   const b = backup as Partial<BackupFile> | null;
   if (!b || b.kind !== "aldo-backup" || b.schemaVersion !== 1) {
-    throw new BackupError("not an Aldo Aim Lab backup file", "BACKUP_BAD_ENVELOPE");
+    throw new BackupError("not a trAIMer backup file", "BACKUP_BAD_ENVELOPE");
   }
   if (
     !Array.isArray(b.entryPaths) ||

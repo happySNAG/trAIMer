@@ -56,7 +56,7 @@ export function runDemo(cliArgs: CliArgs, log: (line: string) => void): void {
   const trueSensX = cliArgs.hiddenEdpi / cliArgs.dpi;
   const baselineSensitivity = equalXy(cliArgs.baselinePercent);
 
-  log("Aldo Aim Lab — synthetic demonstration");
+  log("trAIMer — synthetic demonstration");
   log("");
   log(
     `Player: ${player.displayName} | DPI ${cliArgs.dpi} | baseline ${cliArgs.baselinePercent}%/` +

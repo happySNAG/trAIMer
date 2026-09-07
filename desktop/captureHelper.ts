@@ -2,7 +2,7 @@
  * Native capture helper lifecycle owner.
  *
  * The desktop shell — not the player, not a script, not the renderer — starts
- * and stops `aldo_capture_helper.exe`. Contract:
+ * and stops `traimer_capture_helper.exe`. Contract:
  *
  *   start()  mints nothing (see sessionToken.ts), picks a free loopback port,
  *            spawns the helper with an ARGUMENT ARRAY (never a shell string),
@@ -155,7 +155,7 @@ export class CaptureHelper {
       this.#set({
         state: "unavailable",
         reasonCode: "HELPER_MISSING",
-        detail: `aldo_capture_helper.exe was not found at ${this.exePath}. Reinstall Aldo Aim Lab.`,
+        detail: `traimer_capture_helper.exe was not found at ${this.exePath}. Reinstall trAIMer.`,
       });
       this.log.error("helper-missing", { exePath: this.exePath });
       return this.status;

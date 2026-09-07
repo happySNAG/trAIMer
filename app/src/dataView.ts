@@ -1,6 +1,6 @@
 import { LocalJsonStore } from "../../src/persistence/store.ts";
 import { IndexedDbBackend } from "../../src/persistence/backends.ts";
-import { openAimLabDb } from "./idb.ts";
+import { openTraimerDb } from "./idb.ts";
 import {
   exportExperimentBundle,
   importExperimentBundle,
@@ -32,7 +32,7 @@ export async function renderDataView(container: HTMLElement): Promise<void> {
     ),
   );
 
-  const backend = new IndexedDbBackend(await openAimLabDb());
+  const backend = new IndexedDbBackend(await openTraimerDb());
   const store = new LocalJsonStore(backend);
 
   // ---- whole-store backup ----
@@ -43,7 +43,7 @@ export async function renderDataView(container: HTMLElement): Promise<void> {
     backupStatus.append(el("p", { class: "muted", text: "Building backup…" }));
     try {
       const backup = await exportBackupAll(backend);
-      downloadJson(`aldo-aim-lab-backup-${new Date().toISOString().slice(0, 10)}.json`, backup);
+      downloadJson(`traimer-backup-${new Date().toISOString().slice(0, 10)}.json`, backup);
       clear(backupStatus);
       backupStatus.append(
         inlineAlert("ok", `Backup created — ${backup.entryPaths.length} artifacts, SHA-256 verified.`),

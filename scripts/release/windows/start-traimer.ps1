@@ -1,8 +1,8 @@
 # --------------------------------------------------------------------
-# Aldo Aim Lab — Windows launcher (start)
+# trAIMer — Windows launcher (start)
 #
 # Starts, in order:
-#   1. aldo_capture_helper.exe  (loopback-only Raw Input capture,
+#   1. traimer_capture_helper.exe  (loopback-only Raw Input capture,
 #      authenticated with a fresh random token)
 #   2. a minimal local static web server for the app/ folder
 #      (HttpListener bound to http://127.0.0.1:<webPort>/ ONLY)
@@ -10,7 +10,7 @@
 #
 # Everything stays on 127.0.0.1. No telemetry, no remote endpoints.
 # Keep this window open while playing; closing it (or running
-# stop-aldo-lab.ps1) tears the helper down deterministically.
+# stop-traimer.ps1) tears the helper down deterministically.
 #
 # The web-server port is picked automatically from 48800-48809 so a
 # second instance can never collide with the first.
@@ -19,10 +19,10 @@
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
-$helperPath = Join-Path $root "aldo_capture_helper.exe"
+$helperPath = Join-Path $root "traimer_capture_helper.exe"
 $appDir = Join-Path $root "app"
 $manifestPath = Join-Path $root "manifest.json"
-$stateDir = Join-Path $root ".aldo-lab"
+$stateDir = Join-Path $root ".traimer"
 $helperPort = 48765
 
 function Fail([string]$message) {
@@ -33,13 +33,13 @@ function Fail([string]$message) {
 }
 
 Write-Host ""
-Write-Host "  Aldo Aim Lab — starting..." -ForegroundColor White
+Write-Host "  trAIMer — starting..." -ForegroundColor White
 
 # ---- 1. sanity-check the installation -------------------------------------
 
 if (-not (Test-Path $helperPath)) {
   Write-Host ""
-  Write-Host "  Native capture helper not found: aldo_capture_helper.exe" -ForegroundColor Yellow
+  Write-Host "  Native capture helper not found: traimer_capture_helper.exe" -ForegroundColor Yellow
   Write-Host "  You can still run the app in BROWSER capture mode (works, but"
   Write-Host "  samples at frame rate instead of your mouse's polling rate)."
   Write-Host "  For full-fidelity measurement, rebuild/re-download the release"
@@ -76,7 +76,7 @@ if (Test-Path $manifestPath) {
 $probe = New-Object System.Net.Sockets.TcpClient
 try {
   $probe.Connect("127.0.0.1", $helperPort) | Out-Null
-  Fail ("capture port ${helperPort} is already in use — an Aim Lab helper (or another instance) appears to be running. Run .\stop-aldo-lab.ps1 first, then start again.")
+  Fail ("capture port ${helperPort} is already in use — a trAIMer helper (or another instance) appears to be running. Run .\stop-traimer.ps1 first, then start again.")
 } catch {
   # port free — this is what we want
 } finally {
@@ -209,7 +209,7 @@ try {
   Write-Host ""
   Write-Host "  Ready. Opening $appUrl" -ForegroundColor Green
   Write-Host "  Leave this window open while you play. Stop everything with"
-  Write-Host "  .\stop-aldo-lab.ps1 or by closing this window."
+  Write-Host "  .\stop-traimer.ps1 or by closing this window."
   Write-Host ""
   try {
     Start-Process $appUrl

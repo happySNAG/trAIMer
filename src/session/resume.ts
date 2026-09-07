@@ -201,3 +201,47 @@ export function checkDefinitionCompatible(
   }
   return { compatible: true, reason: null };
 }
+
+/**
+ * What "Continue calibration" should actually run.
+ *
+ * A session can finish its whole plan and STILL not support a recommendation
+ * — five candidates at three reps each is a complete plan and not enough
+ * evidence. Resuming such a checkpoint as-is would replay nothing at all and
+ * hand the player the same "more data needed" screen a second time, which is
+ * the most demoralising possible outcome of a button labelled "continue".
+ *
+ * So: if every step of every planned round is already complete, continuing
+ * adds ONE more search round. Otherwise it simply picks up the remaining
+ * steps. Pure function of the checkpoint and the definition, so the UI and
+ * the runner cannot disagree about what continuing means.
+ */
+export function planContinuation(
+  checkpoint: ResumeCheckpoint,
+  definition: ExperimentDefinition,
+  plannedStepsForRound: (round: number) => readonly { sequenceNumber: number }[],
+): { definition: ExperimentDefinition; addedRound: boolean; remainingSteps: number } {
+  const completed = new Set(checkpoint.completedSequenceKeys);
+  const rounds = Math.max(1, definition.stoppingCriteria.maxSearchRounds);
+  let remaining = 0;
+  for (let round = 0; round < rounds; round++) {
+    for (const spec of plannedStepsForRound(round)) {
+      if (!completed.has(`${round}:${spec.sequenceNumber}`)) remaining++;
+    }
+  }
+  if (remaining > 0) {
+    return { definition, addedRound: false, remainingSteps: remaining };
+  }
+  return {
+    definition: {
+      ...definition,
+      candidates: [...definition.candidates],
+      stoppingCriteria: {
+        ...definition.stoppingCriteria,
+        maxSearchRounds: rounds + 1,
+      },
+    },
+    addedRound: true,
+    remainingSteps: 0,
+  };
+}

@@ -153,7 +153,7 @@ export function renderDiagnosticsView(
       "pulse",
       "neutral",
       "Checking…",
-      "Started and stopped automatically by Aldo Aim Lab",
+      "Started and stopped automatically by trAIMer",
     );
     statusGrid.append(helperTile);
     let currentTile = helperTile;
@@ -483,7 +483,7 @@ export function renderDiagnosticsView(
           field("Helper URL", urlInput, { hint: "Loopback only — remote URLs are refused." }),
           field(
             desktopBridge()
-              ? "Session token (managed by Aldo Aim Lab)"
+              ? "Session token (managed by trAIMer)"
               : "Session token (must match --token)",
             tokenInput,
           ),

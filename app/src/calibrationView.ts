@@ -15,7 +15,7 @@ import {
 import { LocalJsonStore } from "../../src/persistence/store.ts";
 import { IndexedDbBackend } from "../../src/persistence/backends.ts";
 import { HistoryApi } from "../../src/history/api.ts";
-import { openAimLabDb } from "./idb.ts";
+import { openTraimerDb } from "./idb.ts";
 import { el, clear } from "./dom.ts";
 import { loadSettings } from "./state.ts";
 import {
@@ -49,7 +49,7 @@ export function renderCalibrationView(container: HTMLElement): void {
   container.append(statusHolder);
   void (async () => {
     try {
-      const store = new LocalJsonStore(new IndexedDbBackend(await openAimLabDb()));
+      const store = new LocalJsonStore(new IndexedDbBackend(await openTraimerDb()));
       const api = new HistoryApi(store);
       const snap = await api.snapshot();
       const latest = snap.calibrationHistory[snap.calibrationHistory.length - 1];
@@ -231,7 +231,7 @@ export function renderCalibrationView(container: HTMLElement): void {
   computeButton.addEventListener("click", async () => {
     try {
       const record = deriveCalibration("x", methodSelect.value as CalibrationMeasurement["method"], measurements);
-      const backend = new IndexedDbBackend(await openAimLabDb());
+      const backend = new IndexedDbBackend(await openTraimerDb());
       const store = new LocalJsonStore(backend);
       await store.saveRaw(
         "calibration-record",

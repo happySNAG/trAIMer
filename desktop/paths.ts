@@ -19,7 +19,7 @@ export function frontendRoot(): string {
  * child process cannot be spawned from inside an archive.
  */
 export function helperExecutablePath(): string {
-  const exeName = "aldo_capture_helper.exe";
+  const exeName = "traimer_capture_helper.exe";
   return app.isPackaged
     ? join(process.resourcesPath, exeName)
     : join(__dirname, "..", "native", "windows", exeName);

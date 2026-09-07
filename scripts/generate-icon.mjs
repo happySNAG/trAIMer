@@ -19,7 +19,7 @@ import { dirname } from "node:path";
 
 const SIZES = [16, 24, 32, 48, 64, 128, 256];
 const BG = [0x0d, 0x10, 0x15]; // app background
-const FG = [0xc8, 0xf2, 0x4e]; // Aldo lime
+const FG = [0xc8, 0xf2, 0x4e]; // volt accent (design system --accent)
 const SUPERSAMPLE = 4;
 
 function arg(name, fallback) {

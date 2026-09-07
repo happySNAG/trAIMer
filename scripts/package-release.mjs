@@ -4,11 +4,11 @@
  *
  * Assembles the portable release folder:
  *
- *   AldoAimLab/
- *   ├── aldo_capture_helper.exe     (from --helper)
+ *   trAIMer/
+ *   ├── traimer_capture_helper.exe     (from --helper)
  *   ├── app/                        (from dist-app/)
- *   ├── start-aldo-lab.ps1
- *   ├── stop-aldo-lab.ps1
+ *   ├── start-traimer.ps1
+ *   ├── stop-traimer.ps1
  *   ├── FIRST-RUN.md
  *   ├── manifest.json               (versions, commit, file list + hashes)
  *   └── SHA256SUMS.txt              (deterministic checksum manifest)
@@ -44,7 +44,7 @@ function arg(name, fallback) {
 }
 
 const distDir = arg("--dist", "dist-app");
-const helperPath = arg("--helper", "native/windows/aldo_capture_helper.exe");
+const helperPath = arg("--helper", "native/windows/traimer_capture_helper.exe");
 const outRoot = arg("--out", "release");
 const commit = arg("--commit", "");
 
@@ -60,13 +60,13 @@ const placeholderHelper = process.argv.includes("--allow-placeholder-helper");
  * ROOT-CAUSE FIX (v1.0.0-rc.1 shipped the C source under the .exe name).
  *
  * Two rules now make that outcome structurally impossible:
- *   1. Any file placed at `aldo_capture_helper.exe` MUST pass the full
+ *   1. Any file placed at `traimer_capture_helper.exe` MUST pass the full
  *      PE gate (MZ header, PE signature, AMD64 machine, plausible size,
  *      not source text). No flag can bypass this.
  *   2. Dry-run mode never writes the `.exe` name at all — the placeholder
  *      gets an unmistakable filename that Windows will never execute.
  */
-let helperTargetName = "aldo_capture_helper.exe";
+let helperTargetName = "traimer_capture_helper.exe";
 let effectiveHelperPath = helperPath;
 
 if (!existsSync(helperPath)) {
@@ -84,12 +84,12 @@ if (!existsSync(helperPath)) {
     "PLACEHOLDER — not a real binary. A release with helperBinaryIsPlaceholder:true must never ship.\n",
   );
   effectiveHelperPath = placeholder;
-  helperTargetName = "aldo_capture_helper.exe.PLACEHOLDER-NOT-EXECUTABLE";
+  helperTargetName = "traimer_capture_helper.exe.PLACEHOLDER-NOT-EXECUTABLE";
 } else {
   const check = verifyHelperBinary(helperPath);
   if (!check.ok) {
     fail(
-      `refusing to package ${helperPath} as aldo_capture_helper.exe:\n` +
+      `refusing to package ${helperPath} as traimer_capture_helper.exe:\n` +
         check.problems.map((problem) => `    - ${problem}`).join("\n") +
         `\n  Compile the helper on Windows (scripts/build-native-windows.bat) and package that.`,
     );
@@ -130,15 +130,15 @@ function listFilesRecursive(dir) {
 }
 
 // ---- assemble ---------------------------------------------------------------
-const releaseName = `AldoAimLab-v${version}`;
+const releaseName = `trAIMer-v${version}`;
 const releaseDir = join(outRoot, releaseName);
 rmrf(releaseDir);
 mkdirSync(releaseDir, { recursive: true });
 
 cpSync(distDir, join(releaseDir, "app"), { recursive: true });
 copyFileSync(effectiveHelperPath, join(releaseDir, helperTargetName));
-copyFileSync("scripts/release/windows/start-aldo-lab.ps1", join(releaseDir, "start-aldo-lab.ps1"));
-copyFileSync("scripts/release/windows/stop-aldo-lab.ps1", join(releaseDir, "stop-aldo-lab.ps1"));
+copyFileSync("scripts/release/windows/start-traimer.ps1", join(releaseDir, "start-traimer.ps1"));
+copyFileSync("scripts/release/windows/stop-traimer.ps1", join(releaseDir, "stop-traimer.ps1"));
 copyFileSync("scripts/release/windows/FIRST-RUN.md", join(releaseDir, "FIRST-RUN.md"));
 
 // ---- manifests ---------------------------------------------------------------

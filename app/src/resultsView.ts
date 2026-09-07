@@ -1,5 +1,6 @@
 import type { AimDimension, Recommendation } from "../../src/domain/recommendation.ts";
 import type { FinalResult } from "../../src/results/finalResult.ts";
+import type { SessionOutcomeReport } from "../../src/results/sessionOutcome.ts";
 import { el, clear } from "./dom.ts";
 import {
   badge,
@@ -19,6 +20,7 @@ import {
   sectionLabel,
   statTile,
   table,
+  type StatOptions,
   type Tone,
 } from "./ui.ts";
 
@@ -27,8 +29,16 @@ export interface ResultsInput {
   trialsAnalyzed: number;
   /** Pass 5 frozen results contract; rendered as the headline when present. */
   finalResult?: FinalResult | null | undefined;
+  /**
+   * What the session did and what it proved. Present for every session run in
+   * this launch; absent only when the screen is showing a stored result from
+   * an earlier launch.
+   */
+  outcome?: SessionOutcomeReport | null | undefined;
   /** Navigates to the Test tab (empty-state CTA). */
   onStartTest?: (() => void) | undefined;
+  /** Resumes the unfinished calibration this report belongs to. */
+  onContinueCalibration?: (() => void) | null | undefined;
 }
 
 const NEXT_ACTION_LABELS: Record<string, string> = {
@@ -92,7 +102,22 @@ export function renderResultsView(
     pageHeader("Results", "What the evidence says about your sensitivity."),
   );
 
+  const outcome = input.outcome ?? null;
+
+  // A session that ran ALWAYS explains itself first — before any
+  // recommendation, and whether or not one exists. rc.6 had exactly one thing
+  // to render (a recommendation), so a session killed by its own first break
+  // arrived here as the "No results yet" empty state.
+  if (outcome) {
+    container.append(renderSessionOutcome(outcome));
+    container.append(renderEvidenceSoFar(outcome));
+  }
+
   if (!input.recommendation) {
+    if (outcome) {
+      container.append(renderMoreDataNeeded(outcome, input));
+      return;
+    }
     const startBtn = input.onStartTest
       ? button("Start an aim test", { variant: "primary", icon: "play", onClick: () => input.onStartTest?.() })
       : undefined;
@@ -115,6 +140,229 @@ export function renderResultsView(
   } else {
     renderLegacyRecommendation(container, rec, input);
   }
+}
+
+// ---------------------------------------------------------------------------
+// Session outcome — what happened, how far it got, and what it proves
+// ---------------------------------------------------------------------------
+
+const END_TITLES: Record<SessionOutcomeReport["endKind"], string> = {
+  completed: "Calibration complete",
+  "ended-by-player": "You ended this calibration early",
+  "capture-lost": "This calibration stopped early — the mouse was lost",
+  "resume-failed": "This calibration stopped early — the mouse could not be taken back",
+  "capture-unavailable": "This calibration never started",
+  error: "This calibration stopped because of an error",
+};
+
+function renderSessionOutcome(outcome: SessionOutcomeReport): HTMLElement {
+  const p = outcome.progress;
+  const percent = Math.round(p.fraction * 100);
+  const tone: Tone = outcome.endedEarly ? "warn" : "ok";
+  const body: (Node | string)[] = [
+    el("p", { class: "outcome-reason", text: outcome.endReasonText }),
+  ];
+
+  const bar = meter(p.fraction, { tone, label: "calibration progress" });
+  const progressRow = el("div", { class: "outcome-progress" }, [
+    el("span", { class: "outcome-progress-value", text: `Calibration ${percent}%` }),
+    bar,
+  ]);
+  body.push(progressRow);
+
+  body.push(
+    kvList([
+      ["Drills completed", `${p.stepsCompleted} of ${p.stepsPlanned} planned`],
+      ["Measured drills", `${p.measuredCompleted} of ${p.measuredPlanned} planned`],
+      ["Reached", `round ${p.roundIndex} of ${p.roundsPlanned}, block ${p.blockIndex} of ${p.blocksPerRound}`],
+    ]),
+  );
+
+  if (outcome.endReasonCode) {
+    body.push(
+      el("p", {
+        class: "muted mono",
+        text: `reason code: ${outcome.endReasonCode}`,
+      }),
+    );
+  }
+  if (outcome.endedEarly) {
+    body.push(
+      el("p", {
+        class: "muted",
+        text: "Every drill you finished was saved the moment it finished. Nothing measured has been lost.",
+      }),
+    );
+  }
+
+  return card(
+    {
+      title: END_TITLES[outcome.endKind],
+      icon: outcome.endedEarly ? "flag" : "check",
+      tone,
+      class: "outcome-card",
+    },
+    ...body,
+  );
+}
+
+/**
+ * One evidence tile. A measurement with no data renders as an em dash and no
+ * unit — never as zero, which would read as a real (and terrible) score.
+ */
+function evidenceTile(
+  label: string,
+  value: number | null,
+  format: (v: number) => string,
+  unit: string,
+  sub: string,
+  tone?: Tone,
+): HTMLElement {
+  const opts: StatOptions = { sub };
+  if (value !== null && unit !== "") opts.unit = unit;
+  if (tone) opts.tone = tone;
+  return statTile(label, value === null ? "\u2014" : format(value), opts);
+}
+
+const asPercent = (v: number): string => String(Math.round(v * 100));
+const asWhole = (v: number): string => String(Math.round(v));
+
+/** The measurements the session actually produced, however far it got. */
+function renderEvidenceSoFar(outcome: SessionOutcomeReport): HTMLElement {
+  const m = outcome.performance;
+  const tiles = grid(
+    4,
+    statTile("Drills completed", String(m.trialsCompleted), {
+      sub: `${m.measuredTrials} measured \u00b7 ${m.warmupTrials} warm-up`,
+    }),
+    statTile("Valid for scoring", String(m.validMeasuredTrials), {
+      sub: m.excludedTrials > 0 ? `${m.excludedTrials} excluded` : "none excluded",
+      tone: m.excludedTrials > 0 ? "warn" : "ok",
+    }),
+    evidenceTile("Hit accuracy", m.hitAccuracy, asPercent, "%", `${m.shotsFired} shots fired`),
+    evidenceTile("Reaction time", m.reactionTimeMs, asWhole, "ms", "median, to target appearing"),
+    evidenceTile("Overshoot", m.overshootTendency, asPercent, "%", "mean past the centre"),
+    evidenceTile("Undershoot", m.undershootTendency, asPercent, "%", "mean short of the centre"),
+    evidenceTile(
+      "Corrections",
+      m.correctionsPerShot,
+      (v) => v.toFixed(1),
+      "",
+      "extra sub-movements per shot",
+    ),
+    evidenceTile(
+      "Consistency",
+      m.acquisitionTimeCv,
+      asPercent,
+      "%",
+      "spread of acquisition time \u2014 lower is steadier",
+    ),
+    evidenceTile(
+      "Tracking on target",
+      m.trackingTimeOnTarget,
+      asPercent,
+      "%",
+      `${m.trackingTrials} tracking drill(s)`,
+    ),
+    evidenceTile(
+      "Tracking error",
+      m.trackingRmsErrorPx,
+      asWhole,
+      "px",
+      "median RMS distance off centre",
+    ),
+  );
+  return card(
+    {
+      title: "The evidence so far",
+      subtitle:
+        "Measured from your completed drills. A dash means that measurement has no data yet.",
+      icon: "results",
+    },
+    tiles,
+  );
+}
+
+/**
+ * The honest alternative to a recommendation.
+ *
+ * Shown whenever the evidence does not support a defensible sensitivity call:
+ * WHY it is not enough, HOW MUCH more is needed, and the one action that
+ * actually helps — continuing the same calibration rather than starting over.
+ */
+function renderMoreDataNeeded(
+  outcome: SessionOutcomeReport,
+  input: ResultsInput,
+): HTMLElement {
+  const s = outcome.sufficiency;
+  const body: (Node | string)[] = [];
+  body.push(
+    el("p", {
+      class: "more-data-lead",
+      text: "trAIMer will not guess a sensitivity for you. Here is exactly what is missing.",
+    }),
+  );
+
+  body.push(sectionLabel("Why this is not enough yet"));
+  const reasons = el("ul", { class: "reason-list" });
+  for (const reason of s.reasons.length > 0
+    ? s.reasons
+    : ["No measured drills were completed."]) {
+    reasons.append(el("li", { text: reason }));
+  }
+  body.push(reasons);
+
+  body.push(sectionLabel("How much more testing"));
+  body.push(
+    kvList([
+      [
+        "Measured drills still needed",
+        `about ${s.additionalMeasuredTrialsNeeded}`,
+      ],
+      ["Rough time", `about ${s.estimatedAdditionalMinutes} minute(s) of drills`],
+      [
+        "Completed so far",
+        `${outcome.performance.validMeasuredTrials} valid measured drills`,
+      ],
+    ]),
+  );
+
+  body.push(sectionLabel("What to do next"));
+  const steps = el("ol", { class: "next-step-list" });
+  for (const step of s.nextSteps) steps.append(el("li", { text: step }));
+  body.push(steps);
+
+  const actions = el("div", { class: "more-data-actions" });
+  if (input.onContinueCalibration) {
+    actions.append(
+      button("Continue calibration", {
+        variant: "primary",
+        icon: "play",
+        large: true,
+        onClick: () => input.onContinueCalibration?.(),
+      }),
+    );
+  }
+  if (input.onStartTest) {
+    actions.append(
+      button("Start a new calibration", {
+        variant: "secondary",
+        onClick: () => input.onStartTest?.(),
+      }),
+    );
+  }
+  body.push(actions);
+
+  return card(
+    {
+      title: "More data needed",
+      subtitle: "Not enough evidence yet for a sensitivity recommendation.",
+      icon: "warn",
+      tone: "warn",
+      class: "more-data-card",
+    },
+    ...body,
+  );
 }
 
 // ---------------------------------------------------------------------------

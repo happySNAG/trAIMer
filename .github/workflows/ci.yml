@@ -19,8 +19,14 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
+      - name: RELEASE GATE - user-data migration across the rename
+        run: npx vitest run tests/userDataMigration.test.ts
+      - name: RELEASE GATE - calibration journey, capture-release semantics, arena contract
+        run: npx vitest run tests/calibrationJourney.test.ts tests/captureReleaseSemantics.test.ts tests/arenaPresentation.test.ts tests/brandingGate.test.ts
       - name: no-telemetry audit (sources)
         run: node scripts/audit-no-telemetry.mjs
+      - name: RELEASE GATE - branding (sources + player docs)
+        run: node scripts/verify-branding.mjs
 
   browser:
     runs-on: ubuntu-latest
@@ -31,10 +37,15 @@ jobs:
           node-version: 20
       - run: npm ci
       - run: npx playwright install chromium --with-deps
-      - run: npm run test:browser
+      - name: browser suite (incl. calibration flow, tracking UX, shooting feel, results states)
+        run: npm run test:browser
       - run: npm run build
       - name: release artifact verification
         run: node scripts/verify-release.mjs
+      - name: RELEASE GATE - branding (sources + shipped bundle)
+        run: |
+          node scripts/verify-branding.mjs
+          node scripts/verify-branding.mjs --bundle dist-app
       - name: no-telemetry audit (bundle)
         run: node scripts/audit-no-telemetry.mjs
       - uses: actions/upload-artifact@v4
@@ -54,7 +65,7 @@ jobs:
       - name: PowerShell launcher scripts parse cleanly
         shell: pwsh
         run: |
-          foreach ($script in @("scripts/release/windows/start-aldo-lab.ps1","scripts/release/windows/stop-aldo-lab.ps1")) {
+          foreach ($script in @("scripts/release/windows/start-traimer.ps1","scripts/release/windows/stop-traimer.ps1")) {
             $parseErrors = $null
             [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $script), [ref]$null, [ref]$parseErrors)
             if ($parseErrors -and $parseErrors.Count -gt 0) {
@@ -76,14 +87,14 @@ jobs:
         run: scripts\build-native-windows.bat
       - name: RELEASE GATE - helper is a genuine Windows x64 PE
         shell: bash
-        run: node scripts/verify-windows-artifacts.mjs --helper native/windows/aldo_capture_helper.exe
+        run: node scripts/verify-windows-artifacts.mjs --helper native/windows/traimer_capture_helper.exe
       - name: RELEASE GATE - helper actually executes on Windows x64
         shell: pwsh
         run: |
           # rc.1 shipped a "helper.exe" that was the C source file. A format
           # check alone would not have caught a cross-compiled or corrupt
           # binary, so the freshly built artifact is RUN here.
-          $exe = "native/windows/aldo_capture_helper.exe"
+          $exe = "native/windows/traimer_capture_helper.exe"
           $out = (& $exe --version 2>&1 | Out-String).Trim()
           if ($LASTEXITCODE -ne 0) { throw "helper --version exited $LASTEXITCODE : $out" }
           Write-Host "helper --version -> $out"
@@ -92,8 +103,8 @@ jobs:
           if ($out -notmatch 'arch=x64') { throw "helper is not the x64 build: $out" }
       - uses: actions/upload-artifact@v4
         with:
-          name: aldo_capture_helper
-          path: native/windows/aldo_capture_helper.exe
+          name: traimer_capture_helper
+          path: native/windows/traimer_capture_helper.exe
           retention-days: 30
 
   # Pass 6: full downloadable V1 RC portable release artifact.
@@ -109,7 +120,7 @@ jobs:
       - name: PowerShell launcher scripts parse cleanly
         shell: pwsh
         run: |
-          foreach ($script in @("scripts/release/windows/start-aldo-lab.ps1","scripts/release/windows/stop-aldo-lab.ps1")) {
+          foreach ($script in @("scripts/release/windows/start-traimer.ps1","scripts/release/windows/stop-traimer.ps1")) {
             $parseErrors = $null
             [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $script), [ref]$null, [ref]$parseErrors)
             if ($parseErrors -and $parseErrors.Count -gt 0) {
@@ -135,6 +146,11 @@ jobs:
         run: npm run build
       - name: release verification
         run: node scripts/verify-release.mjs
+      - name: RELEASE GATE - branding (sources + shipped bundle)
+        shell: bash
+        run: |
+          node scripts/verify-branding.mjs
+          node scripts/verify-branding.mjs --bundle dist-app
       - name: no-telemetry audit (sources + bundle)
         run: node scripts/audit-no-telemetry.mjs
       - name: npm audit
@@ -142,31 +158,31 @@ jobs:
       - name: download compiled helper
         uses: actions/download-artifact@v4
         with:
-          name: aldo_capture_helper
+          name: traimer_capture_helper
           path: native/windows
       - name: package portable release folder + checksums
         shell: bash
         run: |
           node scripts/package-release.mjs \
-            --helper native/windows/aldo_capture_helper.exe \
+            --helper native/windows/traimer_capture_helper.exe \
             --commit "${{ github.sha }}"
       - name: verify packaged artifact contents
         shell: pwsh
         run: |
-          $manifest = Get-Content "release/AldoAimLab-*/manifest.json" -Raw | ConvertFrom-Json
+          $manifest = Get-Content "release/trAIMer-*/manifest.json" -Raw | ConvertFrom-Json
           if ($manifest.helperBinaryIsPlaceholder) { throw "release contains a placeholder helper" }
-          $required = @("aldo_capture_helper.exe","start-aldo-lab.ps1","stop-aldo-lab.ps1","FIRST-RUN.md","app/index.html")
+          $required = @("traimer_capture_helper.exe","start-traimer.ps1","stop-traimer.ps1","FIRST-RUN.md","app/index.html")
           foreach ($f in $required) {
-            $p = Join-Path "release/AldoAimLab-v$($manifest.appVersion)" $f
+            $p = Join-Path "release/trAIMer-v$($manifest.appVersion)" $f
             if (-not (Test-Path $p)) { throw "missing release file: $f" }
           }
           Write-Host "release artifact verified: $($manifest.files.Count) files"
       - name: zip the portable folder
         shell: pwsh
         run: |
-          $version = (Get-Content "release/AldoAimLab-*/manifest.json" -Raw | ConvertFrom-Json).appVersion
-          $zipName = "Aldo-Aim-Lab-v$version-windows-x64.zip"
-          Compress-Archive -Path "release/AldoAimLab-v*" -DestinationPath "release/$zipName" -Force
+          $version = (Get-Content "release/trAIMer-*/manifest.json" -Raw | ConvertFrom-Json).appVersion
+          $zipName = "trAIMer-v$version-windows-x64.zip"
+          Compress-Archive -Path "release/trAIMer-v*" -DestinationPath "release/$zipName" -Force
           "RELEASE_ZIP_NAME=$zipName" | Out-File -FilePath $env:GITHUB_ENV -Append
           # Publish the archive checksum directly in the job output.
           $hash = (Get-FileHash -Algorithm SHA256 "release/$zipName").Hash.ToLower()
@@ -174,10 +190,10 @@ jobs:
           Write-Host "SHA256: $hash  $zipName"
       - uses: actions/upload-artifact@v4
         with:
-          name: aldo-aim-lab-portable-release
+          name: traimer-portable-release
           path: |
-            release/Aldo-Aim-Lab-*-windows-x64.zip
-            release/AldoAimLab-*-SHA256SUMS.txt
+            release/trAIMer-*-windows-x64.zip
+            release/trAIMer-*-SHA256SUMS.txt
           retention-days: 90
 
   # Pass 9: THE shipped Windows product — one double-clickable installer.
@@ -222,6 +238,11 @@ jobs:
       - name: RELEASE GATE - required frontend assets present
         shell: bash
         run: node scripts/verify-windows-artifacts.mjs --frontend dist-app
+      - name: RELEASE GATE - the shipped UI says trAIMer and nothing else
+        shell: bash
+        run: |
+          node scripts/verify-branding.mjs
+          node scripts/verify-branding.mjs --bundle dist-app
       - name: release verification (versions, matrix, desktop build inputs)
         run: node scripts/verify-release.mjs
       - name: no-telemetry audit (sources + shipped bundle)
@@ -232,15 +253,15 @@ jobs:
       - name: download compiled helper
         uses: actions/download-artifact@v4
         with:
-          name: aldo_capture_helper
+          name: traimer_capture_helper
           path: native/windows
       - name: RELEASE GATE - helper is a genuine Windows x64 PE
         shell: bash
-        run: node scripts/verify-windows-artifacts.mjs --helper native/windows/aldo_capture_helper.exe
+        run: node scripts/verify-windows-artifacts.mjs --helper native/windows/traimer_capture_helper.exe
       - name: RELEASE GATE - helper executes before it is bundled
         shell: pwsh
         run: |
-          $out = (& "native/windows/aldo_capture_helper.exe" --version 2>&1 | Out-String).Trim()
+          $out = (& "native/windows/traimer_capture_helper.exe" --version 2>&1 | Out-String).Trim()
           if ($LASTEXITCODE -ne 0) { throw "helper --version exited $LASTEXITCODE : $out" }
           if ($out -notmatch 'arch=x64') { throw "helper is not the x64 build: $out" }
           Write-Host "bundling helper: $out"
@@ -253,20 +274,22 @@ jobs:
         shell: pwsh
         run: |
           $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
-          $installer = "release/installer/AldoAimLab-Setup-$version.exe"
+          $installer = "release/installer/trAIMer-Setup-$version.exe"
           if (-not (Test-Path $installer)) {
             Get-ChildItem -Recurse release/installer | ForEach-Object { Write-Host $_.FullName }
             throw "installer not produced: $installer"
           }
           node scripts/verify-windows-artifacts.mjs --installer $installer
           if ($LASTEXITCODE -ne 0) { throw "installer verification failed" }
+          node scripts/verify-branding.mjs --installer $installer
+          if ($LASTEXITCODE -ne 0) { throw "installer branding gate failed" }
           "INSTALLER_PATH=$installer" | Out-File -FilePath $env:GITHUB_ENV -Append
           "APP_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: RELEASE GATE - silent install produces a complete application
         shell: pwsh
         run: |
-          $target = "C:\aldo-install-test"
+          $target = "C:\traimer-install-test"
           # /D must be the last argument and unquoted (NSIS convention).
           $proc = Start-Process -FilePath $env:INSTALLER_PATH -ArgumentList "/S", "/D=$target" -Wait -PassThru
           if ($proc.ExitCode -ne 0) { throw "silent install exited $($proc.ExitCode)" }
@@ -274,24 +297,32 @@ jobs:
           Get-ChildItem -Recurse $target | Select-Object -First 40 | ForEach-Object { Write-Host $_.FullName }
           node scripts/verify-windows-artifacts.mjs --installed-app $target
           if ($LASTEXITCODE -ne 0) { throw "installed application verification failed" }
+          node scripts/verify-branding.mjs --installed-app $target
+          if ($LASTEXITCODE -ne 0) { throw "installed application branding gate failed" }
+          # Shortcuts and the Apps & Features entry come from productName /
+          # shortcutName / uninstallDisplayName; prove the NSIS script that was
+          # actually built carries the new ones.
+          if (-not (Test-Path (Join-Path $target "trAIMer.exe"))) { throw "installed executable is not named trAIMer.exe" }
+          $legacy = Get-ChildItem -Recurse $target | Where-Object { $_.Name -like "*Aldo*" }
+          if ($legacy) { throw "installed app still contains legacy-named files: $($legacy.Name -join ', ')" }
 
       - name: RELEASE GATE - installed app starts and shuts down cleanly
         shell: pwsh
         run: |
-          $target = "C:\aldo-install-test"
-          $exe = Join-Path $target "Aldo Aim Lab.exe"
+          $target = "C:\traimer-install-test"
+          $exe = Join-Path $target "trAIMer.exe"
           # runAfterFinish may have launched a copy; the single-instance lock
           # would otherwise turn a no-op into a false pass, and a leftover
           # helper would trip the "nothing survives shutdown" check below.
-          Get-Process -Name "Aldo Aim Lab" -ErrorAction SilentlyContinue | Stop-Process -Force
-          Get-Process -Name "aldo_capture_helper" -ErrorAction SilentlyContinue | Stop-Process -Force
+          Get-Process -Name "trAIMer" -ErrorAction SilentlyContinue | Stop-Process -Force
+          Get-Process -Name "traimer_capture_helper" -ErrorAction SilentlyContinue | Stop-Process -Force
           Start-Sleep -Seconds 3
           $out = "$env:RUNNER_TEMP\smoke-test-result.json"
           $proc = Start-Process -FilePath $exe `
             -ArgumentList "--smoke-test", "--require-helper", "--smoke-out", $out `
             -Wait -PassThru
           if (Test-Path $out) { Get-Content $out | Write-Host }
-          $log = "$env:APPDATA\AldoAimLab\logs\desktop.log"
+          $log = "$env:APPDATA\trAIMer\logs\desktop.log"
           if (Test-Path $log) { Write-Host "--- desktop.log ---"; Get-Content $log | Write-Host }
           if ($proc.ExitCode -ne 0) { throw "installed app smoke test exited $($proc.ExitCode)" }
           $result = Get-Content $out -Raw | ConvertFrom-Json
@@ -299,44 +330,44 @@ jobs:
           if ($result.helperState -ne "ready") { throw "capture helper never reached ready: $($result.helperDetail)" }
           # Nothing may survive the shutdown.
           Start-Sleep -Seconds 2
-          $stragglers = Get-Process -Name "Aldo Aim Lab", "aldo_capture_helper" -ErrorAction SilentlyContinue
+          $stragglers = Get-Process -Name "trAIMer", "traimer_capture_helper" -ErrorAction SilentlyContinue
           if ($stragglers) { throw "processes survived shutdown: $($stragglers.Name -join ', ')" }
           Write-Host "startup + clean shutdown verified"
 
       - name: RELEASE GATE - the INSTALLED app can start a test
         shell: pwsh
         run: |
-          $exe = "C:\aldo-install-test\Aldo Aim Lab.exe"
-          Get-Process -Name "Aldo Aim Lab" -ErrorAction SilentlyContinue | Stop-Process -Force
-          Get-Process -Name "aldo_capture_helper" -ErrorAction SilentlyContinue | Stop-Process -Force
+          $exe = "C:\traimer-install-test\trAIMer.exe"
+          Get-Process -Name "trAIMer" -ErrorAction SilentlyContinue | Stop-Process -Force
+          Get-Process -Name "traimer_capture_helper" -ErrorAction SilentlyContinue | Stop-Process -Force
           Start-Sleep -Seconds 2
           node scripts/verify-arena-entry.mjs --exe $exe
           if ($LASTEXITCODE -ne 0) { throw "arena entry gate failed on the installed app" }
-          Get-Process -Name "Aldo Aim Lab" -ErrorAction SilentlyContinue | Stop-Process -Force
-          Get-Process -Name "aldo_capture_helper" -ErrorAction SilentlyContinue | Stop-Process -Force
+          Get-Process -Name "trAIMer" -ErrorAction SilentlyContinue | Stop-Process -Force
+          Get-Process -Name "traimer_capture_helper" -ErrorAction SilentlyContinue | Stop-Process -Force
 
       - name: publish installer with checksum
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path release/publish | Out-Null
-          Copy-Item $env:INSTALLER_PATH "release/publish/AldoAimLab-Setup-$env:APP_VERSION.exe"
+          Copy-Item $env:INSTALLER_PATH "release/publish/trAIMer-Setup-$env:APP_VERSION.exe"
           # A stable, version-free name so the flash-drive instructions never
           # go stale.
-          Copy-Item $env:INSTALLER_PATH "release/publish/AldoAimLab-Setup.exe"
+          Copy-Item $env:INSTALLER_PATH "release/publish/trAIMer-Setup.exe"
           $hash = (Get-FileHash -Algorithm SHA256 $env:INSTALLER_PATH).Hash.ToLower()
           $bytes = (Get-Item $env:INSTALLER_PATH).Length
-          "$hash  AldoAimLab-Setup-$env:APP_VERSION.exe" |
-            Out-File -FilePath "release/publish/AldoAimLab-Setup-SHA256.txt" -Encoding ascii
-          "## Aldo Aim Lab $env:APP_VERSION Windows installer" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
-          "- file: ``AldoAimLab-Setup-$env:APP_VERSION.exe`` ($bytes bytes)" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "$hash  trAIMer-Setup-$env:APP_VERSION.exe" |
+            Out-File -FilePath "release/publish/trAIMer-Setup-SHA256.txt" -Encoding ascii
+          "## trAIMer $env:APP_VERSION Windows installer" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "- file: ``trAIMer-Setup-$env:APP_VERSION.exe`` ($bytes bytes)" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
           "- sha256: ``$hash``" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
       - uses: actions/upload-artifact@v4
         with:
-          name: aldo-aim-lab-windows-installer
+          name: traimer-windows-installer
           path: |
-            release/publish/AldoAimLab-Setup.exe
-            release/publish/AldoAimLab-Setup-*.exe
-            release/publish/AldoAimLab-Setup-SHA256.txt
+            release/publish/trAIMer-Setup.exe
+            release/publish/trAIMer-Setup-*.exe
+            release/publish/trAIMer-Setup-SHA256.txt
           retention-days: 90
       - uses: actions/upload-artifact@v4
         if: failure()

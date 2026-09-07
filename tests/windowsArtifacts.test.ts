@@ -6,7 +6,7 @@ import { join } from "node:path";
 
 /**
  * Regression suite for the v1.0.0-rc.1 release-blocking defect: the shipped
- * `aldo_capture_helper.exe` was, byte for byte, `aldo_capture_helper.c`.
+ * `traimer_capture_helper.exe` was, byte for byte, `traimer_capture_helper.c`.
  * Windows answered "The specified executable is not a valid application for
  * this OS platform." Nothing in the pipeline had ever inspected the bytes.
  *
@@ -99,8 +99,8 @@ describe("helper release gate", () => {
   });
 
   it("REJECTS the exact artifact that shipped on the rc.1 USB stick", () => {
-    // rc.1's aldo_capture_helper.exe was this file, copied verbatim.
-    const result = runGate("--helper", "native/windows/aldo_capture_helper.c");
+    // rc.1's traimer_capture_helper.exe was this file, copied verbatim.
+    const result = runGate("--helper", "native/windows/traimer_capture_helper.c");
     expect(result.ok).toBe(false);
     expect(result.output).toContain("SOURCE TEXT");
     expect(result.output).toContain("MZ");
@@ -156,7 +156,7 @@ describe("helper release gate", () => {
   });
 
   it.each([
-    ["c-source", "/* Aldo Aim Lab — Windows native mouse capture helper.\n"],
+    ["c-source", "/* trAIMer — Windows native mouse capture helper.\n"],
     ["preprocessor", "#include <winsock2.h>\n"],
     ["shell-script", "#!/usr/bin/env bash\necho hi\n"],
     ["json", '{\n  "name": "aldo"\n}\n'],
@@ -183,7 +183,7 @@ describe("frontend, installer and installed-app gates", () => {
   });
 
   it("fails when the installer file is absent", () => {
-    const result = runGate("--installer", join(workDir, "AldoAimLab-Setup.exe"));
+    const result = runGate("--installer", join(workDir, "trAIMer-Setup.exe"));
     expect(result.ok).toBe(false);
     expect(result.output).toMatch(/missing/);
   });

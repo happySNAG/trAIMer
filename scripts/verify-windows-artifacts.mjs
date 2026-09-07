@@ -2,7 +2,7 @@
 /**
  * Windows release gates (Pass 9).
  *
- * The v1.0.0-rc.1 USB build shipped `aldo_capture_helper.exe` that was, byte
+ * The v1.0.0-rc.1 USB build shipped `traimer_capture_helper.exe` that was, byte
  * for byte, the C SOURCE FILE — Windows refused it with "not a valid
  * application for this OS platform". Nothing in the pipeline ever looked at
  * the bytes it was packaging. This module is that missing check, and it is
@@ -245,7 +245,7 @@ export function verifyInstaller(installerPath) {
 
 /**
  * Post-install layout gate: what must exist on disk after
- * `AldoAimLab-Setup.exe /S` has run.
+ * `trAIMer-Setup.exe /S` has run.
  */
 export function verifyInstalledApp(installDir) {
   const problems = [];
@@ -253,14 +253,14 @@ export function verifyInstalledApp(installDir) {
     return { ok: false, problems: [`installed app directory is missing: ${installDir}`] };
   }
   const required = [
-    "Aldo Aim Lab.exe",
+    "trAIMer.exe",
     join("resources", "app.asar"),
-    join("resources", "aldo_capture_helper.exe"),
+    join("resources", "traimer_capture_helper.exe"),
   ];
   for (const rel of required) {
     if (!existsSync(join(installDir, rel))) problems.push(`installed app is missing ${rel}`);
   }
-  const helper = join(installDir, "resources", "aldo_capture_helper.exe");
+  const helper = join(installDir, "resources", "traimer_capture_helper.exe");
   if (existsSync(helper)) {
     const helperCheck = verifyHelperBinary(helper);
     problems.push(...helperCheck.problems.map((p) => `installed helper: ${p}`));

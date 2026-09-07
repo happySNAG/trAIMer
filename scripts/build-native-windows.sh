@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Native build pipeline — Windows target (Pass 5).
 #
-# Builds aldo_capture_helper.exe. On Windows (MSVC or MinGW) this script
+# Builds traimer_capture_helper.exe. On Windows (MSVC or MinGW) this script
 # compiles directly; on other hosts it validates the pipeline configuration
 # and emits the exact command an Windows CI runner / the Aldo PC must run.
 #
@@ -10,8 +10,8 @@
 #   scripts/build-native-windows.sh --compile  # actually compile (Windows only)
 set -euo pipefail
 
-C_SRC="native/windows/aldo_capture_helper.c"
-EXE="native/windows/aldo_capture_helper.exe"
+C_SRC="native/windows/traimer_capture_helper.c"
+EXE="native/windows/traimer_capture_helper.exe"
 
 fail() { echo "✗ $*" >&2; exit 1; }
 
@@ -55,8 +55,8 @@ else
   cat <<'EOF'
 Compilation requires a Windows host (or MinGW cross toolchain). Run there:
 
-  MSVC Developer Prompt:   cl /O2 /W4 /WX native\windows\aldo_capture_helper.c /Fe:native\windows\aldo_capture_helper.exe ws2_32.lib user32.lib
-  MinGW:                   gcc -O2 -Wall -Werror -o native/windows/aldo_capture_helper.exe native/windows/aldo_capture_helper.c -lws2_32 -luser32
+  MSVC Developer Prompt:   cl /O2 /W4 /WX native\windows\traimer_capture_helper.c /Fe:native\windows\traimer_capture_helper.exe ws2_32.lib user32.lib
+  MinGW:                   gcc -O2 -Wall -Werror -o native/windows/traimer_capture_helper.exe native/windows/traimer_capture_helper.c -lws2_32 -luser32
 
 Or re-run this script with --compile on such a host.
 EOF

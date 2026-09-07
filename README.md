@@ -1,4 +1,6 @@
-# Aldo Aim Lab
+# trAIMer
+
+**Train. Measure. Tune.**
 
 A Fortnite-focused aim measurement and sensitivity optimization engine.
 This repository currently contains the **headless core**: domain model,
@@ -20,12 +22,12 @@ npm run app         # real-input browser aim lab → http://localhost:5173
 npm run build       # production browser bundle → dist-app/
 npm run test:browser  # Playwright end-to-end suite (starts vite automatically)
 npm run desktop     # run the Windows desktop shell locally (Electron)
-npm run dist:win    # build AldoAimLab-Setup.exe (Windows host / CI)
+npm run dist:win    # build trAIMer-Setup.exe (Windows host / CI)
 ```
 
 ## Shipping on Windows
 
-Players get **one installer**: `AldoAimLab-Setup.exe`. It installs an Electron
+Players get **one installer**: `trAIMer-Setup.exe`. It installs an Electron
 desktop shell that owns the app window, serves the built frontend from a
 stable `aldo://app` origin, and starts/stops the native Raw Input helper
 automatically. No PowerShell, no terminal, no browser step, no compiler, no

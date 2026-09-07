@@ -2,7 +2,7 @@
 /**
  * No-telemetry audit (Pass 5).
  *
- * Aldo Aim Lab is local-only. This audit scans BOTH source and the production
+ * trAIMer is local-only. This audit scans BOTH source and the production
  * bundle for any network-capable API or remote endpoint and fails on:
  *
  *   - fetch( / XMLHttpRequest / sendBeacon / EventSource / import() from URLs

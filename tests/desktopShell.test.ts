@@ -228,7 +228,7 @@ describe("installer contract", () => {
     expect(builderConfig).toContain("target: nsis");
     expect(builderConfig).toContain("createDesktopShortcut: always");
     expect(builderConfig).toContain("createStartMenuShortcut: true");
-    expect(builderConfig).toContain("AldoAimLab-Setup-${version}.${ext}");
+    expect(builderConfig).toContain("trAIMer-Setup-${version}.${ext}");
     expect(builderConfig).toMatch(/- x64/);
   });
 
@@ -240,7 +240,7 @@ describe("installer contract", () => {
 
   it("ships the compiled helper outside the asar so it can be spawned", () => {
     expect(builderConfig).toContain("extraResources:");
-    expect(builderConfig).toContain("native/windows/aldo_capture_helper.exe");
+    expect(builderConfig).toContain("native/windows/traimer_capture_helper.exe");
     expect(builderConfig).toContain("asar: true");
   });
 
@@ -248,7 +248,7 @@ describe("installer contract", () => {
     expect(builderConfig).toContain("deleteAppDataOnUninstall: false");
     expect(installerScript).toContain("customUnInstall");
     expect(installerScript).toContain("/SD IDNO");
-    expect(installerScript).toContain("$APPDATA\\AldoAimLab");
+    expect(installerScript).toContain("$APPDATA\\trAIMer");
   });
 
   it("never ships PowerShell in the installed launch path", () => {

@@ -44,7 +44,7 @@ export class InstanceGuard {
 
   constructor(
     readonly instanceId: string,
-    channelName: string = "aldo-aim-lab-instances",
+    channelName: string = "traimer-instances",
   ) {
     this.#channel =
       typeof BroadcastChannel !== "undefined" ? new BroadcastChannel(channelName) : null;

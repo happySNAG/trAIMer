@@ -1,15 +1,17 @@
 # Installing trAIMer on Windows
 
-> **trAIMer — Train. Measure. Tune.** The installer, the installed application
-> and the internal package are still named *Aldo Aim Lab*; the product name is
-> being adopted in release material first and the packaging rename is a
-> separate change.
+> **trAIMer — Train. Measure. Tune.**
+>
+> Upgrading from *Aldo Aim Lab* (1.0.0-rc.6 or earlier)? Your training
+> history, calibration and settings come with you: the first launch moves
+> `%APPDATA%\AldoAimLab` to `%APPDATA%\trAIMer` automatically, and the
+> installer replaces the old entry rather than adding a second one.
 
 One file. Double-click it. That is the whole procedure.
 
 ## What you need
 
-- `AldoAimLab-Setup-1.0.0-rc.6.exe` (also copied as `AldoAimLab-Setup.exe`)
+- `trAIMer-Setup-1.0.0-rc.7.exe` (also copied as `trAIMer-Setup.exe`)
 - Windows 10 or 11, 64-bit (`PROCESSOR_ARCHITECTURE = AMD64`)
 
 You do **not** need PowerShell, a terminal, a browser, a compiler, admin
@@ -17,7 +19,7 @@ rights, or any developer tools.
 
 ## Install
 
-1. Copy `AldoAimLab-Setup.exe` from the flash drive to the Desktop (running it
+1. Copy `trAIMer-Setup.exe` from the flash drive to the Desktop (running it
    from the drive works too, it is just slower).
 2. Double-click it.
 3. Windows SmartScreen will say the publisher is unknown — the build is not
@@ -25,14 +27,14 @@ rights, or any developer tools.
 4. The normal installer window appears. Click through it. It installs for the
    current user only: no admin prompt, no services, no drivers, no registry
    surgery beyond the standard uninstall entry.
-5. When it finishes, an **Aldo Aim Lab** icon is on the Desktop and in the
+5. When it finishes, a **trAIMer** icon is on the Desktop and in the
    Start Menu.
 
-Default install location: `%LOCALAPPDATA%\Programs\Aldo Aim Lab`.
+Default install location: `%LOCALAPPDATA%\Programs\trAIMer`.
 
 ## Launch
 
-Double-click the **Aldo Aim Lab** icon.
+Double-click the **trAIMer** icon.
 
 The application window opens and everything starts by itself:
 
@@ -40,7 +42,7 @@ The application window opens and everything starts by itself:
 - the native capture helper starts hidden in the background,
 - the Diagnostics tab's **Capture helper** tile shows `Running on port …`.
 
-If Windows Defender or the firewall asks about `aldo_capture_helper.exe`,
+If Windows Defender or the firewall asks about `traimer_capture_helper.exe`,
 allow it. It listens on `127.0.0.1` only and never talks to the network.
 
 Launching a second time just brings the window you already have to the front —
@@ -82,13 +84,14 @@ Reason codes you may see:
 | `HELPER_NO_FREE_PORT` | Ports 48765-48776 are all occupied. |
 
 The shell writes a plain-text log to
-`%APPDATA%\AldoAimLab\logs\desktop.log`. It stays on the machine.
+`%APPDATA%\trAIMer\logs\desktop.log`. It stays on the machine.
 
 ## Your data
 
-Training history, calibration and settings live in `%APPDATA%\AldoAimLab`.
+Training history, calibration and settings live in `%APPDATA%\trAIMer`
+(moved automatically from `%APPDATA%\AldoAimLab` the first time rc.7 runs).
 
-Uninstalling (Settings → Apps → Aldo Aim Lab, or the Start Menu uninstaller)
+Uninstalling (Settings → Apps → trAIMer, or the Start Menu uninstaller)
 removes the application and **keeps** that data, so a reinstall picks up where
 you left off. The uninstaller asks once whether you also want the data
 deleted; the default answer, and the answer any silent/automatic uninstall

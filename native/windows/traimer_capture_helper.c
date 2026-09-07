@@ -1,5 +1,5 @@
 /*
- * Aldo Aim Lab — Windows native mouse capture helper.
+ * trAIMer — Windows native mouse capture helper.
  *
  * Reads PHYSICAL raw mouse deltas via the documented Win32 Raw Input API
  * (RegisterRawInputDevices / WM_INPUT / GetRawInputData) and streams them as
@@ -32,8 +32,8 @@
  * fabricated samples). Timestamps are high-resolution monotonic milliseconds
  * from helper start via QueryPerformanceCounter.
  *
- * Build (see native/windows/BUILD.md): cl /O2 /W4 aldo_capture_helper.c
- *   or: gcc -O2 -o aldo_capture_helper.exe aldo_capture_helper.c -lws2_32
+ * Build (see native/windows/BUILD.md): cl /O2 /W4 traimer_capture_helper.c
+ *   or: gcc -O2 -o traimer_capture_helper.exe traimer_capture_helper.c -lws2_32
  */
 
 #define WIN32_LEAN_AND_MEAN
@@ -661,9 +661,9 @@ static int json_find_string(const char *json, const char *field,
 
 static void print_usage(void)
 {
-    printf("aldo_capture_helper [--port N] [--token TOKEN]\n");
+    printf("traimer_capture_helper [--port N] [--token TOKEN]\n");
     printf("                    [--parent-pid PID] [--version]\n");
-    printf("  Local-only Raw Input mouse telemetry for Aldo Aim Lab.\n");
+    printf("  Local-only Raw Input mouse telemetry for trAIMer.\n");
     printf("  Binds 127.0.0.1 exclusively; serves one authenticated client.\n");
 }
 
@@ -678,7 +678,7 @@ static void print_usage(void)
  */
 static void print_version(void)
 {
-    printf("aldo_capture_helper version=%s protocol=%d arch=%s\n",
+    printf("traimer_capture_helper version=%s protocol=%d arch=%s\n",
            HELPER_VERSION, PROTOCOL_VERSION, HELPER_ARCH);
 }
 

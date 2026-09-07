@@ -229,7 +229,7 @@ describe("duplicate application instances", () => {
     const sent: string[] = [];
     const a = new InstanceGuard("storm-a");
     const b = new InstanceGuard("storm-b");
-    const observer = new BroadcastChannel("aldo-aim-lab-instances");
+    const observer = new BroadcastChannel("traimer-instances");
     observer.addEventListener("message", (ev: MessageEvent) => {
       const data = ev.data as { from?: string } | null;
       if (data && typeof data.from === "string") sent.push(data.from);

@@ -34,8 +34,8 @@ check(
 );
 
 // ---- 2. native constants ----
-if (existsSync("native/windows/aldo_capture_helper.c")) {
-  const c = readFileSync("native/windows/aldo_capture_helper.c", "utf8");
+if (existsSync("native/windows/traimer_capture_helper.c")) {
+  const c = readFileSync("native/windows/traimer_capture_helper.c", "utf8");
   const proto = /#define\s+PROTOCOL_VERSION\s+(\d+)/.exec(c);
   const helperVer = /#define\s+HELPER_VERSION\s+"([^"]+)"/.exec(c);
   const protoTs = /export const NATIVE_PROTOCOL_VERSION = (\d+)/.exec(versionTs);
@@ -51,7 +51,7 @@ if (existsSync("native/windows/aldo_capture_helper.c")) {
     `C=${helperVer?.[1]} TS=${helperTs?.[1]}`,
   );
 } else {
-  check("native helper source present", false, "native/windows/aldo_capture_helper.c missing");
+  check("native helper source present", false, "native/windows/traimer_capture_helper.c missing");
 }
 
 // ---- 3. production bundle ----
@@ -102,9 +102,9 @@ if (releaseDirIdx >= 0 && process.argv[releaseDirIdx + 1]) {
   check("release folder exists", existsSync(releasePath), releasePath);
   if (existsSync(releasePath)) {
     for (const required of [
-      "aldo_capture_helper.exe",
-      "start-aldo-lab.ps1",
-      "stop-aldo-lab.ps1",
+      "traimer_capture_helper.exe",
+      "start-traimer.ps1",
+      "stop-traimer.ps1",
       "FIRST-RUN.md",
       "manifest.json",
       join("app", "index.html"),
@@ -169,7 +169,7 @@ if (existsSync("electron-builder.yml")) {
     builder.includes("createDesktopShortcut: always") && builder.includes("createStartMenuShortcut: true"));
   check("uninstall preserves user data by default", builder.includes("deleteAppDataOnUninstall: false"));
   check("compiled helper ships as an extraResource (spawnable, outside asar)",
-    builder.includes("native/windows/aldo_capture_helper.exe"));
+    builder.includes("native/windows/traimer_capture_helper.exe"));
   check("no PowerShell in the installed launch path", !/\.ps1/.test(builder));
 }
 if (existsSync("build/icon.ico")) {

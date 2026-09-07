@@ -7,7 +7,7 @@
  * the SAME production PointerLockCaptureSource event plumbing
  * (emitForTesting) — no production capture code is forked.
  */
-import type { BrowserRunController } from "./runController.ts";
+import type { ArenaSnapshot, BrowserRunController } from "./runController.ts";
 import type { Recommendation } from "../../src/domain/recommendation.ts";
 import type { FinalResult } from "../../src/results/finalResult.ts";
 
@@ -15,6 +15,24 @@ interface TestHooks {
   mode: "virtual";
   injectPointerSample(dx: number, dy: number): void;
   injectClick(): void;
+  /**
+   * Read-only arena state, so the scripted player can AIM rather than sweep
+   * blindly. Without it the synthetic player never hit anything and every
+   * trial it produced was rejected by the validator.
+   */
+  arenaSnapshot(): Promise<ArenaSnapshot | null>;
+  /** Presentation state (streaks, tracking completion) for arena-feel specs. */
+  presentationState(): Promise<{
+    streak: number;
+    bestStreak: number;
+    trackingClicks: number;
+    effectCount: number;
+    lastTrackingCompletion: {
+      onTargetRatio: number;
+      clicks: number;
+      completedAtMs: number;
+    } | null;
+  }>;
   grantLock(): void;
   releaseLock(): void;
   /** Simulates ESC/unlock mid-trial through the production capture path. */
@@ -69,6 +87,14 @@ export function installTestHooks(
         tMs: performance.now(),
         action: "press",
       });
+    },
+    async arenaSnapshot() {
+      const controller = await controllerPromise;
+      return controller.arenaSnapshot;
+    },
+    async presentationState() {
+      const controller = await controllerPromise;
+      return controller.presentationDebug;
     },
     async grantLock() {
       const controller = await controllerPromise;

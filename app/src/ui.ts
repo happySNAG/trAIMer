@@ -1,5 +1,5 @@
 /**
- * Aldo Aim Lab — UI component library (UI Design Pass 1).
+ * trAIMer — UI component library (UI Design Pass 1).
  *
  * Reusable presentation primitives only: icons, badges, cards, buttons,
  * meters, charts, dialogs and empty states. Everything renders through

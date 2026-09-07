@@ -2,7 +2,7 @@
 
 ## Version strings (`src/version.ts`)
 
-- `APP_VERSION` — `1.0.0-rc.6` for the V1 release line (rc.1 was the Pass 5
+- `APP_VERSION` — `1.0.0-rc.7` for the V1 release line (rc.1 was the Pass 5
   candidate and shipped a non-executable helper; rc.2 was the Pass 8
   pre-hardware candidate and still launched via PowerShell; rc.3 was the Pass 9
   installed-desktop-application candidate, which installed and launched on
@@ -44,7 +44,7 @@
    binary is a genuine x64 PE**, runs it with `--version` to prove it
    executes, builds the NSIS installer, silently installs it, and smoke-tests
    the installed application's startup and clean shutdown.
-5. Download `aldo-aim-lab-windows-installer` → `AldoAimLab-Setup.exe`.
+5. Download `traimer-windows-installer` → `trAIMer-Setup.exe`.
 6. Install it on the target Windows PC and run the on-hardware validation in
    `docs/HUMAN-VALIDATION.md` (a compile is not hardware validation).
 7. Tag `v1.0.0` once hardware validation passes. `dist-app/`, the shell and
@@ -55,14 +55,14 @@
 
 | Artifact | Audience | Produced by |
 | --- | --- | --- |
-| `AldoAimLab-Setup-<version>.exe` | players | CI `windows-installer` job |
-| `Aldo-Aim-Lab-v<version>-windows-x64.zip` (portable folder) | development / diagnostics | CI `windows-release` job |
+| `trAIMer-Setup-<version>.exe` | players | CI `windows-installer` job |
+| `trAIMer-v<version>-windows-x64.zip` (portable folder) | development / diagnostics | CI `windows-release` job |
 
 ## Component version matrix (V1 RC, frozen)
 
 | Component | Version |
 |---|---|
-| App | 1.0.0-rc.6 |
+| App | 1.0.0-rc.7 |
 | Engine | engine-v4 |
 | Optimizer | optimizer-v3 (paired fit + adequacy gating + change-point) |
 | Scoring model | scoring-v1 (weights: accuracy .28, speed .14, tracking .14, correction .12, overshoot .11, undershoot .11, consistency .10) |

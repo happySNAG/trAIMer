@@ -501,7 +501,13 @@ describe("the break screen gets the mouse back before it asks for a click", () =
     });
     expect(cancelled).toBe(true);
     expect(outcome.status).toBe("aborted");
-    expect(outcome.abortReason).toBeUndefined();
+    // Every aborted run names its reason, INCLUDING a deliberate exit. rc.6
+    // returned a bare `aborted` for a player cancel, which meant an engine
+    // failure and a player leaving produced identical outcome objects and the
+    // UI could only show one generic sentence for both.
+    expect(outcome.abortReason?.code).toBe("cancelled");
+    expect(outcome.outcomeReport.endKind).toBe("ended-by-player");
+    expect(outcome.outcomeReport.endedEarly).toBe(true);
     expect(session.log.filter((e) => e === "resume:rest:candidate-transition")).toHaveLength(0);
   });
 });

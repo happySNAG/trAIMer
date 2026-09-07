@@ -1,6 +1,24 @@
 import type { MinimalIdbLike } from "../../src/persistence/backends.ts";
 
-export function openAimLabDb(dbName = "aldo-aim-lab"): Promise<MinimalIdbLike> {
+/**
+ * The IndexedDB database holding every trial, session, recommendation and
+ * calibration record this player has ever produced.
+ *
+ * THE NAME IS DELIBERATELY NOT RENAMED with the product (Pass 13). An
+ * IndexedDB database is addressed by (origin, name): opening "traimer"
+ * instead of "aldo-aim-lab" would silently create a brand-new empty database
+ * and present an existing player with no history at all, while their real
+ * data sat on disk under the old name, unreachable from the UI.
+ *
+ * IndexedDB has no rename operation, so the alternatives were "copy every
+ * record across on first launch" (slow, and a partial copy is worse than no
+ * copy) or "keep the name". The name is invisible: it appears in no UI, no
+ * export, and no document the player will ever read. It is allowlisted in the
+ * branding gate for exactly this reason (scripts/verify-branding.mjs).
+ */
+export const TRAINING_DB_NAME = "aldo-aim-lab";
+
+export function openTraimerDb(dbName = TRAINING_DB_NAME): Promise<MinimalIdbLike> {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open(dbName, 1);
     request.onupgradeneeded = () => {

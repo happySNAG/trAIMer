@@ -3,10 +3,10 @@
 ## Why this exists
 
 `v1.0.0-rc.1` reached Aldo's PC as a portable folder driven by
-`start-aldo-lab.ps1`. Two things were wrong with it:
+`start-traimer.ps1`. Two things were wrong with it:
 
-1. **Release-blocking defect.** The packaged `aldo_capture_helper.exe` was
-   byte-for-byte `native/windows/aldo_capture_helper.c`
+1. **Release-blocking defect.** The packaged `traimer_capture_helper.exe` was
+   byte-for-byte `native/windows/traimer_capture_helper.c`
    (`sha256 5af4339191f8…`). Windows reported *"The specified executable is
    not a valid application for this OS platform."* The packager copied
    whatever `--helper` pointed at and never looked at the bytes, and a local
@@ -23,13 +23,13 @@ makes the packaging defect structurally impossible.
 ## Architecture
 
 ```
-AldoAimLab-Setup-<version>.exe        (NSIS, electron-builder)
+trAIMer-Setup-<version>.exe           (NSIS, electron-builder)
         │  installs, per-user, no elevation
         ▼
-%LOCALAPPDATA%\Programs\Aldo Aim Lab\
-├── Aldo Aim Lab.exe                  ← Electron shell (desktop/main.ts)
+%LOCALAPPDATA%\Programs\trAIMer\
+├── trAIMer.exe                       ← Electron shell (desktop/main.ts)
 ├── resources\app.asar                ← dist-desktop/ + dist-app/
-└── resources\aldo_capture_helper.exe ← MSVC-compiled Raw Input helper
+└── resources\traimer_capture_helper.exe ← MSVC-compiled Raw Input helper
                                          (outside the asar so it is spawnable)
 ```
 
@@ -44,7 +44,7 @@ The Electron main process owns everything the launcher used to:
 | Session token | `desktop/sessionToken.ts` — 32 hex chars, per launch, in memory |
 | Renderer bridge | `desktop/preload.ts` → `app/src/desktopBridge.ts` |
 | Single instance | `app.requestSingleInstanceLock()` |
-| User data | `%APPDATA%\AldoAimLab` (`app.setName`) |
+| User data | `%APPDATA%\trAIMer` (`app.setName`; migrated from `%APPDATA%\AldoAimLab` on first launch) |
 | Installer/uninstaller | `electron-builder.yml` + `build/installer.nsh` |
 
 ### Why a custom scheme instead of a loopback HTTP server
@@ -63,7 +63,7 @@ Verified end to end by the smoke test's IndexedDB write/read round trip.
 ```
 launch ─► mint token (16 random bytes → 32 hex)
        ─► scan 48765..48776 for a free loopback port
-       ─► spawn aldo_capture_helper.exe --port N --token T
+       ─► spawn traimer_capture_helper.exe --port N --token T
              (argument array, shell:false, windowsHide:true)
        ─► poll 127.0.0.1:N until it accepts, ≤10 s
        ─► state "ready", renderer receives ws://127.0.0.1:N over the bridge
@@ -94,8 +94,8 @@ implausibly small, is not a PE (`MZ` + `PE\0\0`), is not `IMAGE_FILE_MACHINE_AMD
 is a DLL, or when the installer/frontend/installed layout is incomplete.
 
 `scripts/package-release.mjs` now runs that gate before copying anything to
-the `aldo_capture_helper.exe` name, and its dry-run placeholder is written as
-`aldo_capture_helper.exe.PLACEHOLDER-NOT-EXECUTABLE` — a name Windows will
+the `traimer_capture_helper.exe` name, and its dry-run placeholder is written as
+`traimer_capture_helper.exe.PLACEHOLDER-NOT-EXECUTABLE` — a name Windows will
 never execute. No flag can bypass either rule.
 
 CI adds the two gates that only a Windows host can prove:

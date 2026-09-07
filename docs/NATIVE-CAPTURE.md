@@ -7,7 +7,7 @@ reads, or communicates with any game or anti-cheat system.
 ## Architecture
 
 ```
-[aldo_capture_helper.exe]  ← Raw Input (WM_INPUT), QPC timestamps
+[traimer_capture_helper.exe]  ← Raw Input (WM_INPUT), QPC timestamps
         │  loopback WebSocket (127.0.0.1 only), versioned handshake
         ▼
 NativeTransportCaptureSource (src/capture/nativeClient.ts)
@@ -87,8 +87,8 @@ capture on real Apple hardware for latency parity tests.
 See `native/windows/BUILD.md`. Short form:
 
 ```bat
-cl /O2 /W4 aldo_capture_helper.c /Fe:aldo_capture_helper.exe ws2_32.lib user32.lib
-aldo_capture_helper.exe --port 48765 --token <secret>
+cl /O2 /W4 traimer_capture_helper.c /Fe:traimer_capture_helper.exe ws2_32.lib user32.lib
+traimer_capture_helper.exe --port 48765 --token <secret>
 ```
 
 Then open Aim Lab → Diagnostics → Run native capture probe with the same

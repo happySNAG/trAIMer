@@ -111,7 +111,7 @@ export const LOCK_FAILURE_GUIDANCE: Record<
   denied:
     "Windows or the browser engine refused to capture the mouse. This usually means the window lost focus, or the pointer was unlocked with Esc less than a second ago.",
   timeout:
-    "The mouse-capture request never completed. The window may not have keyboard focus — click the Aldo Aim Lab window once, then try again.",
+    "The mouse-capture request never completed. The window may not have keyboard focus — click the trAIMer window once, then try again.",
   cancelled: "The mouse-capture request was cancelled before it completed.",
   unsupported:
     "This build cannot capture the mouse: the Pointer Lock API is unavailable in this window.",
@@ -191,11 +191,24 @@ export class PointerLockCaptureSource implements CaptureSource {
   #capabilities: PointerEventCapabilities | null = null;
   #lastOutcome: LockOutcome | null = null;
   /**
-   * Set while an exitPointerLock() WE asked for is in flight, so the
-   * pointerlockchange it produces is reported as CAPTURE_RELEASED_REASON
+   * How many exitPointerLock() calls WE made are still waiting for their
+   * pointerlockchange, so each one is reported as CAPTURE_RELEASED_REASON
    * rather than a loss. Consumers turn a loss into a fatal interruption.
+   *
+   * A COUNTER, not a boolean, and cleared only by the change handler.
+   *
+   * rc.6 shipped this as a boolean that `releaseLock()` re-cleared the moment
+   * `document.pointerLockElement` read back null. In Chromium/Electron
+   * `exitPointerLock()` clears `pointerLockElement` SYNCHRONOUSLY and fires
+   * `pointerlockchange` in a later task, so that "belt and braces" line
+   * un-marked every single deliberate release before its event arrived. Every
+   * break therefore surfaced as POINTER_LOCK_LOSS_REASON, which the run
+   * controller treats as a fatal interruption — the first break silently
+   * ended the whole calibration. Measured in Electron 44:
+   * `exitPointerLock()` → `pointerLockElement` null on the next line,
+   * `pointerlockchange` one task later.
    */
-  #releaseRequested = false;
+  #pendingDeliberateReleases = 0;
 
   get capabilities(): PointerEventCapabilities | null {
     return this.#capabilities;
@@ -293,8 +306,8 @@ export class PointerLockCaptureSource implements CaptureSource {
       const wasLocked = this.#locked;
       this.#locked = isLocked;
       if (!isLocked && wasLocked) {
-        const deliberate = this.#releaseRequested;
-        this.#releaseRequested = false;
+        const deliberate = this.#pendingDeliberateReleases > 0;
+        if (deliberate) this.#pendingDeliberateReleases--;
         sink.onEvent({
           kind: "lock-change",
           tMs: nowMs(),
@@ -307,7 +320,8 @@ export class PointerLockCaptureSource implements CaptureSource {
           detail: "pointer lock was released before the request settled",
         });
       } else if (isLocked && !wasLocked) {
-        this.#releaseRequested = false;
+        // A fresh lock supersedes any release we are still waiting on.
+        this.#pendingDeliberateReleases = 0;
         sink.onEvent({ kind: "lock-change", tMs: nowMs(), locked: true, reason: "acquired" });
         this.#settleLock(LOCK_GRANTED);
       }
@@ -452,16 +466,21 @@ export class PointerLockCaptureSource implements CaptureSource {
    * fatal loss of a lock the session still needed.
    */
   releaseLock(deliberate = true): void {
-    if (this.#options.document.pointerLockElement != null) {
-      this.#releaseRequested = deliberate;
-      this.#options.document.exitPointerLock();
-      // exitPointerLock() is asynchronous: if the document never dispatches a
-      // change (torn-down window), the flag must not leak into a later, real
-      // loss. The change handler clears it; this is the belt-and-braces path.
-      if (this.#options.document.pointerLockElement == null) {
-        this.#releaseRequested = false;
-      }
-    }
+    if (this.#options.document.pointerLockElement == null) return;
+    if (deliberate) this.#pendingDeliberateReleases++;
+    this.#options.document.exitPointerLock();
+    // Deliberately NOT re-checking pointerLockElement here. Chromium clears it
+    // synchronously inside exitPointerLock() and dispatches pointerlockchange
+    // afterwards; a post-call check therefore always reads "already unlocked"
+    // and would cancel the very marker the change handler is about to read.
+    // The mark is consumed by that handler (and reset by a fresh lock), so a
+    // document that never dispatches cannot leak it into a real loss: a real
+    // loss requires being locked again first, which resets the counter.
+  }
+
+  /** True while a deliberate release is still waiting for its change event. */
+  get deliberateReleasePending(): boolean {
+    return this.#pendingDeliberateReleases > 0;
   }
 
   stop(): void {
@@ -477,7 +496,24 @@ export class PointerLockCaptureSource implements CaptureSource {
     });
   }
 
+  /**
+   * Test adapter seam: pushes a scripted event through the production sink.
+   *
+   * A pointer sample is applied to the virtual reticle FIRST, exactly as the
+   * real pointermove handler does, and re-emitted with the applied (clamped)
+   * delta. Without that step the reticle never moved under `?e2e=1`: the
+   * recorder's own cursor advanced, but the thing the arena draws — and the
+   * thing `arenaSnapshot()` reports — stayed pinned at the centre of the
+   * screen for the whole session. The scripted player could therefore never
+   * aim at anything, which is why the browser suite had never once exercised
+   * a hit.
+   */
   emitForTesting(event: CaptureEvent): void {
+    if (event.kind === "pointer-sample") {
+      const applied = this.#reticle.applyRawDelta(event.dx, event.dy);
+      this.#sink?.onEvent({ ...event, dx: applied.dx, dy: applied.dy });
+      return;
+    }
     this.#sink?.onEvent(event);
   }
 

@@ -20,6 +20,7 @@ import {
 } from "../src/index.ts";
 import type { TrialPlanSpec } from "../src/experiments/protocol.ts";
 import type { TrialRecord } from "../src/domain/trial.ts";
+import type { ExperimentDefinition } from "../src/domain/experiment.ts";
 import { equalXy } from "../src/domain/settings.ts";
 
 const fsRoot = await mkdtemp(join(tmpdir(), "aldo-runner-"));
@@ -38,8 +39,24 @@ class ScriptedExecutionPort implements TrialExecutionPort {
   resumes = 0;
   readonly executed: { candidateId: string; scenarioId: string; phase: string; round: number; repIndex: number | null }[] = [];
   readonly outcomesByCandidate = new Map<string, ScriptedOutcome>();
+  /**
+   * The candidate ladder this port is scripting for. A trial's
+   * captureContext.sensitivity MUST be the sensitivity that trial was actually
+   * played at: hardcoding the baseline made every non-baseline candidate's
+   * trials fail validation with CONFIG_MISMATCH, so the fixture silently
+   * produced a session in which only one of three candidates had any usable
+   * data at all.
+   */
+  definition: ExperimentDefinition | null = null;
 
   constructor(private readonly clock: ManualClock) {}
+
+  #sensitivityFor(candidateId: string) {
+    return (
+      this.definition?.candidates.find((c) => c.id === candidateId)?.sensitivity ??
+      equalXy(7)
+    );
+  }
 
   setOutcome(candidateId: string, outcome: ScriptedOutcome): void {
     this.outcomesByCandidate.set(candidateId, outcome);
@@ -93,7 +110,7 @@ class ScriptedExecutionPort implements TrialExecutionPort {
       captureContext: {
         scenarioKind: scenario.kind,
         viewport: { widthPx: 1280, heightPx: 720 },
-        sensitivity: equalXy(7),
+        sensitivity: this.#sensitivityFor(spec.candidateId),
         dpi: 800,
         expectedSampleIntervalMs: 4,
       },
@@ -192,6 +209,7 @@ describe("session runner", () => {
     const backend = new InMemoryBackend();
     const execution = new ScriptedExecutionPort(clock);
     const definition = buildSmallDefinition();
+    execution.definition = definition;
     for (const candidate of definition.candidates) {
       execution.setOutcome(candidate.id, { hit: true, acquisitionMs: 380 });
     }
@@ -233,6 +251,7 @@ describe("session runner", () => {
     execution.lockResult = false;
     const stateLog: SessionStateName[] = [];
     const definition = buildSmallDefinition();
+    execution.definition = definition;
     const runner = new SessionRunner(definition, makePorts(clock, backend, execution, stateLog));
     const result = await runner.run();
     expect(result.status).toBe("aborted");
@@ -254,6 +273,7 @@ describe("session runner", () => {
       },
       measuredRepsPerCandidatePerRound: 4,
     });
+    execution.definition = definition;
     const trialCounter = 0;
     for (const candidate of definition.candidates) {
       execution.setOutcome(candidate.id, { hit: true, acquisitionMs: 300 });
@@ -274,6 +294,7 @@ describe("session runner", () => {
     const backend = new InMemoryBackend();
     const execution = new ScriptedExecutionPort(clock);
     const definition = buildSmallDefinition({ stoppingCriteria: { maxSearchRounds: 1 } });
+    execution.definition = definition;
     for (const candidate of definition.candidates) {
       execution.setOutcome(candidate.id, { hit: true, acquisitionMs: 320 });
     }
@@ -291,6 +312,7 @@ describe("session runner", () => {
     const secondBackend = new InMemoryBackend();
     const execution2 = new ScriptedExecutionPort(clock);
     const definition2 = buildSmallDefinition({ stoppingCriteria: { maxSearchRounds: 3 } });
+    execution2.definition = definition2;
     for (const candidate of definition2.candidates) {
       execution2.setOutcome(candidate.id, { hit: true, acquisitionMs: 330 });
     }
@@ -306,6 +328,7 @@ describe("session runner", () => {
     const backend = new InMemoryBackend();
     const execution = new ScriptedExecutionPort(clock);
     const definition = buildSmallDefinition({ stoppingCriteria: { maxSearchRounds: 1 } });
+    execution.definition = definition;
     for (const candidate of definition.candidates) {
       execution.setOutcome(candidate.id, { hit: true, acquisitionMs: 340 });
     }

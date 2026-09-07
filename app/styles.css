@@ -1,5 +1,5 @@
 /* ==========================================================================
-   Aldo Aim Lab — competitive-performance design system (UI Pass 1)
+   trAIMer — competitive-performance design system (UI Pass 1)
    Dark, precise, restrained. Volt accent used sparingly for primary actions
    and key numbers; semantic tones carry data meaning only.
    ========================================================================== */
@@ -134,19 +134,25 @@ h1, h2, h3, h4, p {
 }
 
 .wordmark-name {
-  font-size: 16px;
+  font-size: 17px;
   font-weight: 800;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.01em;
   line-height: 1.1;
 }
 
+/* trAIMer: the AIM is the point of the name, so it carries the accent. */
+.wordmark-aim {
+  color: var(--accent, #c8f24e);
+}
+
+/* "Train. Measure. Tune." reads as a sentence, so it keeps its own casing
+   and normal tracking rather than the wide uppercase of a category label. */
 .wordmark-sub {
-  font-size: 10px;
+  font-size: 10.5px;
   font-weight: 600;
-  letter-spacing: 0.32em;
+  letter-spacing: 0.06em;
   color: var(--text-3);
-  text-transform: uppercase;
-  margin-top: 2px;
+  margin-top: 3px;
 }
 
 .wordmark > span:last-child {
@@ -2197,4 +2203,109 @@ body.capture-suspended #run-canvas {
   color: var(--text-3);
   font-size: 12.5px;
   line-height: 1.55;
+}
+
+/* ==========================================================================
+   Drill mode (SHOOT / TRACK) and calibration progress — Pass 13
+   ==========================================================================
+   The mode chip is the single most load-bearing label on the run screen: it
+   is the difference between "click this" and "follow this". rc.6 had no such
+   indicator and a real player shot the tracking drill for its whole window.
+   ========================================================================== */
+
+.run-mode-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 11px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.18em;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+
+.run-mode-chip[data-mode="shoot"] {
+  color: #d7ef8a;
+  background: rgba(200, 242, 78, 0.12);
+  border-color: rgba(200, 242, 78, 0.35);
+}
+
+.run-mode-chip[data-mode="track"] {
+  color: #ffd0f2;
+  background: rgba(255, 111, 216, 0.16);
+  border-color: rgba(255, 111, 216, 0.55);
+}
+
+/* A tracking drill tints the whole run screen's accent so the change of task
+   is legible from the corner of the eye, not only from the chip. */
+body.drill-tracking .run-topbar,
+body.drill-tracking .run-bottombar {
+  border-color: rgba(255, 111, 216, 0.28);
+}
+
+.run-calibration-label {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: var(--text-1);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ==========================================================================
+   Session outcome + "More data needed" (Results)
+   ========================================================================== */
+
+.outcome-card .outcome-reason {
+  font-size: 14px;
+  color: var(--text-1);
+  margin: 0 0 14px;
+  line-height: 1.55;
+}
+
+.outcome-progress {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.outcome-progress .meter {
+  flex: 1;
+}
+
+.outcome-progress-value {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-1);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.more-data-card .more-data-lead {
+  font-size: 14px;
+  color: var(--text-1);
+  margin: 0 0 16px;
+  line-height: 1.55;
+}
+
+.reason-list,
+.next-step-list {
+  margin: 0 0 18px;
+  padding-left: 20px;
+  color: var(--text-2);
+  font-size: 13.5px;
+  line-height: 1.6;
+}
+
+.reason-list li,
+.next-step-list li {
+  margin-bottom: 7px;
+}
+
+.more-data-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 6px;
 }

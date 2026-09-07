@@ -21,6 +21,16 @@ export const AUDIT_CATEGORIES = [
   "extra-block-requested",
   "retest-linked",
   "recommendation-created",
+  /**
+   * The engine could not continue (capture lost, resume refused). Distinct
+   * from a player cancel so a transcript never confuses the two (Pass 13).
+   */
+  "session-aborted",
+  /**
+   * Analysis ran but the evidence did not support a recommendation, so none
+   * was persisted. Recorded rather than silently skipped.
+   */
+  "evidence-insufficient",
 ] as const;
 
 export type AuditCategory = (typeof AUDIT_CATEGORIES)[number];

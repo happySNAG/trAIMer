@@ -1,8 +1,8 @@
 /**
- * Aldo Aim Lab — Windows desktop shell (Electron main process).
+ * trAIMer — Windows desktop shell (Electron main process).
  *
  * This process is the product's entry point on Windows. Installed by
- * AldoAimLab-Setup.exe and launched from the Start Menu / Desktop shortcut,
+ * trAIMer-Setup.exe and launched from the Start Menu / Desktop shortcut,
  * it owns:
  *
  *   - the application window,
@@ -11,7 +11,8 @@
  *     deterministic shutdown),
  *   - startup readiness + honest error reporting,
  *   - single-instance behaviour (a second launch focuses the first window),
- *   - the installed user-data path (%APPDATA%\AldoAimLab).
+ *   - the installed user-data path (%APPDATA%	rAIMer, migrated from the
+ *     rc.6 %APPDATA%\AldoAimLab directory on first launch).
  *
  * There is no PowerShell, no terminal window, no manual browser step, and no
  * developer tooling requirement on the player's PC.
@@ -21,19 +22,46 @@
  * anti-cheat, or synthesizes input.
  */
 import { app, BrowserWindow, dialog, ipcMain, Menu, session, shell } from "electron";
-import { writeFileSync } from "node:fs";
+import { cpSync, existsSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { APP_DIR_NAME, APP_ORIGIN, PRODUCT_NAME } from "./config";
+import { APP_DIR_NAME, APP_ORIGIN, LEGACY_APP_DIR_NAME, PRODUCT_NAME } from "./config";
 import { CaptureHelper, type HelperStatus } from "./captureHelper";
 import { registerAppSchemePrivileges, registerFrontendProtocol } from "./frontendProtocol";
 import { DesktopLog } from "./logging";
 import { frontendRoot, helperExecutablePath, preloadPath } from "./paths";
 import { mintSessionToken } from "./sessionToken";
+import { migrateUserData, type MigrationResult } from "./userDataMigration";
 
-// Fixes the installed user-data path to %APPDATA%\AldoAimLab regardless of
-// how the package is named. Must run before any getPath("userData") call.
+// Fixes the installed user-data path to %APPDATA%\trAIMer regardless of how
+// the package is named. Must run before any getPath("userData") call.
 app.setName(APP_DIR_NAME);
 app.setAppUserModelId("com.aldoaimlab.desktop");
+
+/**
+ * Carries an rc.6 player's training history across the rename, BEFORE
+ * anything opens the userData directory.
+ *
+ * `app.getPath("appData")` is the roaming root (%APPDATA%) and is available
+ * before `whenReady()`. If the migration cannot move the old directory it
+ * points userData back at it, so the data survives even when the folder name
+ * does not.
+ */
+const userDataMigration: MigrationResult = (() => {
+  const appDataRoot = app.getPath("appData");
+  const currentDir = join(appDataRoot, APP_DIR_NAME);
+  const legacyDir = join(appDataRoot, LEGACY_APP_DIR_NAME);
+  const result = migrateUserData(
+    {
+      currentDir,
+      legacyDir,
+      currentExists: existsSync(currentDir),
+      legacyExists: existsSync(legacyDir),
+    },
+    { existsSync, renameSync, cpSync },
+  );
+  app.setPath("userData", result.dir);
+  return result;
+})();
 
 const SMOKE_TEST = process.argv.includes("--smoke-test");
 const REQUIRE_HELPER = process.argv.includes("--require-helper");
@@ -86,6 +114,12 @@ if (!gotTheLock) {
 async function main(): Promise<void> {
   await app.whenReady();
   log = new DesktopLog(app.getPath("userData"));
+  log.info("user-data-migration", {
+    plan: userDataMigration.plan,
+    outcome: userDataMigration.outcome,
+    detail: userDataMigration.detail,
+    dir: userDataMigration.dir,
+  });
   log.info("shell-start", {
     productVersion: app.getVersion(),
     electron: process.versions.electron,
@@ -118,7 +152,7 @@ async function main(): Promise<void> {
 
   if (!loaded.ok) {
     reportFatal(
-      "The Aldo Aim Lab interface could not be loaded.",
+      "The trAIMer interface could not be loaded.",
       `${loaded.detail}\n\nInstalled frontend: ${frontendRoot()}\nLog: ${log.filePath}`,
     );
   }
@@ -370,7 +404,7 @@ async function runSmokeTest(
   const pass = loaded.ok && domOk && bridgeOk && storageOk && (helperOk || !REQUIRE_HELPER);
 
   const result = {
-    smokeTest: "aldo-aim-lab-desktop",
+    smokeTest: "traimer-desktop",
     pass,
     frontendLoaded: loaded.ok,
     frontendDetail: loaded.detail,
