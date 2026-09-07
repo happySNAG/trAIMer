@@ -21,7 +21,13 @@ echo "== native build pipeline (windows-x64) =="
 
 # 1. Configuration validation (works on every host).
 grep -Eq '#define PROTOCOL_VERSION[[:space:]]+1' "$C_SRC" || fail "protocol version drift"
-grep -Eq '#define HELPER_VERSION[[:space:]]+"helper-1.0.0"' "$C_SRC" || fail "helper version drift"
+# The helper version is NOT duplicated here. It lives in src/version.ts, and
+# the node parity check below is what compares the two — a literal in this
+# script is a third copy that can drift on its own, and did (rc.8 bumped the
+# helper to helper-1.1.0 for the time-sync protocol and this line still said
+# 1.0.0, failing the gate for a reason unrelated to the helper).
+grep -Eq '#define HELPER_VERSION[[:space:]]+"helper-[0-9]+\.[0-9]+\.[0-9]+"' "$C_SRC" \
+  || fail "helper version constant missing or malformed"
 grep -q 'INADDR_LOOPBACK' "$C_SRC" || fail "loopback bind missing"
 node -e '
 const fs = require("fs");

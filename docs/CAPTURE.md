@@ -20,6 +20,10 @@ events → 3. basic mouse events.** Rules enforced in
 
 - tier-1 requires a PASSING diagnostics run (`analyzeNativeStream`); an
   unvalidated helper is rejected with a reason — never trusted implicitly,
+- tier-1 additionally requires that the helper's clock was SYNCHRONIZED with
+  the renderer's during that run. The helper counts milliseconds from its own
+  process start, so an untranslated helper timestamp cannot be placed on the
+  same timeline as the drills at all — see [CLOCK-DOMAINS.md](CLOCK-DOMAINS.md),
 - the active source and every transition are recorded
   (`negotiator.transitions`) and persisted on checkpoints/sessions,
 - a native disconnect DURING a measured trial emits a structured
@@ -51,13 +55,31 @@ Gates: `tests/captureEntry.test.ts`, `tests/browser/captureEntry.spec.ts`,
 `tests/uiContract.test.ts`, and `scripts/verify-arena-entry.mjs` (which drives
 the real Electron shell, and the installed application in CI).
 
-## Session capture quality (Pass 4)
+## Session capture quality (Pass 4; wired live in Pass 14)
 
 Per-trial `computeInputQuality` reports remain, but confidence gating now
 uses the robust SESSION summary (`src/diagnostics/captureQuality.ts`): median
 per-trial scores, drop fraction, lock/resize totals, degradation over time,
 trial consistency, capture-source transitions, fraction of high-quality
 trials. See `docs/OPTIMIZER.md`; one bad trial cannot sink a clean session.
+
+Until Pass 14 nothing in the live path ever CALLED it. `SessionRunner` built
+its optimizer without a `captureQualitySession`, so every real session reached
+the results page reporting *"Capture quality: not graded for this session — run
+the capture check in Diagnostics before your next test"* — advice for a session
+that had already happened — and the optimizer's capture-quality confidence cap
+was permanently disarmed. The runner now grades the session from its own
+recorded stream before analysis, so the grade is a property of the drills that
+were actually played.
+
+## Telling the player BEFORE the session (Pass 14)
+
+The setup screen reports the capture path a calibration started now would be
+measured on, and what that costs: a lower-rate stream gives coarser aim paths,
+so the plausible range around the recommendation comes out wider. It is **not**
+a gate — a calibration on browser capture is a real calibration — and the
+capture check is offered only when running it could actually change the tier,
+so a machine with no helper is never sent to Diagnostics for nothing.
 
 ## Event vocabulary
 
