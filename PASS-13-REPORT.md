@@ -425,3 +425,102 @@ Only these, all deliberate and all invisible to a player:
 The word "Aldo" also remains where it refers to **the person** (the default
 player name, comments about his hardware sessions). That is correct.
 
+---
+
+## 11. Windows CI
+
+Three runs on this branch; the first two failed **only** in the new branding
+gate's own plumbing, never in product code.
+
+| Run | Commit | Result |
+| --- | --- | --- |
+| [34138350113](https://github.com/happySNAG/Aldo-Aim-Lab/actions/runs/34138350113) | `204bbc5` | `engine`, `browser`, `native-windows` green. Both Windows jobs failed: `tests/brandingGate.test.ts` imported `scripts/verify-branding.mjs` from TypeScript, which resolved on Linux/macOS and threw `SyntaxError` at suite load on Windows. |
+| [34139392087](https://github.com/happySNAG/Aldo-Aim-Lab/actions/runs/34139392087) | `833fe88` | Import replaced with a JSON process boundary. Windows jobs failed again — and revealed a **worse** problem: `if (import.meta.url === \`file://${process.argv[1]}\`) main();` is false on Windows (`file:///D:/a/…` vs `D:\a\…`), so every `node scripts/verify-branding.mjs` step in the Windows jobs had produced **no output and exit code 0**. A release gate that passes by not running. The suite caught it because it asserts the gate's *output*, not only its exit code. |
+| **[34140248613](https://github.com/happySNAG/Aldo-Aim-Lab/actions/runs/34140248613)** | **`c741cf9`** | **All five jobs green: `engine`, `browser`, `native-windows`, `windows-release`, `windows-installer`.** |
+
+The `windows-installer` job on `c741cf9` passed, in order: lint + strict
+typecheck, the full engine + desktop suite on a Windows host, no-telemetry
+audit, frontend build, desktop shell build, **arena-entry gate**, frontend
+asset gate, **branding gate (sources + shipped bundle)**, release verification,
+`npm audit`, **helper is a genuine x64 PE**, **helper executes**, NSIS build,
+**installer exists and is plausible + branding gate on the installer
+filename**, **silent install produces a complete application + branding gate on
+the installed layout + no legacy-named file anywhere + `trAIMer.exe` present**,
+**installed app starts, reaches `helperState: ready`, and shuts down with
+nothing surviving**, **the INSTALLED app can start a test** (arena-entry gate
+against the installed exe), then publish with checksum.
+
+---
+
+## 12. Release artifacts
+
+| | |
+| --- | --- |
+| Version | **`1.0.0-rc.7`** |
+| Installer | **`trAIMer-Setup-1.0.0-rc.7.exe`** (also published as `trAIMer-Setup.exe`) |
+| Size | 100,517,791 bytes |
+| SHA-256 | **`3487263dcfb6c2ae5d062b9ad537fcb0b6733a421a0bc5881b11918767bf5d98`** |
+| Built by | CI run `34140248613`, job `windows-installer`, commit `c741cf9` |
+| Portable zip | `trAIMer-v1.0.0-rc.7-windows-x64.zip` (`windows-release` job) |
+
+Verified after download with `verify-windows-artifacts.mjs --installer` and
+`verify-branding.mjs --installer`, then re-verified byte-for-byte after the
+copy to the flash drive.
+
+### Flash drive — `/Volumes/NO NAME`
+
+```
+trAIMer-Setup-1.0.0-rc.7.exe   3487263d…5d98
+trAIMer-Setup.exe              3487263d…5d98   (identical, stable name)
+trAIMer-Setup-SHA256.txt       checksums + CI run + commit
+READ-ME-FIRST-rc7.txt          install steps, what changed, what to try
+```
+
+SHA-256 was re-read **from the drive** after the copy and matches the CI
+artifact exactly, for both filenames.
+
+The rc.6 files (`AldoAimLab-Setup*.exe`, its checksum and `READ-ME-FIRST-rc6.txt`)
+were removed **after** the new copies verified. Leaving a runnable installer
+called *Aldo Aim Lab* beside one called *trAIMer* is the most likely way to get
+the wrong build tested. Their provenance is preserved in `PASS-12-REPORT.md`
+(SHA-256 `9c967cb2…5c70`, CI run 34070387920) and the artifact is still
+reproducible from CI.
+
+---
+
+## 13. Next steps on Aldo's Windows PC
+
+1. Plug in the drive, copy **`trAIMer-Setup.exe`** to the Desktop, run it.
+   SmartScreen → *More info* → *Run anyway*. It replaces the existing
+   "Aldo Aim Lab" install.
+2. Open **trAIMer** from the Desktop icon. Check that History still shows the
+   previous sessions — that is the user-data migration working.
+3. Start a session and **play through at least two breaks.** The one thing
+   that must not happen is the session ending on its own. Progress should read
+   `Calibration NN%` and keep climbing past the first block.
+4. When a **TRACK** drill appears: do not shoot. Follow it, watch the on-target
+   bar, and confirm it ends by itself with `TRACK COMPLETE`.
+5. Shoot the other drills and say whether the sound, hit markers and streaks
+   feel better.
+6. Read the results screen at the end and say whether it makes sense — and
+   whether it gave a recommendation or asked for more data.
+7. If anything goes wrong: Diagnostics → export the diagnostic bundle.
+
+---
+
+## 14. Remaining release blockers
+
+**None for this test.** Known, accepted, unchanged from rc.6:
+
+- **The build is not code-signed.** SmartScreen shows "unknown publisher" on
+  first run. Documented in `docs/INSTALL-WINDOWS.md`; a certificate is not
+  purchased.
+- **The break/resume path is only partly automatable end to end.** The
+  root-cause fix is covered by unit tests against a DOM double that reproduces
+  Chromium's exact ordering, and by the interlude guard; a real Windows
+  Pointer Lock release inside a running session is still exercised only by
+  hand.
+- **Windows PR CI runs on `pull_request`.** A push to a branch without an open
+  PR would not build an installer.
+- The **5-pass multi-game profile campaign has not been started**, as
+  instructed.
