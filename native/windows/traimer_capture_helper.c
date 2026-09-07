@@ -916,6 +916,16 @@ int main(int argc, char **argv)
                 send_welcome(client);
                 emit_lifecycle(client, "started", "raw input stream opened");
                 handshakedOk = 1;
+                /* Consume the hello frame before leaving this loop. Breaking
+                   with it still in `rx` left the streaming loop below to
+                   re-parse it as if it were the client's next message, so the
+                   client's FIRST post-handshake frame was never seen — it sat
+                   in the buffer waiting for another read that a
+                   request/response client will not make until it is answered.
+                   That deadlocked the clock-synchronization handshake. */
+                memmove(rx, rx + offset, (size_t)(rxLen - (int)offset));
+                rxLen -= (int)offset;
+                rx[rxLen] = '\0';
                 break;
             }
             /* Compact remaining bytes. */
@@ -947,14 +957,25 @@ int main(int argc, char **argv)
                 if (n <= 0) break;
                 rxLen += n;
                 rx[rxLen] = '\0';
-                unsigned char opcode = 0;
-                size_t offset = 0;
-                char payload[2048];
-                int plen = ws_parse_client_frame(
-                    (const unsigned char *)rx, (size_t)rxLen, &offset, payload,
-                    sizeof(payload), &opcode);
-                if (plen >= 0) {
-                    if (opcode == 0x8) break; /* close frame */
+                /* Drain EVERY complete frame this read delivered. Handling
+                   one per read meant a second frame already in the buffer
+                   waited for the next read — which a client that waits for a
+                   reply before sending again will never make. */
+                int closing = 0;
+                for (;;) {
+                    unsigned char opcode = 0;
+                    size_t offset = 0;
+                    char payload[2048];
+                    int plen = ws_parse_client_frame(
+                        (const unsigned char *)rx, (size_t)rxLen, &offset,
+                        payload, sizeof(payload), &opcode);
+                    if (plen < 0) {
+                        if (rxLen >= (int)sizeof(rx) - 1) {
+                            rxLen = 0; /* overflow guard; drop garbage */
+                        }
+                        break; /* need more bytes */
+                    }
+                    if (opcode == 0x8) { closing = 1; }
                     if (opcode == 0x9) send_text(client, "\x8A\x00"); /* pong */
                     if (opcode == 0x1) {
                         char mtype[32] = { 0 };
@@ -969,9 +990,9 @@ int main(int argc, char **argv)
                     memmove(rx, rx + offset, (size_t)(rxLen - (int)offset));
                     rxLen -= (int)offset;
                     rx[rxLen] = '\0';
-                } else if (rxLen >= (int)sizeof(rx) - 1) {
-                    rxLen = 0; /* overflow guard; drop garbage */
+                    if (closing) break;
                 }
+                if (closing) break;
             }
             if (waitResult == WAIT_OBJECT_0) {
                 while (PeekMessageA(&msg, hwnd, 0, 0, PM_REMOVE)) {

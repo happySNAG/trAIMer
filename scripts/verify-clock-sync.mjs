@@ -32,6 +32,16 @@ const MIN_CLOCK_SYNC_SAMPLES = 5;
 const PROBES = 12;
 const PORT = 48771;
 
+/**
+ * Hard deadlines. A gate that HANGS is worse than one that fails: the first
+ * run of this script sat for twenty minutes against a helper that had
+ * silently stopped reading its socket, and told nobody why. Every wait below
+ * is bounded, and every timeout names what it was waiting for.
+ */
+const UPGRADE_TIMEOUT_MS = 10_000;
+const MESSAGE_TIMEOUT_MS = 10_000;
+const OVERALL_TIMEOUT_MS = 90_000;
+
 function fail(message) {
   console.error(`FAIL: ${message}`);
   process.exitCode = 1;
@@ -87,6 +97,25 @@ function decodeFrames(buffer) {
     offset = cursor + length;
   }
   return [messages, buffer.subarray(offset)];
+}
+
+function withTimeout(promise, ms, what) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`timed out after ${ms} ms waiting for ${what}`)),
+      ms,
+    );
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
 }
 
 function openSocket(port) {
@@ -166,10 +195,32 @@ async function main() {
   };
   process.on("exit", cleanup);
 
-  // Give the helper a moment to bind.
-  await new Promise((r) => setTimeout(r, 1500));
-
-  const socket = await openSocket(PORT);
+  // Retry the connect rather than sleeping a guessed amount: a cold CI runner
+  // can take longer than any constant to bind, and a flaky gate is a gate
+  // nobody trusts.
+  let socket = null;
+  const connectDeadline = Date.now() + UPGRADE_TIMEOUT_MS;
+  let lastConnectError = null;
+  while (socket === null && Date.now() < connectDeadline) {
+    if (helper.exitCode !== null) {
+      fail(`helper exited with code ${helper.exitCode} before accepting a client`);
+    }
+    try {
+      socket = await withTimeout(
+        openSocket(PORT),
+        2000,
+        "the helper's WebSocket upgrade",
+      );
+    } catch (err) {
+      lastConnectError = err;
+      await new Promise((r) => setTimeout(r, 250));
+    }
+  }
+  if (socket === null) {
+    fail(
+      `helper never accepted a client on 127.0.0.1:${PORT}: ${String(lastConnectError?.message ?? lastConnectError)}`,
+    );
+  }
   const inbox = [];
   const waiters = [];
   socket.onMessage((raw) => {
@@ -178,12 +229,16 @@ async function main() {
     if (waiter) waiter(parsed);
     else inbox.push(parsed);
   });
-  const next = () =>
-    new Promise((resolve) => {
-      const queued = inbox.shift();
-      if (queued) resolve(queued);
-      else waiters.push(resolve);
-    });
+  const next = (what) =>
+    withTimeout(
+      new Promise((resolve) => {
+        const queued = inbox.shift();
+        if (queued) resolve(queued);
+        else waiters.push(resolve);
+      }),
+      MESSAGE_TIMEOUT_MS,
+      what,
+    );
 
   socket.send(
     JSON.stringify({
@@ -194,8 +249,8 @@ async function main() {
     }),
   );
 
-  let welcome = await next();
-  while (welcome.type === "lifecycle") welcome = await next();
+  let welcome = await next("the helper's welcome");
+  while (welcome.type === "lifecycle") welcome = await next("the helper's welcome");
   if (welcome.type !== "welcome") fail(`expected welcome, got ${welcome.type}`);
   console.log(
     `welcome: ${welcome.helperVersion} protocol=${welcome.protocolVersion} device=${welcome.deviceId}`,
@@ -212,9 +267,11 @@ async function main() {
     const id = `probe-${i}`;
     const t0 = performance.now();
     socket.send(JSON.stringify({ type: "time-sync", id }));
-    let reply = await next();
+    let reply = await next(`a time-sync reply for ${id}`);
     // Raw input can interleave frames with the reply.
-    while (reply.type !== "time-sync-reply") reply = await next();
+    while (reply.type !== "time-sync-reply") {
+      reply = await next(`a time-sync reply for ${id}`);
+    }
     const t2 = performance.now();
     if (reply.id !== id) fail(`reply id mismatch: sent ${id}, got ${reply.id}`);
     if (typeof reply.helperMonotonicMs !== "number" || !Number.isFinite(reply.helperMonotonicMs)) {
@@ -280,8 +337,17 @@ async function main() {
   }
 
   console.log("clock-sync gate: all checks passed");
+  clearTimeout(overall);
   cleanup();
 }
+
+const overall = setTimeout(() => {
+  console.error(
+    `FAIL: clock-sync gate did not finish within ${OVERALL_TIMEOUT_MS} ms`,
+  );
+  process.exit(1);
+}, OVERALL_TIMEOUT_MS);
+overall.unref?.();
 
 main().catch((err) => {
   console.error(String(err?.message ?? err));
