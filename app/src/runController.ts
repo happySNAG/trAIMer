@@ -8,6 +8,7 @@ import {
   type LockRequestableElement,
 } from "../../src/capture/browserSource.ts";
 import {
+  CAPTURE_RELEASED_REASON,
   POINTER_LOCK_LOSS_REASON,
   type CaptureEvent,
 } from "../../src/capture/events.ts";
@@ -60,6 +61,18 @@ export interface DrillInfo {
 
 export interface RunControllerCallbacks {
   onHud(state: SessionStateName, detail: string): void;
+  /**
+   * Gameplay capture has been handed back for an interlude (break/pause):
+   * the player has a real cursor and the on-screen controls are clickable.
+   */
+  onCaptureSuspended?(reason: string): void;
+  /**
+   * The mouse could not be taken back without a user gesture. `retry` MUST be
+   * invoked synchronously from a click handler.
+   */
+  onCaptureGestureNeeded?(retry: () => void): void;
+  /** Gameplay capture is held again; the interlude UI can come down. */
+  onCaptureResumed?(): void;
   /** A break began (with its planned length) or ended (null). */
   onRest?(rest: RestNotice | null): void;
   /** The next drill is about to start: where it sits in the session and what to do. */
@@ -257,6 +270,39 @@ export class BrowserRunController {
           if (this.#virtualLock) return;
           capture.releaseLock();
         },
+        // Interlude handling (rc.6). A break or a pause presents buttons the
+        // player is meant to click; leaving the arena's pointer lock in place
+        // means there is no cursor to click them WITH. The mouse now goes back
+        // to Windows before any interlude UI is shown, and is taken again on
+        // the way out.
+        suspendCapture: async (reason) => {
+          // The E2E adapter holds no real lock, but it MUST still report the
+          // interlude: that the automated suite could not tell "mouse held"
+          // from "mouse free" is exactly why a break screen shipped with an
+          // unclickable button.
+          if (!this.#virtualLock) capture.releaseLock();
+          this.#callbacks.onCaptureSuspended?.(reason);
+        },
+        resumeCapture: async (reason) => {
+          if (this.#virtualLock) {
+            this.#callbacks.onCaptureResumed?.();
+            return LOCK_GRANTED;
+          }
+          if (capture.isLocked) {
+            this.#callbacks.onCaptureResumed?.();
+            return LOCK_GRANTED;
+          }
+          // Chromium may grant a re-lock without a fresh gesture; when it
+          // refuses, the honest answer is to ask the player for a click
+          // rather than to end the session.
+          const direct = await capture.requestLock();
+          if (direct.granted && capture.isLocked) {
+            this.#callbacks.onCaptureResumed?.();
+            return direct;
+          }
+          if (this.#cancelledBeforeStart) return direct;
+          return this.#awaitCaptureGesture(reason);
+        },
       },
       onStateChange: (state, detail) => this.#callbacks.onHud(state, detail ?? ""),
       onRest: (rest) => this.#callbacks.onRest?.(rest),
@@ -381,6 +427,8 @@ export class BrowserRunController {
   cancel(): void {
     this.#cancelledBeforeStart = true;
     this.#runner?.cancel();
+    // A "click the arena to continue" gate must never outlive the session.
+    this.#gestureAbort?.();
     // Settle any in-flight lock request immediately so nothing waits out the
     // timeout, and give the mouse back if it was already captured.
     this.#capture?.abortPendingLock("ended by the player");
@@ -398,6 +446,56 @@ export class BrowserRunController {
   /** True once start() has been entered (a runner exists or is being built). */
   get started(): boolean {
     return this.#started;
+  }
+
+  /** Settles a pending "click the arena to continue" gate (End session). */
+  #gestureAbort: (() => void) | null = null;
+
+  /**
+   * Waits for the player to hand the mouse back with a real click. The UI
+   * renders the prompt and calls `retry` from inside the click's user
+   * activation, which is the only context Chromium reliably accepts a lock
+   * request in. Ending the session settles this immediately — a gate the
+   * player cannot leave would be the same trap in a new place.
+   */
+  #awaitCaptureGesture(reason: string): Promise<LockOutcome> {
+    const capture = this.#capture;
+    if (!capture) {
+      return Promise.resolve({
+        granted: false,
+        reasonCode: "unsupported" as const,
+        detail: "capture source was not initialised",
+      });
+    }
+    return new Promise<LockOutcome>((resolve) => {
+      let settled = false;
+      const settle = (outcome: LockOutcome): void => {
+        if (settled) return;
+        settled = true;
+        this.#gestureAbort = null;
+        resolve(outcome);
+      };
+      this.#gestureAbort = () =>
+        settle({
+          granted: false,
+          reasonCode: "cancelled",
+          detail: `the session was ended while resuming from ${reason}`,
+        });
+      const attempt = (): void => {
+        // SYNCHRONOUS inside the click gesture.
+        void capture.requestLock().then((outcome) => {
+          if (settled) return;
+          if (outcome.granted && capture.isLocked) {
+            this.#callbacks.onCaptureResumed?.();
+            settle(outcome);
+            return;
+          }
+          // Refused again: ask once more rather than ending the session.
+          this.#callbacks.onCaptureGestureNeeded?.(attempt);
+        });
+      };
+      this.#callbacks.onCaptureGestureNeeded?.(attempt);
+    });
   }
 
   /** E2E adapter seam: feed a capture event through the production recorder. */
@@ -547,7 +645,17 @@ export class BrowserRunController {
       event.action === "press"
     ) {
       const latest = active.recorder.state.latestShot;
-      if (latest?.hit && latest.aimTargetId) {
+      // A shot removes the target it hit ONLY in the click-to-hit drills.
+      //
+      // The tracking drill (the fast pink target) is not shot at all — it is
+      // followed for a fixed window. rc.5 removed it on a click anyway, which
+      // left the arena empty for the rest of the six seconds with no target,
+      // no feedback and nothing to do: the drill looked like it had registered
+      // the hit and was waiting for another input before moving on. It was
+      // not; it was running out a timer against an invisible target, which
+      // also destroyed that trial's tracking measurement.
+      const removesOnHit = active.director.removesTargetOnHit;
+      if (removesOnHit && latest?.hit && latest.aimTargetId) {
         active.recorder.add({
           kind: "target-remove",
           tMs: latest.tMs + 1,
@@ -565,8 +673,12 @@ export class BrowserRunController {
     // Fatal interruptions (manual-test policy E4): losing pointer lock or
     // window focus mid-trial ends the trial as invalid and cancels the
     // session honestly — no trial measured without full control survives.
+    // A release WE asked for (break/pause/session end) is not a loss and
+    // never happens mid-trial.
     const isFatal =
-      (event.kind === "lock-change" && !event.locked) ||
+      (event.kind === "lock-change" &&
+        !event.locked &&
+        event.reason !== CAPTURE_RELEASED_REASON) ||
       (event.kind === "focus-change" && !event.focused);
     if (isFatal && !active.fatalSeen) {
       active.fatalSeen = true;
@@ -740,6 +852,17 @@ export class BrowserRunController {
 
     this.#fx.draw(ctx, now);
 
+    // The tracking drill runs a fixed window and ends by itself. Without a
+    // visible clock an arena with nothing to click reads as "waiting for
+    // input" — which is precisely how rc.5's tracking drill was reported.
+    if (kind === "tracking") {
+      const started = director.startedAtMonotonicMs;
+      const total = director.durationMs;
+      if (started !== null && total > 0) {
+        drawDrillProgress(ctx, w, h, (now - started) / total, palette.core);
+      }
+    }
+
     // Sequence pips for the switch drill: how many of the three are done.
     if (kind === "target-switch") {
       const total = this.#activeScenario?.targetsPerTrial ?? 3;
@@ -894,6 +1017,30 @@ function drawSequencePips(
       ctx.stroke();
     }
   }
+}
+
+/**
+ * A thin time bar for drills that end on a clock rather than on a hit. It says
+ * "this is running and it will finish on its own", so an arena the player
+ * cannot act on never looks frozen.
+ */
+function drawDrillProgress(
+  ctx: CanvasRenderingContext2D,
+  w: number,
+  h: number,
+  fraction: number,
+  color: string,
+): void {
+  const f = Math.max(0, Math.min(1, fraction));
+  const barW = Math.min(360, w * 0.32);
+  const x = (w - barW) / 2;
+  const y = h - 22;
+  ctx.save();
+  ctx.fillStyle = "rgba(255,255,255,0.14)";
+  ctx.fillRect(x, y, barW, 3);
+  ctx.fillStyle = color;
+  ctx.fillRect(x, y, barW * f, 3);
+  ctx.restore();
 }
 
 /** Darkens a #rrggbb colour by `factor` (0–1). */

@@ -54,6 +54,45 @@ async function reachFirstBreak(page: Page): Promise<void> {
   throw new Error(`never reached a break; state=${await sessionState(page)}`);
 }
 
+test.describe("the break hands the mouse back before asking for a click", () => {
+  /**
+   * rc.5's break screen drew "Skip break" while the arena still held Pointer
+   * Lock — no cursor, so nothing to press it with ("the time out screen you
+   * can't skip cause it freezes your mouse"). The run screen now marks the
+   * interlude on <body> so this is observable, and the arena shows a cursor.
+   */
+  test("marks the interlude, restores the cursor, and clears it on resume", async ({ page }) => {
+    await startShortSession(page);
+    await expect(page.locator("body")).not.toHaveClass(/capture-suspended/);
+    await reachFirstBreak(page);
+    await expect(page.locator("body")).toHaveClass(/capture-suspended/);
+    // A real cursor over the arena, and a reachable Skip break button.
+    await expect(page.locator("#run-canvas")).toHaveCSS("cursor", "default");
+    await expect(page.locator(".overlay-body")).toContainText("Your mouse is free");
+    const skip = page.locator(".overlay-actions button:has-text('Skip break')");
+    await expect(skip).toBeVisible();
+    await skip.click();
+    // Back under capture for the drills that follow.
+    await expect(page.locator("body")).not.toHaveClass(/capture-suspended/, { timeout: 5_000 });
+    await expect(page.locator(".run-screen")).not.toHaveAttribute(
+      "data-session-state",
+      "rest",
+      { timeout: 5_000 },
+    );
+  });
+
+  test("the End session control is reachable during a break", async ({ page }) => {
+    await startShortSession(page);
+    await reachFirstBreak(page);
+    const endSession = page.locator(".run-controls button:has-text('End session')");
+    await expect(endSession).toBeVisible();
+    await expect(endSession).toBeEnabled();
+    // Clickable, not merely present: the mouse is the player's during a break.
+    await endSession.click();
+    await expect(page.locator("dialog.dialog")).toBeVisible({ timeout: 5_000 });
+  });
+});
+
 test.describe("skippable breaks", () => {
   test("a break shows a countdown and a Skip break action, and the button ends it", async ({ page }) => {
     await startShortSession(page);

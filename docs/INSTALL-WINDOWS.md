@@ -1,10 +1,15 @@
-# Installing Aldo Aim Lab on Windows
+# Installing trAIMer on Windows
+
+> **trAIMer — Train. Measure. Tune.** The installer, the installed application
+> and the internal package are still named *Aldo Aim Lab*; the product name is
+> being adopted in release material first and the packaging rename is a
+> separate change.
 
 One file. Double-click it. That is the whole procedure.
 
 ## What you need
 
-- `AldoAimLab-Setup-1.0.0-rc.5.exe` (also copied as `AldoAimLab-Setup.exe`)
+- `AldoAimLab-Setup-1.0.0-rc.6.exe` (also copied as `AldoAimLab-Setup.exe`)
 - Windows 10 or 11, 64-bit (`PROCESSOR_ARCHITECTURE = AMD64`)
 
 You do **not** need PowerShell, a terminal, a browser, a compiler, admin

@@ -622,6 +622,7 @@ let runScreenTeardown: (() => void) | null = null;
 
 function exitSessionChrome(): void {
   document.body.classList.remove("session-active");
+  document.body.classList.remove("capture-suspended");
   runScreenTeardown?.();
   runScreenTeardown = null;
 }
@@ -686,6 +687,29 @@ function makeCallbacks(run: RunView): RunControllerCallbacks {
         run.hideOverlay();
       }
     },
+    onCaptureSuspended(reason) {
+      // The mouse is the player's again: say so, and let the run screen show a
+      // cursor over the arena.
+      document.body.classList.add("capture-suspended");
+      run.setIntentHint("Mouse released — the buttons on this screen work now.");
+      diagnosticLog.log("info", "capture-suspended", { reason });
+    },
+    onCaptureGestureNeeded(retry) {
+      // Chromium refused a gesture-less re-lock. Ask for the click instead of
+      // ending the session; the handler runs inside the user activation.
+      run.showOverlay(
+        "crosshair",
+        "Click to continue",
+        "Click the arena to hand the mouse back to the test and carry on. Nothing is lost — every completed trial is saved.",
+      );
+      run.setPendingStart(retry);
+    },
+    onCaptureResumed() {
+      document.body.classList.remove("capture-suspended");
+      run.setIntentHint(null);
+      run.hideOverlay();
+      diagnosticLog.log("info", "capture-resumed", {});
+    },
     onRest(rest) {
       if (restTicker !== null) {
         clearInterval(restTicker);
@@ -702,8 +726,8 @@ function makeCallbacks(run: RunView): RunControllerCallbacks {
           "clock",
           title,
           isFatigue
-            ? `${seconds}s — you have been testing continuously for a while. A short rest protects measurement quality, but it is yours to take. Press Space or Enter to resume now.`
-            : `${seconds}s — next blinded sensitivity coming up. Press Space or Enter to resume now.`,
+            ? `${seconds}s — you have been testing continuously for a while. A short rest protects measurement quality, but it is yours to take. Your mouse is free: click Skip break, or press Space or Enter.`
+            : `${seconds}s — next blinded sensitivity coming up. Your mouse is free: click Skip break, or press Space or Enter.`,
           [
             {
               label: "Skip break",

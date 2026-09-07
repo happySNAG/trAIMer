@@ -34,6 +34,8 @@ interface ScriptedOutcome {
 
 class ScriptedExecutionPort implements TrialExecutionPort {
   lockResult = true;
+  suspends = 0;
+  resumes = 0;
   readonly executed: { candidateId: string; scenarioId: string; phase: string; round: number; repIndex: number | null }[] = [];
   readonly outcomesByCandidate = new Map<string, ScriptedOutcome>();
 
@@ -50,6 +52,15 @@ class ScriptedExecutionPort implements TrialExecutionPort {
   }
 
   async releaseCapture(): Promise<void> {}
+
+  async suspendCapture(): Promise<void> {
+    this.suspends++;
+  }
+
+  async resumeCapture(): Promise<LockOutcome> {
+    this.resumes++;
+    return LOCK_GRANTED;
+  }
 
   async executeTrial(
     spec: TrialPlanSpec,

@@ -125,6 +125,8 @@ function basePorts(): { ports: SessionRunnerPorts; backend: InMemoryBackend } {
         abortedMs: null,
       }),
       releaseCapture: async () => undefined,
+      suspendCapture: async () => undefined,
+      resumeCapture: async () => LOCK_GRANTED,
     },
   };
   return { ports, backend };

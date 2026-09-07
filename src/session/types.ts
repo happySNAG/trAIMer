@@ -23,6 +23,23 @@ export interface TrialExecutionPort {
     repIndex: number | null,
   ): Promise<TrialRecord>;
   releaseCapture(): Promise<void>;
+  /**
+   * Hands the input path back for an INTERLUDE (a break, a pause) that shows
+   * the player something to click.
+   *
+   * This is not the same as `releaseCapture`, which ends the session's claim
+   * for good. Until rc.6 there was no such thing: a break drew a "Skip break"
+   * button while the arena still held Pointer Lock, so there was no cursor to
+   * press it with — "the time out screen you can't skip cause it freezes your
+   * mouse".
+   */
+  suspendCapture(reason: string): Promise<void>;
+  /**
+   * Takes the input path back after an interlude. May legitimately have to
+   * wait for a user gesture (Chromium refuses gesture-less pointer-lock
+   * requests), so it returns the same structured outcome as `requestLock`.
+   */
+  resumeCapture(reason: string): Promise<LockOutcome>;
 }
 
 export interface SessionRunnerPorts {

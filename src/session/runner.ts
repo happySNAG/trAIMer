@@ -60,6 +60,10 @@ export class SessionRunner {
   #cancelRequested = false;
   /** Resolves the rest currently in progress early (Skip break / Space / Enter). */
   #restSkip: (() => void) | null = null;
+  /** True between suspendCapture() and resumeCapture() — a break or a pause. */
+  #captureSuspended = false;
+  /** Set when the mouse could not be taken back after an interlude. */
+  #resumeFailure: SessionAbortReason | null = null;
   readonly #audit = new AuditLog();
   #resumedFrom: ResumeCheckpoint | null = null;
   #startedAtIso = new Date().toISOString();
@@ -228,6 +232,12 @@ export class SessionRunner {
     }
 
     if (this.#cancelRequested) {
+      if (this.#resumeFailure) {
+        return this.#abortRun(
+          `capture could not be resumed: ${this.#resumeFailure.detail}`,
+          this.#resumeFailure,
+        );
+      }
       return this.#abortRun("cancelled by user");
     }
 
@@ -485,6 +495,12 @@ export class SessionRunner {
    * called, or when the session is cancelled — whichever comes first.
    */
   async #rest(durationMs: number, reason: string): Promise<void> {
+    // THE MOUSE COMES BACK FIRST. The break screen offers "Skip break" and the
+    // bottom bar offers Pause / End session; every one of them is unreachable
+    // while the arena still owns the pointer. Releasing before the overlay is
+    // shown — not after, not on a timer — is what makes the break skippable
+    // with a mouse at all.
+    await this.#suspendCapture(`rest:${reason}`);
     this.#audit.append(this.#ports.nowIso(), "rest-started", { reason, durationMs });
     this.#ports.onRest?.({ durationMs, reason, skippable: true });
     const startedAt = this.#ports.clock.nowMs();
@@ -508,17 +524,67 @@ export class SessionRunner {
       plannedMs: durationMs,
     });
     this.#ports.onRest?.(null);
+    await this.#resumeCapture(`rest:${reason}`);
   }
 
   async #awaitIfPaused(): Promise<void> {
     if (!this.#pauseRequested) return;
     const resumeState = this.#state;
+    // A pause is an interlude too: the Resume control lives in the bottom bar,
+    // which the player cannot reach while the arena holds the pointer. Same
+    // cleanup as a break, deliberately — one path, one guarantee.
+    await this.#suspendCapture("pause");
     this.#setState("paused");
     while (this.#pauseRequested && !this.#cancelRequested) {
       await this.#ports.sleep(50);
     }
     if (!this.#cancelRequested) {
+      await this.#resumeCapture("pause");
       this.#forceState(resumeState === "paused" ? "inter-trial" : resumeState);
+    }
+  }
+
+  /**
+   * Hands the mouse back for an interlude. Recorded in the audit trail so a
+   * session's transcript shows exactly when the player had the cursor.
+   */
+  async #suspendCapture(reason: string): Promise<void> {
+    if (this.#captureSuspended) return;
+    this.#captureSuspended = true;
+    await this.#ports.execution.suspendCapture(reason);
+    this.#audit.append(this.#ports.nowIso(), "capture-suspended", { reason });
+  }
+
+  /**
+   * Takes the mouse back after an interlude. A refusal ends the session with a
+   * named reason rather than dropping the player into drills that cannot
+   * record anything — but a cancel is not a refusal, it is the player leaving.
+   */
+  async #resumeCapture(reason: string): Promise<void> {
+    if (!this.#captureSuspended) return;
+    // Ending the session during a break: there is nothing to take back, and
+    // asking would turn a deliberate exit into a "capture failed" report.
+    if (this.#cancelRequested) {
+      this.#captureSuspended = false;
+      return;
+    }
+    const outcome = await this.#ports.execution.resumeCapture(reason);
+    this.#captureSuspended = false;
+    this.#audit.append(this.#ports.nowIso(), "capture-resumed", {
+      reason,
+      reasonCode: outcome.reasonCode,
+      granted: outcome.granted ? 1 : 0,
+    });
+    if (!outcome.granted && !this.#cancelRequested) {
+      this.#audit.append(this.#ports.nowIso(), "capture-unavailable", {
+        reasonCode: outcome.reasonCode,
+        detail: outcome.detail,
+      });
+      this.#cancelRequested = true;
+      this.#resumeFailure = {
+        code: outcome.reasonCode,
+        detail: outcome.detail,
+      };
     }
   }
 

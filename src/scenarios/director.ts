@@ -99,6 +99,11 @@ export class ScenarioDirector {
     this.#lastRemovalAtMonotonicMs = tMs;
   }
 
+  /** The scenario's own window (ms) — what the trial's clock runs against. */
+  get durationMs(): number {
+    return this.#instance.durationMs;
+  }
+
   /** Per-target window for sequential scenarios; null when not applicable. */
   get perTargetTimeoutMs(): number | null {
     return this.#instance.perTargetTimeoutMs ?? null;
@@ -146,6 +151,18 @@ export class ScenarioDirector {
 
   isSequentialScenario(): boolean {
     return this.#isSequentialScenario();
+  }
+
+  /**
+   * Whether a successful shot takes the target out of the arena.
+   *
+   * True for every click-to-hit drill. FALSE for tracking: that drill is not
+   * shot at all, so removing its target on a click leaves the player staring
+   * at an empty arena for the rest of the window — the "I hit it and then had
+   * to click again" report from the rc.5 hardware session.
+   */
+  get removesTargetOnHit(): boolean {
+    return this.#request.scenarioKind !== "tracking";
   }
 
   #isSequentialScenario(): boolean {

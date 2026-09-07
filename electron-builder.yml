@@ -25,6 +25,13 @@ files:
 
 # The helper must live OUTSIDE the asar archive: a packed archive member
 # cannot be spawned as a child process.
+#
+# electron-builder SKIPS a missing extraResource with a log line and builds a
+# perfectly valid-looking installer without it ("file source doesn't exist").
+# `npm run dist:win` therefore runs verify-windows-artifacts --helper first
+# and fails closed, the same way the portable packager refuses to package a
+# helper it cannot verify. Never invoke electron-builder directly for a
+# release build.
 extraResources:
   - from: native/windows/aldo_capture_helper.exe
     to: aldo_capture_helper.exe

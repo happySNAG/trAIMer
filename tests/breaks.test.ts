@@ -96,6 +96,7 @@ function makeRunner(restBetweenCandidatesMs: number) {
   const time = manualTime();
   const rests: (RestNotice | null)[] = [];
   const states: string[] = [];
+  const captureLog: string[] = [];
   const definition = buildExperimentDefinition({
     id: makeExperimentId("breaks-test"),
     name: "breaks",
@@ -111,6 +112,13 @@ function makeRunner(restBetweenCandidatesMs: number) {
     requestLock: async () => LOCK_GRANTED,
     executeTrial: async (spec) => stubTrial(`t-${spec.sequenceNumber}`, spec.scenarioId, time.clock.nowMs()),
     releaseCapture: async () => undefined,
+    suspendCapture: async (reason) => {
+      captureLog.push(`suspend:${reason}`);
+    },
+    resumeCapture: async (reason) => {
+      captureLog.push(`resume:${reason}`);
+      return LOCK_GRANTED;
+    },
   };
   const runner = new SessionRunner(definition, {
     clock: time.clock,
@@ -121,7 +129,7 @@ function makeRunner(restBetweenCandidatesMs: number) {
     onStateChange: (state) => states.push(state),
     onRest: (rest) => rests.push(rest),
   });
-  return { runner, time, rests, states, definition };
+  return { runner, time, rests, states, definition, captureLog };
 }
 
 /** Runs the session, advancing manual time in `stepMs` chunks until it finishes. */

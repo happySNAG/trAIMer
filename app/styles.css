@@ -1450,6 +1450,17 @@ pre.json {
   position: relative;
 }
 
+/*
+ * While gameplay capture is suspended (a break, a pause) the arena must show a
+ * real cursor: the whole point of releasing the pointer is that the player can
+ * press "Skip break", Pause or End session. Pointer Lock hides the cursor by
+ * itself, so this rule matters on the frames either side of the transition.
+ */
+body.capture-suspended .run-stage-inner,
+body.capture-suspended #run-canvas {
+  cursor: default;
+}
+
 #run-canvas {
   display: block;
   background: #05070a;

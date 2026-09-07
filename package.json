@@ -1,6 +1,6 @@
 {
   "name": "aldo-aim-lab",
-  "version": "1.0.0-rc.5",
+  "version": "1.0.0-rc.6",
   "private": true,
   "type": "module",
   "description": "Fortnite-focused aim measurement and sensitivity optimization engine (headless core).",
@@ -18,7 +18,7 @@
     "build:desktop": "tsc -p desktop/tsconfig.json && node scripts/finalize-desktop-build.mjs",
     "desktop": "npm run build && npm run build:desktop && electron .",
     "desktop:smoke": "npm run build && npm run build:desktop && electron . --smoke-test",
-    "dist:win": "npm run build && npm run build:desktop && electron-builder --win --x64 --publish never",
+    "dist:win": "npm run build && npm run build:desktop && node scripts/verify-windows-artifacts.mjs --helper native/windows/aldo_capture_helper.exe && electron-builder --win --x64 --publish never",
     "package:dry-run": "npm run build && node scripts/package-release.mjs --allow-placeholder-helper",
     "verify:release": "node scripts/verify-release.mjs",
     "verify:windows-artifacts": "node scripts/verify-windows-artifacts.mjs",

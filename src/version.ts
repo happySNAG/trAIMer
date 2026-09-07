@@ -6,7 +6,12 @@
  * these strings so any historical result can be traced to the exact code that
  * produced it.
  *
- * The V1 release candidate is identified as 1.0.0-rc.5 (Pass 11: gameplay
+ * The V1 release candidate is identified as 1.0.0-rc.6 (Pass 12: three
+ * gameplay defects from the second hardware session — the strafing target was
+ * hit-tested at a stale keyframe and swept too little of the field to be
+ * shootable, a click on the tracking target deleted it and left the arena
+ * blank until its timer ran out, and the break screen asked for a click while
+ * the arena still held the mouse). rc.5 (Pass 11: gameplay
  * fixes from the first playable hardware session — the three-target switch
  * drill is genuinely sequential with per-target windows, breaks are
  * skippable and configurable, drill draws are balanced and de-repeated, and
@@ -27,7 +32,7 @@
 export const APP_NAME = "aldo-aim-lab";
 
 /** Application release version for the V1 release candidate. */
-export const APP_VERSION = "1.0.0-rc.5";
+export const APP_VERSION = "1.0.0-rc.6";
 
 /**
  * Engine contract version: bump when a persisted engine-facing data contract

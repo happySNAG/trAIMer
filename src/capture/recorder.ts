@@ -314,11 +314,23 @@ export class TrialRecorder {
     return record;
   }
 
+  /**
+   * The target a shot at `tMs` landed on, or null for a miss.
+   *
+   * Positions come from `targetPositionAt` — the SAME function the renderer
+   * draws from (`activeTargetsAt`). Until rc.6 this path used a local helper
+   * that snapped to the previous keyframe instead of interpolating between
+   * them, so on a moving target the hit disc trailed the drawn disc by up to
+   * one keyframe interval. On the strafing drill (50 ms keyframes, up to
+   * 520 px/s, 24 px radius) that put the hit disc as much as 26 px behind the
+   * circle on screen: a pixel-perfect shot at the visible centre was scored a
+   * miss. That is why Aldo did not hit a single light-blue target.
+   */
   #targetUnderCursor(tMs: number): TargetSpan["targetId"] | null {
     for (const span of this.#targets) {
       if (span.appearedMs > tMs) continue;
-      if (span.removedMs !== null && span.removedMs < tMs) continue;
-      const pos = spanMotionPosition(span, tMs);
+      if (this.#isResolved(span, tMs)) continue;
+      const pos = targetPositionAt(span, tMs);
       if (
         pos &&
         Math.hypot(pos.x - this.#cursor.x, pos.y - this.#cursor.y) <=
@@ -330,32 +342,28 @@ export class TrialRecorder {
     return null;
   }
 
+  /**
+   * A target that has already been hit (or has expired) can never be shot
+   * again — not even by a second click carrying the SAME millisecond
+   * timestamp, which is exactly how a fast double-click used to score two
+   * hits on one target.
+   */
+  #isResolved(span: TargetSpan, tMs: number): boolean {
+    if (span.removedMs === null) return false;
+    return span.removalReason === "hit" || span.removedMs <= tMs;
+  }
+
   #nearestTargetDistance(tMs: number): number | null {
     let best: number | null = null;
     for (const span of this.#targets) {
       if (span.appearedMs > tMs) continue;
-      const pos = spanMotionPosition(span, tMs);
+      const pos = targetPositionAt(span, tMs);
       if (!pos) continue;
       const d = Math.hypot(pos.x - this.#cursor.x, pos.y - this.#cursor.y);
       best = best === null ? d : Math.min(best, d);
     }
     return best;
   }
-}
-
-function spanMotionPosition(
-  span: TargetSpan,
-  tMs: number,
-): Vec2 | null {
-  if (span.motion.kind === "static") return span.motion.position;
-  const keys = span.motion.keyframes;
-  let prev: { tMs: number; position: Vec2 } | null = null;
-  for (const key of keys) {
-    if (key.tMs <= tMs) prev = key;
-    else break;
-  }
-  if (!prev) return null;
-  return prev.position;
 }
 
 export function lastSampleTime(record: TrialRecord): number | null {

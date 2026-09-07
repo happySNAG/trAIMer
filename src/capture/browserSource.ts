@@ -1,5 +1,6 @@
 import type { Viewport } from "../domain/geometry.ts";
 import {
+  CAPTURE_RELEASED_REASON,
   initialReticlePosition,
   POINTER_LOCK_LOSS_REASON,
   TAB_HIDDEN_REASON,
@@ -189,6 +190,12 @@ export class PointerLockCaptureSource implements CaptureSource {
   #lockTimer: ReturnType<typeof setTimeout> | null = null;
   #capabilities: PointerEventCapabilities | null = null;
   #lastOutcome: LockOutcome | null = null;
+  /**
+   * Set while an exitPointerLock() WE asked for is in flight, so the
+   * pointerlockchange it produces is reported as CAPTURE_RELEASED_REASON
+   * rather than a loss. Consumers turn a loss into a fatal interruption.
+   */
+  #releaseRequested = false;
 
   get capabilities(): PointerEventCapabilities | null {
     return this.#capabilities;
@@ -286,11 +293,13 @@ export class PointerLockCaptureSource implements CaptureSource {
       const wasLocked = this.#locked;
       this.#locked = isLocked;
       if (!isLocked && wasLocked) {
+        const deliberate = this.#releaseRequested;
+        this.#releaseRequested = false;
         sink.onEvent({
           kind: "lock-change",
           tMs: nowMs(),
           locked: false,
-          reason: POINTER_LOCK_LOSS_REASON,
+          reason: deliberate ? CAPTURE_RELEASED_REASON : POINTER_LOCK_LOSS_REASON,
         });
         this.#settleLock({
           granted: false,
@@ -298,6 +307,7 @@ export class PointerLockCaptureSource implements CaptureSource {
           detail: "pointer lock was released before the request settled",
         });
       } else if (isLocked && !wasLocked) {
+        this.#releaseRequested = false;
         sink.onEvent({ kind: "lock-change", tMs: nowMs(), locked: true, reason: "acquired" });
         this.#settleLock(LOCK_GRANTED);
       }
@@ -435,9 +445,22 @@ export class PointerLockCaptureSource implements CaptureSource {
     this.releaseLock();
   }
 
-  releaseLock(): void {
+  /**
+   * Hands the mouse back. `deliberate` (the default) marks the resulting
+   * pointerlockchange as CAPTURE_RELEASED_REASON so consumers do not mistake
+   * an intentional release — a break, a pause, the end of a session — for the
+   * fatal loss of a lock the session still needed.
+   */
+  releaseLock(deliberate = true): void {
     if (this.#options.document.pointerLockElement != null) {
+      this.#releaseRequested = deliberate;
       this.#options.document.exitPointerLock();
+      // exitPointerLock() is asynchronous: if the document never dispatches a
+      // change (torn-down window), the flag must not leak into a later, real
+      // loss. The change handler clears it; this is the belt-and-braces path.
+      if (this.#options.document.pointerLockElement == null) {
+        this.#releaseRequested = false;
+      }
     }
   }
 

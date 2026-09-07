@@ -12,6 +12,10 @@ export const AUDIT_CATEGORIES = [
   "capture-source-changed",
   /** The session could not obtain the input path it needs (Pass 10). */
   "capture-unavailable",
+  /** The mouse was handed back for an interlude — a break or a pause (rc.6). */
+  "capture-suspended",
+  /** The mouse was taken back after an interlude (rc.6). */
+  "capture-resumed",
   "boundary-expansion-proposed",
   "adaptive-allocation-decision",
   "extra-block-requested",

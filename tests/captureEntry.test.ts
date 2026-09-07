@@ -349,6 +349,8 @@ function makeRunner(
     releaseCapture: async () => {
       released.count++;
     },
+    suspendCapture: async () => undefined,
+    resumeCapture: async () => LOCK_GRANTED,
   };
   const definition = tinyDefinition();
   const runner = new SessionRunner(definition, {
@@ -435,6 +437,8 @@ describe("session runner: the execution gate never hangs or lies", () => {
           return stubTrial(`t-${spec.sequenceNumber}`, spec.scenarioId);
         },
         releaseCapture: async () => undefined,
+        suspendCapture: async () => undefined,
+        resumeCapture: async () => LOCK_GRANTED,
       },
       onStateChange: (state) => states.push(state),
     });

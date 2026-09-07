@@ -3,7 +3,7 @@ import { ScenarioDirector } from "../src/scenarios/director.ts";
 import { createInstanceRng, planScenarioInstance } from "../src/scenarios/planner.ts";
 import { scenarioById } from "../src/domain/scenario.ts";
 import type { TrialRecordingRequest } from "../src/capture/recorder.ts";
-import type { TargetId } from "../src/domain/ids.ts";
+import { aimAt, shoot } from "./arenaHarness.ts";
 
 /**
  * Three-target switch drill (Pass 11 regression).
@@ -49,30 +49,6 @@ function directorFor(seed: number, id = `switch-${seed}`): ScenarioDirector {
   const d = new ScenarioDirector(request(id), instance);
   d.start(1000);
   return d;
-}
-
-/** Mirrors BrowserRunController#handleCaptureEvent for a button press. */
-function shoot(director: ScenarioDirector, t: number): boolean {
-  director.recorder.add({ kind: "button", tMs: t, action: "press" });
-  const latest = director.recorder.state.latestShot;
-  if (latest?.hit && latest.aimTargetId) {
-    director.recorder.add({
-      kind: "target-remove",
-      tMs: latest.tMs + 1,
-      targetId: latest.aimTargetId as TargetId,
-      reason: "hit",
-    });
-    director.observeRemoval(latest.tMs + 1);
-    return true;
-  }
-  return false;
-}
-
-/** Moves the recorder cursor onto a target in one sample. */
-function aimAt(director: ScenarioDirector, cursor: { x: number; y: number }, target: { x: number; y: number }, t: number): void {
-  director.recorder.add({ kind: "pointer-sample", tMs: t, dx: target.x - cursor.x, dy: target.y - cursor.y });
-  cursor.x = target.x;
-  cursor.y = target.y;
 }
 
 /**

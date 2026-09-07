@@ -21,6 +21,10 @@ class QuickPort implements TrialExecutionPort {
     return LOCK_GRANTED;
   }
   async releaseCapture() {}
+  async suspendCapture() {}
+  async resumeCapture() {
+    return LOCK_GRANTED;
+  }
   async executeTrial(spec: TrialPlanSpec, _round: number, repIndex: number | null): Promise<TrialRecord> {
     void repIndex;
     const scenario = scenarioById(spec.scenarioId);

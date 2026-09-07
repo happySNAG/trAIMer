@@ -59,11 +59,21 @@ const FLICK_DYNAMIC_HORIZONTAL: ScenarioDefinition = {
   id: "flick-dynamic-horizontal",
   kind: "flick-dynamic",
   label: "Flick to horizontally strafing target",
-  timeoutMs: 1100,
+  // rc.6: the sweep now runs for the whole window and crosses the centre
+  // (scenarios/planner.ts). rc.5 gave a 1100 ms budget in which the target
+  // covered 272–515 px of a 1280 px field and then vanished mid-approach —
+  // "the light blue circle don't go far enough across the screen to be able
+  // to shoot". 2000 ms buys the full crossing at the SAME speed band, so the
+  // drill is no easier per pixel, it simply presents a real opportunity.
+  timeoutMs: 2000,
   targetRadiusPx: 24,
+  // Vertical spread only (the horizontal path is derived from speed × window);
+  // kept so the shared definition shape stays meaningful across scenarios.
   distanceRangePx: { min: 260, max: 560 },
   angleMode: "horizontal-biased",
-  targetSpeedPxPerSec: { min: 260, max: 520 },
+  // Upper bound trimmed 520 → 480 so a full-window sweep (speed × 2 s) always
+  // fits inside the fully-visible band and never has to be clamped short.
+  targetSpeedPxPerSec: { min: 260, max: 480 },
   difficulty: {
     tier: "hard",
     discriminatesDimensions: ["speed", "correctionEfficiency"],
