@@ -20,16 +20,18 @@ import { readFileSync, existsSync } from "node:fs";
 
 const exe = process.argv[2] ?? "native/windows/traimer_capture_helper.exe";
 
+// Repo-relative from the working directory, exactly like every other gate in
+// scripts/ — they are all run from the repository root.
+const VERSION_SOURCE = readFileSync("src/version.ts", "utf8");
+
 function expectedFromSource(name) {
-  const source = readFileSync(new URL("../src/version.ts", import.meta.url), "utf8");
-  const match = new RegExp(`${name} = "([^"]+)"`).exec(source);
+  const match = new RegExp(`${name} = "([^"]+)"`).exec(VERSION_SOURCE);
   if (!match) throw new Error(`${name} not found in src/version.ts`);
   return match[1];
 }
 
 function expectedNumberFromSource(name) {
-  const source = readFileSync(new URL("../src/version.ts", import.meta.url), "utf8");
-  const match = new RegExp(`${name} = (\\d+)`).exec(source);
+  const match = new RegExp(`${name} = (\\d+)`).exec(VERSION_SOURCE);
   if (!match) throw new Error(`${name} not found in src/version.ts`);
   return match[1];
 }
