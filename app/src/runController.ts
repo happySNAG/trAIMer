@@ -31,10 +31,18 @@ import {
   type CalibrationProgressSnapshot,
 } from "../../src/results/sessionOutcome.ts";
 import type {
+  ReplacementBlockNotice,
   RestNotice,
   SessionRunnerPorts,
   SessionStateName,
 } from "../../src/session/types.ts";
+import {
+  CALIBRATION_MODES,
+  classifyPlan,
+  type CalibrationModeId,
+} from "../../src/experiments/sessionModes.ts";
+import { meanLeadMs } from "../../src/capture/timebase.ts";
+import type { SessionInstrumentation } from "../../src/results/sessionOutcome.ts";
 import { makeExperimentId, makeSessionId, makeTrialId } from "../../src/domain/ids.ts";
 import type { AppSettings } from "./state.ts";
 import {
@@ -45,6 +53,7 @@ import { makePlayerId } from "../../src/domain/ids.ts";
 import { OPTIMIZER_VERSION } from "../../src/version.ts";
 import { assessTimeJump } from "../../src/lifecycle/lifecycle.ts";
 import { ArenaAudio } from "./arenaAudio.ts";
+import type { CaptureTierReport } from "./captureTiers.ts";
 
 export const LOGICAL_VIEWPORT = { widthPx: 1280, heightPx: 720 };
 
@@ -171,6 +180,11 @@ export interface RunControllerCallbacks {
   onDrill?(info: DrillInfo): void;
   /** Truthful position in the whole calibration plan (engine-computed). */
   onCalibrationProgress?(progress: CalibrationProgressSnapshot): void;
+  /**
+   * Extra drills are being added to replace measurements that could not be
+   * used. The player is told the count and the reason, in their units.
+   */
+  onReplacementBlock?(notice: ReplacementBlockNotice): void;
   onTrialPersisted(trial: TrialRecord): void;
   /**
    * The session ended, for ANY reason. The outcome always carries a report
@@ -254,6 +268,12 @@ export class BrowserRunController {
   #invalidCount = 0;
   #warmupCount = 0;
   #startedAtIso = new Date().toISOString();
+  /**
+   * The capture-path report for this session, handed in by the shell once it
+   * has probed the helper. Recorded into the outcome report so a later
+   * hardware session can be diagnosed from the saved result alone.
+   */
+  #captureTier: CaptureTierReport | null = null;
 
   private constructor(
     canvas: HTMLCanvasElement,
@@ -324,6 +344,11 @@ export class BrowserRunController {
     capture.start({ onEvent: (event) => controller.#handleCaptureEvent(event) });
     controller.#capture = capture;
     return controller;
+  }
+
+  /** Records which capture path is carrying this session (instrumentation). */
+  setCaptureTier(report: CaptureTierReport): void {
+    this.#captureTier = report;
   }
 
   get definition() {
@@ -457,6 +482,8 @@ export class BrowserRunController {
       onCalibrationProgress: (progress) =>
         this.#callbacks.onCalibrationProgress?.(progress),
       onRest: (rest) => this.#callbacks.onRest?.(rest),
+      onReplacementBlock: (notice) => this.#callbacks.onReplacementBlock?.(notice),
+      sessionInstrumentation: () => this.#instrumentation(),
       onTrialPersisted: (trial) => {
         if (trial.phase === "measured") this.#measuredCount++;
         else this.#warmupCount++;
@@ -475,7 +502,9 @@ export class BrowserRunController {
           ports,
           this.#resume.trials,
         )
-      : new SessionRunner(this.#definition, ports);
+      : new SessionRunner(this.#definition, ports, {
+          evidenceTarget: this.#evidenceTarget(),
+        });
     if (this.#resume && runner.sessionId) this.#sessionId = runner.sessionId;
     this.#runner = runner;
     // A cancel that landed while create()/the click were still in flight must
@@ -615,6 +644,7 @@ export class BrowserRunController {
           endKind: "ended-by-player",
           abortReason,
           progress: this.emptyProgress(),
+          instrumentation: this.#instrumentation(),
         }),
       });
     }
@@ -650,6 +680,64 @@ export class BrowserRunController {
         d.candidates.length * d.measuredRepsPerCandidatePerRound * rounds,
         d.stoppingCriteria.maxTotalMeasuredTrials,
       ),
+    };
+  }
+
+  /**
+   * The evidence this session should end with.
+   *
+   * Taken from the PLAN the session is actually running, never from the
+   * player's current settings: continuing a Quick calibration must stay a
+   * Quick calibration even if the setup screen now says Precision. A custom
+   * plan gets no target — nothing named it, so nothing may extend it.
+   */
+  #evidenceTarget(): {
+    modeId: CalibrationModeId;
+    targetValidTrialsPerCandidate: number;
+    maxReplacementBlocks: number;
+  } | null {
+    const d = this.#definition;
+    const modeId = classifyPlan({
+      rounds: Math.max(1, d.stoppingCriteria.maxSearchRounds),
+      measuredRepsPerCandidatePerRound: d.measuredRepsPerCandidatePerRound,
+      warmupTrialsPerCandidateBlock: d.warmupTrialsPerCandidateBlock,
+    });
+    if (modeId === "custom") return null;
+    const mode = CALIBRATION_MODES[modeId];
+    return {
+      modeId,
+      targetValidTrialsPerCandidate: mode.targetValidTrialsPerCandidate,
+      maxReplacementBlocks: mode.maxReplacementBlocks,
+    };
+  }
+
+  /** Local-only diagnostics the shell can see and the engine cannot. */
+  #instrumentation(): Partial<SessionInstrumentation> {
+    const tier = this.#captureTier;
+    const stats = this.#capture?.timestampStats ?? null;
+    return {
+      captureTier: tier?.activeTier ?? null,
+      captureTierCaption: tier?.caption ?? null,
+      captureTierDetail: tier?.detail ?? null,
+      nativeRejectedBecause: tier?.native.rejectedBecause ?? null,
+      clockSyncState: tier
+        ? tier.native.clockSynchronized
+          ? "established"
+          : "not-established"
+        : null,
+      clockSyncDetail: tier?.native.rejectedBecause ?? null,
+      timestampLead:
+        stats !== null
+          ? {
+              samples: stats.observed,
+              maxLeadMs: stats.maxLeadMs,
+              meanLeadMs: meanLeadMs(stats),
+              toleranceMs: this.#capture!.descriptor.leadToleranceMs,
+              aheadOfNow: stats.aheadOfNow,
+              foreignDomain: stats.foreignDomain,
+              missing: stats.missing,
+            }
+          : null,
     };
   }
 
@@ -839,6 +927,13 @@ export class BrowserRunController {
       sensitivity: candidate.sensitivity,
       dpi: this.#definition.dpi,
       expectedSampleIntervalMs: null,
+      // The capture source declares how far its event timestamps may precede
+      // the moment this line reads the clock. Browser Pointer Lock stamps
+      // events with their OCCURRENCE time and delivers them a frame later, so
+      // the first coalesced burst after a drill starts legitimately carries
+      // samples from a few milliseconds ago. rc.7 recorded no tolerance and
+      // the validator failed every such drill as "broken timestamps".
+      timestampLeadToleranceMs: this.#capture.descriptor.leadToleranceMs,
       startedAtMonotonicMs: performance.now(),
       seedTag: `${this.#settings.experimentSeed}:${round}:${spec.sequenceNumber}`,
     };

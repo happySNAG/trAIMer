@@ -18,6 +18,7 @@ import { InMemoryBackend } from "../src/persistence/backends.ts";
 import { scenarioById } from "../src/domain/scenario.ts";
 import {
   decideCaptureTier,
+  NATIVE_CLOCK_SYNC_BLOCKER,
   NATIVE_LIVE_BLOCKER,
 } from "../app/src/captureTiers.ts";
 
@@ -467,7 +468,11 @@ describe("capture tier selection", () => {
       shellPresent: true,
       platformSupported: true,
       helperState: "ready",
-      selfTest: { verdict: "pass", sourceKind: "native" },
+      selfTest: {
+        verdict: "pass",
+        sourceKind: "native",
+        clockSync: { state: "established" },
+      },
       browser: COALESCED,
       nativeLiveTransportEnabled: true,
     });
@@ -484,7 +489,11 @@ describe("capture tier selection", () => {
       shellPresent: true,
       platformSupported: true,
       helperState: "ready",
-      selfTest: { verdict: "pass", sourceKind: "native" },
+      selfTest: {
+        verdict: "pass",
+        sourceKind: "native",
+        clockSync: { state: "established" },
+      },
       browser: COALESCED,
       nativeLiveTransportEnabled: false,
     });
@@ -493,6 +502,22 @@ describe("capture tier selection", () => {
     expect(report.native.helperReady).toBe(true);
     expect(report.native.rejectedBecause).toBe(NATIVE_LIVE_BLOCKER);
     expect(report.detail).toContain(NATIVE_LIVE_BLOCKER);
+  });
+
+  it("refuses tier 1 when the helper clock was never synchronized", () => {
+    // A validated native stream whose timestamps live in the helper's own
+    // process-start clock cannot be placed on the arena's timeline at all.
+    const report = decideCaptureTier({
+      shellPresent: true,
+      platformSupported: true,
+      helperState: "ready",
+      selfTest: { verdict: "pass", sourceKind: "native", clockSync: null },
+      browser: COALESCED,
+      nativeLiveTransportEnabled: true,
+    });
+    expect(report.activeKind).toBe("browser-pointer-lock");
+    expect(report.native.clockSynchronized).toBe(false);
+    expect(report.native.rejectedBecause).toBe(NATIVE_CLOCK_SYNC_BLOCKER);
   });
 
   it("never trusts a ready-but-unvalidated helper", () => {

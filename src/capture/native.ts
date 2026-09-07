@@ -20,6 +20,12 @@ export interface NativeStreamHeader {
   deviceDescription: string;
   nominalRateHz: number;
   timeOriginNote: string;
+  /**
+   * Whether the helper answers `time-sync` probes. A helper that does not
+   * cannot have its timestamps translated into the renderer clock, so it can
+   * never carry measurement — see src/capture/timebase.ts.
+   */
+  supportsTimeSync?: boolean;
 }
 
 export interface NativeFrame {

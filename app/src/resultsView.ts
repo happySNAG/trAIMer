@@ -1,17 +1,31 @@
 import type { AimDimension, Recommendation } from "../../src/domain/recommendation.ts";
 import type { FinalResult } from "../../src/results/finalResult.ts";
-import type { SessionOutcomeReport } from "../../src/results/sessionOutcome.ts";
+import type {
+  SessionInstrumentation,
+  SessionOutcomeReport,
+} from "../../src/results/sessionOutcome.ts";
+import {
+  explainExclusions,
+  summarizeExclusions,
+} from "../../src/results/sessionOutcome.ts";
+import {
+  classifyRecommendation,
+  describeAimTendency,
+  type RecommendationPresentation,
+} from "../../src/results/recommendationState.ts";
+import { CALIBRATION_MODES } from "../../src/experiments/sessionModes.ts";
 import { el, clear } from "./dom.ts";
 import {
   badge,
   barChart,
   button,
   card,
+  codeChip,
   detailsBlock,
   emptyState,
-  formatDateTime,
   grid,
   icon,
+  inlineAlert,
   jsonBlock,
   kvList,
   meter,
@@ -39,6 +53,8 @@ export interface ResultsInput {
   onStartTest?: (() => void) | undefined;
   /** Resumes the unfinished calibration this report belongs to. */
   onContinueCalibration?: (() => void) | null | undefined;
+  /** Opens Diagnostics on the capture check. */
+  onRunCaptureCheck?: (() => void) | null | undefined;
 }
 
 const NEXT_ACTION_LABELS: Record<string, string> = {
@@ -61,26 +77,6 @@ const DIMENSION_LABELS: Record<AimDimension, string> = {
   consistency: "Consistency",
 };
 
-/** Player-facing labels for engine exclusion reason codes (codes stay visible). */
-const EXCLUSION_LABELS: Record<string, string> = {
-  IMPOSSIBLE_MOVEMENT: "Impossible movement",
-  LARGE_SAMPLE_GAP: "Sample gaps",
-  INSUFFICIENT_SAMPLES: "Too few samples",
-  PRE_APPEARANCE_CLICK: "Click before target",
-  FOCUS_LOST: "Focus lost",
-  POINTER_LOCK_LOST: "Pointer lock lost",
-  TIMEOUT_NO_SHOT: "No shot before timeout",
-  IMPOSSIBLE_TIMESTAMPS: "Broken timestamps",
-  CONFIG_MISMATCH: "Configuration mismatch",
-};
-
-function exclusionLabel(code: string): string {
-  const known = EXCLUSION_LABELS[code];
-  if (known) return known;
-  const words = code.toLowerCase().replaceAll("_", " ");
-  return words.charAt(0).toUpperCase() + words.slice(1);
-}
-
 /**
  * Presentation tone for confidence, derived from the ENGINE-owned
  * `confidenceLabel` (low / moderate / high, thresholds live in the engine's
@@ -93,6 +89,20 @@ function confidenceLabelTone(label: string): Tone {
   return "danger";
 }
 
+/**
+ * The results screen, in the order a player asks the questions.
+ *
+ * 1. What sensitivity should I use?
+ * 2. How confident is trAIMer?
+ * 3. What is my main aiming tendency?
+ * 4. How did I perform?
+ * 5. What should I do next?
+ *
+ * rc.7 answered those in roughly the reverse order, interleaved with
+ * candidate utility scores, standard errors, scenario contribution tables,
+ * search coverage and two raw JSON dumps — all on the first screen. None of
+ * that information is gone: it moved, whole, into **Advanced results**.
+ */
 export function renderResultsView(
   container: HTMLElement,
   input: ResultsInput,
@@ -104,18 +114,21 @@ export function renderResultsView(
 
   const outcome = input.outcome ?? null;
 
-  // A session that ran ALWAYS explains itself first — before any
-  // recommendation, and whether or not one exists. rc.6 had exactly one thing
-  // to render (a recommendation), so a session killed by its own first break
-  // arrived here as the "No results yet" empty state.
-  if (outcome) {
-    container.append(renderSessionOutcome(outcome));
-    container.append(renderEvidenceSoFar(outcome));
-  }
+  // An early ending is the FIRST thing a player needs to know, because it
+  // changes what every number below means. A completed session says so in one
+  // line and gets out of the way; the full breakdown lives in Advanced.
+  if (outcome) container.append(renderEndingBanner(outcome));
 
   if (!input.recommendation) {
     if (outcome) {
-      container.append(renderMoreDataNeeded(outcome, input));
+      container.append(renderMoreDataNeeded(outcome));
+      const nextWhenShort = renderNextSteps(outcome, null, null, input);
+      if (nextWhenShort) container.append(nextWhenShort);
+      container.append(renderPerformanceCards(outcome, null));
+      if (outcome.performance.excludedTrials > 0) {
+        container.append(renderExclusions(outcome));
+      }
+      container.append(renderAdvancedResults(outcome, null, null, input));
       return;
     }
     const startBtn = input.onStartTest
@@ -143,6 +156,639 @@ export function renderResultsView(
 }
 
 // ---------------------------------------------------------------------------
+// 1–2. The headline: what to use, and how much trAIMer will stand behind it
+// ---------------------------------------------------------------------------
+
+/**
+ * One line about how the session ended.
+ *
+ * Full progress, block/round position and reason codes moved into Advanced
+ * results: a player who finished normally does not need a progress meter that
+ * reads 100 %, and a player who did not needs one sentence, not a table.
+ */
+function renderEndingBanner(outcome: SessionOutcomeReport): HTMLElement {
+  if (!outcome.endedEarly) {
+    return inlineAlert(
+      "ok",
+      "Calibration complete",
+      `${outcome.performance.measuredTrials} measured drills · ${outcome.performance.validMeasuredTrials} usable for scoring`,
+    );
+  }
+  return inlineAlert(
+    "warn",
+    END_TITLES[outcome.endKind],
+    `${outcome.endReasonText} Every drill you finished was saved the moment it finished.`,
+  );
+}
+
+function renderHeadline(
+  fr: FinalResult,
+  presentation: RecommendationPresentation,
+  outcome: SessionOutcomeReport | null,
+): HTMLElement {
+  const rangeFirst = presentation.emphasizeRange;
+  const body: (Node | string)[] = [];
+
+  const status = el("div", { class: `result-status tone-${presentation.tone}` });
+  status.append(
+    icon(presentation.tone === "ok" ? "check" : "warn", 16),
+    el("span", { class: "result-status-title", text: presentation.title }),
+    el("span", {
+      class: "result-status-strength",
+      text: `${(presentation.confidence * 100).toFixed(0)}% evidence strength`,
+    }),
+  );
+  body.push(status);
+
+  // A number the engine will not stand behind must not be typeset like one it
+  // will. When the evidence is weak the RANGE is the result and gets the
+  // large treatment; the point estimate shrinks to a caption inside it.
+  const sens = el("div", {
+    class: `sens-headline${rangeFirst ? " range-first" : ""}`,
+  });
+  sens.append(
+    el("div", { class: "sens-values" }, [
+      el("span", { class: "sens-big", text: fr.immediateRecommended.sensXPercent.toFixed(2) }),
+      el("span", { class: "sens-axis", text: "X %" }),
+      el("span", { class: "sens-big", text: fr.immediateRecommended.sensYPercent.toFixed(2) }),
+      el("span", { class: "sens-axis", text: "Y %" }),
+    ]),
+    el("span", {
+      class: "sens-edpi",
+      text: `${fr.immediateRecommended.edpi.toFixed(0)} eDPI · you are on ${fr.currentSensitivity.sensXPercent.toFixed(2)}% (${fr.currentSensitivity.edpi.toFixed(0)} eDPI)`,
+    }),
+  );
+  body.push(sens);
+
+  body.push(
+    el("p", {
+      class: rangeFirst ? "range-lead" : "muted",
+      text: rangeFirst
+        ? "The evidence supports this RANGE. Anywhere inside it is consistent with what this session measured — treat the single number as its midpoint, not as a verdict."
+        : "Plausible range for your optimum, from this session's evidence:",
+    }),
+  );
+  body.push(
+    rangeBar(
+      fr.plausibleEdpiRange,
+      [
+        { value: fr.currentSensitivity.edpi, label: "current", tone: "neutral" },
+        {
+          value: fr.immediateRecommended.edpi,
+          label: rangeFirst ? "midpoint" : "use now",
+          tone: rangeFirst ? "warn" : "accent",
+        },
+      ],
+      (v) => `${v.toFixed(0)} eDPI`,
+    ),
+  );
+
+  body.push(el("p", { class: "result-summary", text: presentation.summary }));
+
+  if (outcome) {
+    const tendency = describeAimTendency({
+      overshootTendency: outcome.performance.overshootTendency,
+      undershootTendency: outcome.performance.undershootTendency,
+      validTrials: outcome.performance.validMeasuredTrials,
+    });
+    if (tendency.claimSupported) {
+      body.push(el("p", { class: "result-summary", text: tendency.detail }));
+    }
+  }
+
+  if (fr.fullInferredSensitivity) {
+    body.push(
+      el("p", { class: "muted" }, [
+        el("strong", { text: "Why not the full change? " }),
+        `Large sensitivity jumps disrupt trained aim, so this is a staged step toward ${fr.fullInferredSensitivity.sensXPercent.toFixed(2)}% (${fr.fullInferredSensitivity.edpi.toFixed(0)} eDPI). Play on the value above, retest, then step further only if the evidence holds.`,
+      ]),
+    );
+  }
+
+  return card(
+    {
+      title: "Recommended sensitivity",
+      icon: "target",
+      tone: presentation.tone === "ok" ? "accent" : presentation.tone,
+      class: `hero result-headline${rangeFirst ? " tentative" : ""}`,
+    },
+    ...body,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// 3–4. Performance cards — a small number of understandable numbers
+// ---------------------------------------------------------------------------
+
+/**
+ * The four cards on the first screen.
+ *
+ * Reaction time is deliberately NOT here. It is measured from the moment the
+ * app decides a target exists to the first movement past a displacement
+ * threshold, which includes display latency the app cannot see and can fire
+ * on a hand that was still moving from the previous drill — this session
+ * reported a 85 ms median, well below human simple reaction time. It stays in
+ * Advanced results with that caveat attached rather than being presented to a
+ * player as their reflexes.
+ */
+function renderPerformanceCards(
+  outcome: SessionOutcomeReport,
+  presentation: RecommendationPresentation | null,
+): HTMLElement {
+  const m = outcome.performance;
+  const cards = el("div", { class: "player-cards", id: "results-player-cards" });
+
+  cards.append(
+    playerCard(
+      "Accuracy",
+      m.hitAccuracy === null ? "—" : `${Math.round(m.hitAccuracy * 100)}%`,
+      m.hitAccuracy === null
+        ? "No shots recorded yet"
+        : `${m.shotsFired} shots across the drills that ask for one`,
+      m.hitAccuracy === null ? "neutral" : m.hitAccuracy >= 0.7 ? "ok" : "warn",
+    ),
+  );
+
+  const tendency = describeAimTendency({
+    overshootTendency: m.overshootTendency,
+    undershootTendency: m.undershootTendency,
+    validTrials: m.validMeasuredTrials,
+  });
+  cards.append(
+    playerCard(
+      "Aim control",
+      m.overshootTendency === null || m.undershootTendency === null
+        ? "—"
+        : `${Math.round(m.overshootTendency * 100)}% / ${Math.round(m.undershootTendency * 100)}%`,
+      `overshoot / undershoot — ${tendency.headline}`,
+      tendency.claimSupported ? "info" : "neutral",
+    ),
+  );
+
+  cards.append(
+    playerCard(
+      "Tracking",
+      m.trackingTimeOnTarget === null
+        ? "—"
+        : `${Math.round(m.trackingTimeOnTarget * 100)}%`,
+      m.trackingRmsErrorPx === null
+        ? `${m.trackingTrials} tracking drill(s)`
+        : `time on target · ${Math.round(m.trackingRmsErrorPx)} px average miss`,
+      m.trackingTimeOnTarget === null ? "neutral" : "info",
+    ),
+  );
+
+  const confidenceWord = presentation
+    ? presentation.title.replace(" recommendation", "")
+    : "Not enough to rank";
+  cards.append(
+    playerCard(
+      "Evidence quality",
+      String(m.validMeasuredTrials),
+      `usable drills of ${m.measuredTrials} measured · ${confidenceWord.toLowerCase()}`,
+      m.excludedTrials === 0 ? "ok" : "warn",
+    ),
+  );
+
+  return card(
+    {
+      title: "How you performed",
+      subtitle: "Measured from the drills that produced usable data.",
+      icon: "pulse",
+    },
+    cards,
+  );
+}
+
+function playerCard(
+  label: string,
+  value: string,
+  sub: string,
+  tone: Tone | "neutral",
+): HTMLElement {
+  const opts: StatOptions = { sub };
+  if (tone !== "neutral") opts.tone = tone as Tone;
+  return statTile(label, value, opts);
+}
+
+// ---------------------------------------------------------------------------
+// 5. What to do next — the ACTUAL next step for this session's state
+// ---------------------------------------------------------------------------
+
+function renderNextSteps(
+  outcome: SessionOutcomeReport | null,
+  fr: FinalResult | null,
+  presentation: RecommendationPresentation | null,
+  input: ResultsInput,
+): HTMLElement | null {
+  const actions = el("div", { class: "next-actions" });
+  const lines: string[] = [];
+  const instrumentation = outcome?.instrumentation ?? null;
+  const captureImprovable =
+    instrumentation?.captureTier != null &&
+    instrumentation.captureTier > 1 &&
+    instrumentation.nativeRejectedBecause != null &&
+    /unvalidated|capture check|not synchronized/i.test(
+      instrumentation.nativeRejectedBecause,
+    );
+
+  // A software fault that has since been fixed must NEVER be turned into
+  // homework for the player. If the only reason drills were lost is one the
+  // app owns, the remedy is not "retest harder".
+  const explanations = outcome
+    ? explainExclusions(outcome.performance.exclusionsByReason)
+    : [];
+  const onlySoftwareFaults =
+    explanations.length > 0 && explanations.every((e) => e.softwareFault);
+  const playerActionable = explanations.filter((e) => e.action !== null);
+
+  if (captureImprovable && input.onRunCaptureCheck) {
+    lines.push(
+      "Run the capture check once. It measures what your mouse actually delivers and lets trAIMer say how much of the range is your aim and how much is the capture path.",
+    );
+    actions.append(
+      button("Run capture check", {
+        variant: presentation ? "secondary" : "primary",
+        icon: "pulse",
+        onClick: () => input.onRunCaptureCheck?.(),
+      }),
+    );
+  }
+
+  if (!presentation || presentation.state === "insufficient") {
+    if (input.onContinueCalibration) {
+      lines.push(
+        "Continue this calibration. It picks up exactly where the session stopped — nothing already measured is measured again.",
+      );
+      actions.append(
+        button("Continue calibration", {
+          variant: "primary",
+          icon: "play",
+          large: true,
+          onClick: () => input.onContinueCalibration?.(),
+        }),
+      );
+    }
+  } else if (
+    presentation.state === "directional-estimate" ||
+    presentation.state === "preliminary"
+  ) {
+    if (input.onContinueCalibration) {
+      lines.push(
+        "Add more drills to the same calibration. More evidence narrows the range; starting over throws away what this session already proved.",
+      );
+      actions.append(
+        button("Continue calibration", {
+          variant: "primary",
+          icon: "play",
+          large: true,
+          onClick: () => input.onContinueCalibration?.(),
+        }),
+      );
+    }
+    lines.push(
+      `Meanwhile, playing anywhere inside ${fr ? `${fr.plausibleEdpiRange.min.toFixed(0)}–${fr.plausibleEdpiRange.max.toFixed(0)} eDPI` : "the range above"} is consistent with what was measured.`,
+    );
+  } else if (fr) {
+    lines.push(
+      NEXT_ACTION_LABELS[fr.recommendedNextAction] ?? fr.recommendedNextAction,
+    );
+    if (fr.nextActionRationale.length > 0) {
+      lines.push(...fr.nextActionRationale.slice(0, 2));
+    }
+    if (input.onStartTest) {
+      actions.append(
+        button("Run a clean repeat", {
+          variant: "secondary",
+          icon: "play",
+          onClick: () => input.onStartTest?.(),
+        }),
+      );
+    }
+  }
+
+  if (onlySoftwareFaults) {
+    lines.push(
+      "The drills that could not be scored were lost to a measurement fault in the app, not to anything you did — there is nothing to change on your side.",
+    );
+  } else if (playerActionable.length > 0) {
+    for (const e of playerActionable.slice(0, 2)) {
+      if (e.action) lines.push(e.action);
+    }
+  }
+
+  if (input.onStartTest && actions.childElementCount === 0) {
+    actions.append(
+      button("Start a new calibration", {
+        variant: "secondary",
+        icon: "play",
+        onClick: () => input.onStartTest?.(),
+      }),
+    );
+  }
+  if (lines.length === 0 && actions.childElementCount === 0) return null;
+
+  return card(
+    { title: "What to do next", icon: "flag", tone: "info", class: "next-steps" },
+    el("ul", { class: "next-action-list" }, lines.map((l) => el("li", { text: l }))),
+    actions,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Exclusions, in words a player can act on
+// ---------------------------------------------------------------------------
+
+function renderExclusions(outcome: SessionOutcomeReport): HTMLElement {
+  const m = outcome.performance;
+  const explanations = explainExclusions(m.exclusionsByReason);
+  const technical = el("div", {});
+  for (const e of explanations) {
+    const row = el("div", { class: "exclusion-row" });
+    row.append(
+      el("div", { class: "exclusion-head" }, [
+        el("span", { class: "exclusion-count", text: `${e.count}×` }),
+        el("span", { class: "exclusion-label", text: e.label }),
+        codeChip(e.code),
+      ]),
+      el("p", { class: "muted", text: e.plain }),
+    );
+    if (e.action) row.append(el("p", { class: "exclusion-action", text: e.action }));
+    technical.append(row);
+  }
+
+  return card(
+    {
+      title: "Drills that could not be scored",
+      icon: "warn",
+      tone: "warn",
+      class: "exclusion-card",
+    },
+    el("p", {
+      class: "exclusion-summary",
+      text: summarizeExclusions(m.excludedTrials, m.measuredTrials, m.exclusionsByReason),
+    }),
+    detailsBlock("Learn more — exactly what happened", technical),
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Advanced results — everything the engine knows, one click away
+// ---------------------------------------------------------------------------
+
+/**
+ * NOTHING is discarded to simplify the first screen.
+ *
+ * Every table, standard error, coverage classification, contribution row and
+ * raw contract that rc.7 printed at the top of the results page is rendered
+ * here, plus the session instrumentation this pass added. The default view is
+ * shorter because this section exists, not because the engine says less.
+ */
+function renderAdvancedResults(
+  outcome: SessionOutcomeReport | null,
+  fr: FinalResult | null,
+  rec: Recommendation | null,
+  input: ResultsInput,
+): HTMLElement {
+  const body = el("div", { class: "advanced-body" });
+
+  if (outcome) {
+    body.append(sectionLabel("Session"));
+    const p = outcome.progress;
+    const modeId = outcome.instrumentation?.modeId ?? null;
+    const modeLabel =
+      modeId && modeId !== "custom" ? CALIBRATION_MODES[modeId].label : "Custom plan";
+    body.append(
+      kvList([
+        ["Calibration length", modeLabel],
+        // The ending SENTENCE is on the banner at the top of the screen and
+        // is deliberately not repeated here: rc.6 shipped a results page that
+        // said "You ended the session from the arena controls. You ended the
+        // session from the arena controls."
+        ["Ending", `${END_TITLES[outcome.endKind]} (${outcome.endReasonCode ?? "no code"})`],
+        ["Progress", `${Math.round(p.fraction * 100)}% · ${p.stepsCompleted} of ${p.stepsPlanned} drills`],
+        ["Reached", `round ${p.roundIndex} of ${p.roundsPlanned}, block ${p.blockIndex} of ${p.blocksPerRound}`],
+        ["Measured drills", `${p.measuredCompleted} of ${p.measuredPlanned} planned`],
+      ]),
+    );
+    body.append(meter(p.fraction, { tone: outcome.endedEarly ? "warn" : "ok", label: "calibration progress" }));
+
+    body.append(sectionLabel("Every measurement this session produced"));
+    body.append(renderEvidenceSoFar(outcome));
+
+    const instrumentation = outcome.instrumentation ?? null;
+    if (instrumentation) {
+      body.append(sectionLabel("Capture and timing diagnostics"));
+      body.append(renderInstrumentation(instrumentation));
+    }
+  }
+
+  if (fr && rec) {
+    body.append(sectionLabel("Candidate comparison"));
+    body.append(renderCandidateComparison(fr));
+    body.append(sectionLabel("Performance dimensions"));
+    body.append(renderDimensionBreakdown(rec));
+    if (fr.scenarioContributions.length > 0) {
+      body.append(sectionLabel("Scenario contributions"));
+      body.append(
+        table({
+          head: ["Scenario", "Difficulty", "Valid trials", "Best candidate", "Runner-up"],
+          rows: fr.scenarioContributions.map((sc) => [
+            sc.scenarioId,
+            sc.difficultyTier,
+            String(sc.validTrials),
+            sc.meanUtilityBest !== null ? sc.meanUtilityBest.toFixed(3) : "—",
+            sc.meanUtilityRunnerUp !== null ? sc.meanUtilityRunnerUp.toFixed(3) : "—",
+          ]),
+        }),
+      );
+    }
+    body.append(sectionLabel("Search coverage and quality"));
+    body.append(
+      kvList([
+        ["Curve shape", fr.searchAdequacyClassification ?? "—"],
+        ["Boundary", fr.boundaryStatus],
+        ["Adaptation detected", fr.adaptationContamination ? "yes" : "no"],
+        [
+          "Capture quality",
+          fr.captureQualityGrade
+            ? `${fr.captureQualityGrade}${fr.captureQualityScore !== null ? ` (score ${fr.captureQualityScore.toFixed(2)})` : ""}`
+            : "not graded",
+        ],
+        ["Confidence basis", fr.confidenceBasis],
+        ["Engine declined high confidence", fr.refusedHighConfidence ? "yes" : "no"],
+      ]),
+    );
+    if (fr.uncertaintyRemaining.length > 0) {
+      body.append(sectionLabel("Open questions"));
+      body.append(
+        el("ul", { class: "list-plain" },
+          fr.uncertaintyRemaining
+            .filter((l) => l !== "warnings:")
+            .map((l) => el("li", { text: l }))),
+      );
+    }
+    body.append(
+      detailsBlock(
+        "Full rationale",
+        el("ul", { class: "list-plain" }, fr.rationaleLines.map((l) => el("li", { text: l }))),
+      ),
+    );
+    const why = [...fr.whyThisX, ...fr.whyThisY];
+    if (why.length > 0) {
+      body.append(
+        detailsBlock(
+          "Why this candidate won",
+          el("ul", { class: "list-plain" }, why.map((l) => el("li", { text: l }))),
+          ...(fr.contradictoryEvidence.length > 0
+            ? [
+                sectionLabel("Evidence against the winner"),
+                el("ul", { class: "list-plain" },
+                  fr.contradictoryEvidence.map((l) => el("li", { text: l }))),
+              ]
+            : []),
+        ),
+      );
+    }
+    body.append(detailsBlock("Final result JSON (frozen contract)", jsonBlock(fr)));
+    body.append(detailsBlock("Raw recommendation JSON", jsonBlock(rec)));
+  }
+
+  if (outcome) {
+    body.append(detailsBlock("Session outcome JSON", jsonBlock(outcome)));
+  }
+  void input;
+
+  return card(
+    {
+      title: "Advanced results",
+      subtitle:
+        "Every number the engine produced, including the statistics behind the recommendation. Nothing here is hidden from the summary above — it is the same session, in full.",
+      icon: "results",
+      class: "advanced-results",
+    },
+    detailsBlock("Open advanced results", body),
+  );
+}
+
+function renderCandidateComparison(fr: FinalResult): HTMLElement {
+  if (fr.candidateComparisons.length === 0) {
+    return el("p", { class: "muted", text: "No candidate produced usable data." });
+  }
+  const rows = fr.candidateComparisons.map((c) => ({
+    label: c.candidateId,
+    value: c.utilityMean,
+    se: c.utilityStandardError,
+    highlight: c.isBest,
+    sub: `${c.edpiX.toFixed(0)} eDPI · ${c.validTrials} trials${c.tiedWithBest && !c.isBest ? " · tied" : ""}`,
+  }));
+  return el("div", { id: "advanced-candidate-table" }, [
+    barChart(rows, (v) => v.toFixed(3)),
+    table({
+      head: ["Candidate", "eDPI", "Utility", "±SE", "Valid trials", "Result"],
+      rows: fr.candidateComparisons.map((c) => [
+        c.candidateId,
+        c.edpiX.toFixed(0),
+        c.utilityMean !== null ? c.utilityMean.toFixed(4) : "—",
+        c.utilityStandardError !== null ? c.utilityStandardError.toFixed(4) : "—",
+        String(c.validTrials),
+        c.isBest ? badge("accent", "best") : c.tiedWithBest ? badge("neutral", "tied") : "",
+      ]),
+    }),
+  ]);
+}
+
+function renderDimensionBreakdown(rec: Recommendation): HTMLElement {
+  const dims = Object.entries(rec.dimensionEstimates) as [
+    AimDimension,
+    { mean: number; standardError: number; sampleCount: number } | undefined,
+  ][];
+  const rows = dims
+    .filter((entry): entry is [AimDimension, { mean: number; standardError: number; sampleCount: number }] => entry[1] !== undefined)
+    .map(([dim, est]) => [
+      DIMENSION_LABELS[dim] ?? dim,
+      est.mean.toFixed(3),
+      est.standardError.toFixed(3),
+      String(est.sampleCount),
+    ]);
+  if (rows.length === 0) {
+    return el("p", { class: "muted", text: "No dimension estimates." });
+  }
+  return table({ head: ["Dimension", "Mean", "±SE", "n"], rows });
+}
+
+/**
+ * The local-only instrumentation this pass added, so a second real-hardware
+ * session can be diagnosed from the saved result rather than from a guess.
+ */
+function renderInstrumentation(inst: SessionInstrumentation): HTMLElement {
+  const rows: [string, string][] = [
+    [
+      "Capture path",
+      inst.captureTierCaption
+        ? `tier ${inst.captureTier ?? "?"} · ${inst.captureTierCaption}`
+        : "not recorded",
+    ],
+  ];
+  if (inst.nativeRejectedBecause) {
+    rows.push(["Native capture not used because", inst.nativeRejectedBecause]);
+  }
+  if (inst.clockSyncState) {
+    rows.push([
+      "Helper clock sync",
+      inst.clockOffsetMs !== null
+        ? `${inst.clockSyncState} · offset ${inst.clockOffsetMs.toFixed(3)} ms ±${(inst.clockSyncUncertaintyMs ?? 0).toFixed(3)} ms`
+        : inst.clockSyncState,
+    ]);
+  }
+  if (inst.timestampLead) {
+    const l = inst.timestampLead;
+    rows.push([
+      "Input timestamp lead",
+      `${l.samples} events · worst ${l.maxLeadMs.toFixed(2)} ms · mean ${l.meanLeadMs === null ? "—" : `${l.meanLeadMs.toFixed(2)} ms`} · tolerance ${l.toleranceMs} ms`,
+    ]);
+    if (l.aheadOfNow > 0 || l.foreignDomain > 0 || l.missing > 0) {
+      rows.push([
+        "Timestamp corrections",
+        `${l.aheadOfNow} ahead of clock · ${l.foreignDomain} foreign domain · ${l.missing} missing`,
+      ]);
+    }
+  }
+  if (inst.modeId) {
+    rows.push([
+      "Calibration mode",
+      inst.modeId === "custom" ? "custom plan" : CALIBRATION_MODES[inst.modeId].label,
+    ]);
+  }
+  if (inst.targetValidTrialsPerCandidate !== null) {
+    rows.push([
+      "Evidence target",
+      `${inst.targetValidTrialsPerCandidate} usable drills per candidate`,
+    ]);
+  }
+  if (inst.replacement) {
+    const r = inst.replacement;
+    rows.push([
+      "Replacement drills",
+      `${r.drillsRun} drill(s) in ${r.blocksRun} of at most ${r.maxBlocks} block(s) (cap ${r.maxDrills} drills)`,
+    ]);
+  }
+  const block = el("div", {}, [kvList(rows)]);
+  if (inst.validTrialsByCandidateEdpi.length > 0) {
+    block.append(
+      table({
+        head: ["Candidate eDPI", "Valid measured drills"],
+        rows: inst.validTrialsByCandidateEdpi.map((c) => [
+          String(c.edpi),
+          String(c.valid),
+        ]),
+      }),
+    );
+  }
+  return block;
+}
+
+// ---------------------------------------------------------------------------
 // Session outcome — what happened, how far it got, and what it proves
 // ---------------------------------------------------------------------------
 
@@ -154,57 +800,6 @@ const END_TITLES: Record<SessionOutcomeReport["endKind"], string> = {
   "capture-unavailable": "This calibration never started",
   error: "This calibration stopped because of an error",
 };
-
-function renderSessionOutcome(outcome: SessionOutcomeReport): HTMLElement {
-  const p = outcome.progress;
-  const percent = Math.round(p.fraction * 100);
-  const tone: Tone = outcome.endedEarly ? "warn" : "ok";
-  const body: (Node | string)[] = [
-    el("p", { class: "outcome-reason", text: outcome.endReasonText }),
-  ];
-
-  const bar = meter(p.fraction, { tone, label: "calibration progress" });
-  const progressRow = el("div", { class: "outcome-progress" }, [
-    el("span", { class: "outcome-progress-value", text: `Calibration ${percent}%` }),
-    bar,
-  ]);
-  body.push(progressRow);
-
-  body.push(
-    kvList([
-      ["Drills completed", `${p.stepsCompleted} of ${p.stepsPlanned} planned`],
-      ["Measured drills", `${p.measuredCompleted} of ${p.measuredPlanned} planned`],
-      ["Reached", `round ${p.roundIndex} of ${p.roundsPlanned}, block ${p.blockIndex} of ${p.blocksPerRound}`],
-    ]),
-  );
-
-  if (outcome.endReasonCode) {
-    body.push(
-      el("p", {
-        class: "muted mono",
-        text: `reason code: ${outcome.endReasonCode}`,
-      }),
-    );
-  }
-  if (outcome.endedEarly) {
-    body.push(
-      el("p", {
-        class: "muted",
-        text: "Every drill you finished was saved the moment it finished. Nothing measured has been lost.",
-      }),
-    );
-  }
-
-  return card(
-    {
-      title: END_TITLES[outcome.endKind],
-      icon: outcome.endedEarly ? "flag" : "check",
-      tone,
-      class: "outcome-card",
-    },
-    ...body,
-  );
-}
 
 /**
  * One evidence tile. A measurement with no data renders as an em dash and no
@@ -290,10 +885,7 @@ function renderEvidenceSoFar(outcome: SessionOutcomeReport): HTMLElement {
  * WHY it is not enough, HOW MUCH more is needed, and the one action that
  * actually helps — continuing the same calibration rather than starting over.
  */
-function renderMoreDataNeeded(
-  outcome: SessionOutcomeReport,
-  input: ResultsInput,
-): HTMLElement {
+function renderMoreDataNeeded(outcome: SessionOutcomeReport): HTMLElement {
   const s = outcome.sufficiency;
   const body: (Node | string)[] = [];
   body.push(
@@ -327,31 +919,12 @@ function renderMoreDataNeeded(
     ]),
   );
 
-  body.push(sectionLabel("What to do next"));
-  const steps = el("ol", { class: "next-step-list" });
-  for (const step of s.nextSteps) steps.append(el("li", { text: step }));
-  body.push(steps);
-
-  const actions = el("div", { class: "more-data-actions" });
-  if (input.onContinueCalibration) {
-    actions.append(
-      button("Continue calibration", {
-        variant: "primary",
-        icon: "play",
-        large: true,
-        onClick: () => input.onContinueCalibration?.(),
-      }),
-    );
-  }
-  if (input.onStartTest) {
-    actions.append(
-      button("Start a new calibration", {
-        variant: "secondary",
-        onClick: () => input.onStartTest?.(),
-      }),
-    );
-  }
-  body.push(actions);
+  body.push(
+    detailsBlock(
+      "The engine's own next steps",
+      el("ol", { class: "next-step-list" }, s.nextSteps.map((step) => el("li", { text: step }))),
+    ),
+  );
 
   return card(
     {
@@ -369,344 +942,41 @@ function renderMoreDataNeeded(
 // FinalResult (frozen results contract) — the headline experience
 // ---------------------------------------------------------------------------
 
-function sensBlock(
-  label: string,
-  sens: { sensXPercent: number; sensYPercent: number; edpi: number },
-  recommended: boolean,
-): HTMLElement {
-  const block = el("div", { class: `sens-block${recommended ? " recommended" : ""}` });
-  block.append(el("span", { class: "sens-block-label", text: label }));
-  const values = el("div", { class: "sens-values" });
-  values.append(
-    el("span", { class: "sens-big", text: sens.sensXPercent.toFixed(2) }),
-    el("span", { class: "sens-axis", text: "X %" }),
-    el("span", { class: "sens-big", text: sens.sensYPercent.toFixed(2) }),
-    el("span", { class: "sens-axis", text: "Y %" }),
-  );
-  block.append(values);
-  block.append(el("span", { class: "sens-edpi", text: `${sens.edpi.toFixed(0)} eDPI` }));
-  return block;
-}
-
 function renderFinalResult(
   outerContainer: HTMLElement,
   fr: FinalResult,
   rec: Recommendation,
   input: ResultsInput,
 ): void {
-  // The engine's own refusal flag drives the tentative treatment: a result
-  // the engine declined to back must not look like a confident verdict.
-  const tentative = fr.refusedHighConfidence;
+  const outcome = input.outcome ?? null;
+  const presentation = classifyRecommendation({
+    recommendation: rec,
+    evidenceSufficient: outcome ? outcome.sufficiency.sufficient : true,
+    refusedHighConfidence: fr.refusedHighConfidence,
+  });
+
   const container = el("div", {
-    class: `result-reveal${tentative ? " results-tentative" : ""}`,
+    class: `result-reveal${presentation.emphasizeRange ? " results-tentative" : ""}`,
   });
   outerContainer.append(container);
 
-  // ---- hero ----
-  const compare = el("div", { class: "sens-compare" });
-  compare.append(
-    sensBlock("Current", fr.currentSensitivity, false),
-    el("span", { class: "sens-arrow" }, [icon("arrow-right", 20)]),
-    sensBlock(tentative ? "Preliminary" : "Use now", fr.immediateRecommended, true),
-  );
-  if (fr.fullInferredSensitivity) {
-    compare.append(
-      el("span", { class: "sens-arrow" }, [icon("arrow-right", 20)]),
-      sensBlock("Full target", fr.fullInferredSensitivity, false),
-    );
+  // 1–2. What to use, and how much trAIMer will stand behind it.
+  container.append(renderHeadline(fr, presentation, outcome));
+
+  // 3–4. How you performed.
+  if (outcome) container.append(renderPerformanceCards(outcome, presentation));
+
+  // 5. What to do next.
+  const next = renderNextSteps(outcome, fr, presentation, input);
+  if (next) container.append(next);
+
+  // Why some drills were not scored, in plain language.
+  if (outcome && outcome.performance.excludedTrials > 0) {
+    container.append(renderExclusions(outcome));
   }
 
-  const heroBody: (Node | string)[] = [compare];
-
-  if (tentative) {
-    const note = el("p", { class: "tentative-note" });
-    note.append(
-      icon("warn", 14),
-      el("span", {
-        text: "Preliminary — the engine wants more evidence before you commit. Treat the range below, not the point, as the result.",
-      }),
-    );
-    heroBody.push(note);
-  }
-
-  if (fr.fullInferredSensitivity) {
-    const staged = el("div", {}, [
-      el("p", { class: "muted" }, [
-        el("strong", { text: "Why two numbers? " }),
-        "Large sensitivity jumps disrupt trained aim, so the change is staged: " +
-          `play on the "use now" value, retest, and step toward the full target only as the evidence holds up.`,
-      ]),
-    ]);
-    heroBody.push(staged);
-  }
-
-  heroBody.push(
-    rangeBar(
-      fr.plausibleEdpiRange,
-      [
-        { value: fr.currentSensitivity.edpi, label: "current", tone: "neutral" },
-        {
-          value: fr.immediateRecommended.edpi,
-          label: tentative ? "preliminary" : "use now",
-          tone: tentative ? "warn" : "accent",
-        },
-        ...(fr.fullInferredSensitivity
-          ? [{ value: fr.fullInferredSensitivity.edpi, label: "full target", tone: "info" as Tone }]
-          : []),
-      ],
-      (v) => `${v.toFixed(0)} eDPI`,
-    ),
-  );
-
-  const heroCard = card(
-    {
-      title: "Recommended sensitivity",
-      subtitle: `DPI ${fr.dpi} · ${fr.experimentId}`,
-      icon: "target",
-      tone: "accent",
-      class: "hero",
-    },
-    ...heroBody,
-  );
-
-  // ---- next action + confidence ----
-  const actionLabel = NEXT_ACTION_LABELS[fr.recommendedNextAction] ?? fr.recommendedNextAction;
-  const conf = fr.confidence;
-  const confTone = confidenceLabelTone(fr.confidenceLabel);
-
-  // Retest plan folds into the action card — one place answers "what next,
-  // why, and when can I start".
-  const plan = fr.retestProtocol && fr.retestProtocol.kind !== "none" ? fr.retestProtocol : null;
-  const planBlock: HTMLElement[] = [];
-  if (plan) {
-    const restLine = el("div", { class: `inline-alert ${plan.canStartNow ? "tone-bg-ok" : "tone-bg-info"}` });
-    restLine.append(
-      el("span", { class: plan.canStartNow ? "tone-ok" : "tone-info" }, [
-        icon(plan.canStartNow ? "check" : "clock", 14),
-      ]),
-      el("div", { class: "inline-alert-text" }, [
-        el("p", {
-          text: plan.canStartNow
-            ? "Rest requirement met — the next session is ready whenever you are."
-            : `Rest first: the next session unlocks at ${formatDateTime(plan.earliestStartIso)}.`,
-        }),
-        el("p", {
-          class: "inline-alert-detail",
-          text:
-            plan.kind === "targeted-retest"
-              ? `A shorter, focused session is already designed to resolve: ${plan.uncertaintyToResolve}`
-              : `A clean repeat with fresh randomization will confirm what this session saw.`,
-        }),
-      ]),
-    );
-    planBlock.push(restLine);
-  }
-
-  // Lead with the most useful rationale; the full engine narrative stays one
-  // click away rather than dominating the card.
-  const leadRationale = fr.nextActionRationale.slice(0, 3);
-  const moreRationale = fr.nextActionRationale.slice(3);
-  const actionCard = card(
-    { title: "What to do next", icon: "flag", tone: "info" },
-    el("p", { style: "font-size:16px;font-weight:700", text: actionLabel }),
-    el("ul", { class: "next-action-list" },
-      leadRationale.map((l) => el("li", { text: l }))),
-    ...(moreRationale.length > 0
-      ? [detailsBlock(
-          `Full reasoning (${fr.nextActionRationale.length} points)`,
-          el("ul", { class: "next-action-list" },
-            moreRationale.map((l) => el("li", { text: l }))),
-        )]
-      : []),
-    ...planBlock,
-    el("div", {}, [
-      sectionLabel("Evidence strength"),
-      el("div", { class: "confidence-row" }, [
-        meter(conf, { tone: confTone, label: "confidence" }),
-        el("span", { class: `confidence-pct tone-${confTone}`, text: `${(conf * 100).toFixed(0)}%` }),
-      ]),
-      el("p", { class: "muted", text: `${fr.confidenceLabel} · ${fr.confidenceBasis}` }),
-    ]),
-  );
-
-  container.append(el("div", { class: "result-hero" }, [heroCard, actionCard]));
-
-  // ---- evidence ----
-  const evidenceGrid = grid(2);
-
-  // Candidate comparison.
-  if (fr.candidateComparisons.length > 0) {
-    const rows = fr.candidateComparisons.map((c) => ({
-      label: c.candidateId,
-      value: c.utilityMean,
-      se: c.utilityStandardError,
-      highlight: c.isBest,
-      sub: `${c.edpiX.toFixed(0)} eDPI · ${c.validTrials} trials${c.tiedWithBest && !c.isBest ? " · tied" : ""}`,
-    }));
-    const why: HTMLElement[] = [];
-    const whyLines = [...fr.whyThisX, ...fr.whyThisY];
-    if (whyLines.length > 0) {
-      why.push(
-        detailsBlock(
-          "Why this candidate won",
-          el("ul", { class: "list-plain" }, whyLines.map((l) => el("li", { text: l }))),
-          ...(fr.contradictoryEvidence.length > 0
-            ? [
-                sectionLabel("Evidence against the winner"),
-                el("ul", { class: "list-plain" },
-                  fr.contradictoryEvidence.map((l) => el("li", { text: l }))),
-              ]
-            : []),
-        ),
-      );
-    }
-    evidenceGrid.append(
-      card(
-        {
-          title: "Candidate comparison",
-          subtitle: "Higher utility = better overall aim performance",
-          icon: "results",
-        },
-        barChart(rows, (v) => v.toFixed(3)),
-        ...why,
-      ),
-    );
-  }
-
-  // Performance dimensions.
-  const dims = Object.entries(rec.dimensionEstimates) as [
-    AimDimension,
-    { mean: number; standardError: number; sampleCount: number } | undefined,
-  ][];
-  if (dims.length > 0) {
-    const dimGrid = el("div", { class: "grid cols-2" });
-    for (const [dim, est] of dims) {
-      if (!est) continue;
-      dimGrid.append(
-        statTile(DIMENSION_LABELS[dim] ?? dim, est.mean.toFixed(3), {
-          sub: `± ${est.standardError.toFixed(3)} SE · n=${est.sampleCount}`,
-        }),
-      );
-    }
-    evidenceGrid.append(
-      card(
-        {
-          title: "Performance breakdown",
-          subtitle: "All candidates pooled · 0–1 scale per dimension",
-          icon: "pulse",
-        },
-        dimGrid,
-      ),
-    );
-  }
-
-  if (evidenceGrid.childElementCount > 0 || fr.scenarioContributions.length > 0) {
-    container.append(sectionLabel("Evidence"));
-  }
-  if (evidenceGrid.childElementCount > 0) container.append(evidenceGrid);
-
-  // Scenario contributions.
-  if (fr.scenarioContributions.length > 0) {
-    container.append(
-      card(
-        { title: "Scenario contributions", subtitle: "How each drill fed the comparison", icon: "target" },
-        table({
-          head: ["Scenario", "Difficulty", "Valid trials", "Best candidate", "Runner-up"],
-          rows: fr.scenarioContributions.map((s) => [
-            s.scenarioId,
-            s.difficultyTier,
-            String(s.validTrials),
-            s.meanUtilityBest !== null ? s.meanUtilityBest.toFixed(3) : "—",
-            s.meanUtilityRunnerUp !== null ? s.meanUtilityRunnerUp.toFixed(3) : "—",
-          ]),
-        }),
-      ),
-    );
-  }
-
-  // ---- session quality (one surface, three zones) ----
-  container.append(sectionLabel("Session quality"));
-  const qualityCard = card({});
-  const qualityBody = qualityCard.querySelector<HTMLElement>(".card-body");
-  if (qualityBody) {
-    qualityBody.style.padding = "0";
-    const cells = el("div", { class: "cell-grid-3" });
-
-    const captureCell = el("div", {});
-    captureCell.append(
-      el("div", { class: "home-cell-head" }, [
-        el("span", { class: "home-cell-title", text: "Capture quality" }),
-      ]),
-      fr.captureQualityGrade
-        ? statTile("Grade", fr.captureQualityGrade, {
-            sub: fr.captureQualityScore !== null ? `score ${fr.captureQualityScore.toFixed(2)}` : "",
-            tone: fr.captureQualityGrade === "A" || fr.captureQualityGrade === "B" ? "ok" : "warn",
-          })
-        : el("p", { class: "muted", text: "Not graded for this session — run the capture check in Diagnostics before your next test." }),
-    );
-
-    const searchCell = el("div", {});
-    searchCell.append(
-      el("div", { class: "home-cell-head" }, [
-        el("span", { class: "home-cell-title", text: "Search coverage" }),
-      ]),
-      kvList([
-        ["Curve shape", fr.searchAdequacyClassification ?? "—"],
-        ["Boundary", fr.boundaryStatus],
-        ["Adaptation detected", fr.adaptationContamination ? "yes" : "no"],
-      ]),
-    );
-
-    const trialsCell = el("div", {});
-    trialsCell.append(
-      el("div", { class: "home-cell-head" }, [
-        el("span", { class: "home-cell-title", text: "Trials" }),
-      ]),
-      kvList([
-        ["Measured", String(input.trialsAnalyzed)],
-        ["Excluded", String(fr.excludedTrials.count)],
-      ]),
-    );
-    if (Object.keys(fr.excludedTrials.reasonsByCode).length > 0) {
-      const reasons = el("div", { class: "dim-chips" });
-      for (const [code, n] of Object.entries(fr.excludedTrials.reasonsByCode)) {
-        const chip = el("div", { class: "dim-chip" });
-        chip.append(
-          el("span", { class: "dim-chip-name", text: exclusionLabel(code) }),
-          el("span", { class: "dim-chip-value", text: String(n) }),
-        );
-        chip.title = code;
-        reasons.append(chip);
-      }
-      trialsCell.append(reasons);
-    }
-
-    cells.append(captureCell, searchCell, trialsCell);
-    qualityBody.append(cells);
-  }
-  container.append(qualityCard);
-
-  // Warnings / open uncertainty.
-  if (fr.uncertaintyRemaining.length > 0 || fr.warnings.length > 0) {
-    const lines = fr.uncertaintyRemaining.filter((l) => l !== "warnings:");
-    container.append(
-      card(
-        { title: "Open questions", subtitle: "What this session could not settle", icon: "warn", tone: "warn" },
-        el("ul", { class: "list-plain" }, lines.map((l) => el("li", { text: l }))),
-      ),
-    );
-  }
-
-  // ---- technical details ----
-  container.append(
-    sectionLabel("Technical details"),
-    detailsBlock(
-      "Full rationale",
-      el("ul", { class: "list-plain" }, fr.rationaleLines.map((l) => el("li", { text: l }))),
-    ),
-    detailsBlock("Final result JSON (frozen contract)", jsonBlock(fr)),
-    detailsBlock("Raw recommendation JSON", jsonBlock(rec)),
-  );
+  // Everything else, one click away.
+  container.append(renderAdvancedResults(outcome, fr, rec, input));
 }
 
 // ---------------------------------------------------------------------------

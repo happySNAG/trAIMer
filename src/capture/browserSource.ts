@@ -9,6 +9,11 @@ import {
   type CaptureSink,
   type CaptureSource,
 } from "./events.ts";
+import {
+  DOM_CAPTURE_LEAD_TOLERANCE_MS,
+  DomTimestampNormalizer,
+  type DomTimestampStats,
+} from "./timebase.ts";
 
 export interface DomEventTargetLike {
   addEventListener(type: string, listener: (ev: unknown) => void): void;
@@ -122,6 +127,12 @@ export const LOCK_FAILURE_GUIDANCE: Record<
 
 export interface MouseButtonLike {
   button: number;
+  timeStamp?: number;
+}
+
+/** Any DOM event this source reads an occurrence timestamp from. */
+export interface TimestampedDomEvent {
+  timeStamp?: number;
 }
 
 export interface BrowserCaptureOptions {
@@ -176,6 +187,14 @@ export class PointerLockCaptureSource implements CaptureSource {
     kind: "browser-pointer-lock" as const,
     description: "Browser Pointer Lock capture (movement deltas at event rate)",
     nominalSampleIntervalMs: null,
+    /**
+     * Every event this source emits is stamped with the OCCURRENCE time the
+     * user agent reported (`event.timeStamp`), which lives in the renderer's
+     * `performance.now()` domain but is always a little earlier than the
+     * moment the handler runs. See src/capture/timebase.ts.
+     */
+    timestampDomain: "renderer-monotonic" as const,
+    leadToleranceMs: DOM_CAPTURE_LEAD_TOLERANCE_MS,
   };
 
   readonly #options: BrowserCaptureOptions;
@@ -190,6 +209,14 @@ export class PointerLockCaptureSource implements CaptureSource {
   #lockTimer: ReturnType<typeof setTimeout> | null = null;
   #capabilities: PointerEventCapabilities | null = null;
   #lastOutcome: LockOutcome | null = null;
+  /**
+   * Turns every incoming DOM `timeStamp` into a renderer-monotonic timestamp
+   * and records how far behind the observation clock it was. The recorded
+   * distribution is what proves the lead tolerance in
+   * src/capture/timebase.ts is the right size on THIS machine, rather than
+   * an assumption; it is surfaced in Diagnostics and in Advanced Results.
+   */
+  readonly #timestamps = new DomTimestampNormalizer();
   /**
    * How many exitPointerLock() calls WE made are still waiting for their
    * pointerlockchange, so each one is reported as CAPTURE_RELEASED_REASON
@@ -212,6 +239,11 @@ export class PointerLockCaptureSource implements CaptureSource {
 
   get capabilities(): PointerEventCapabilities | null {
     return this.#capabilities;
+  }
+
+  /** Observed occurrence→observation lead distribution for this source. */
+  get timestampStats(): Readonly<DomTimestampStats> {
+    return this.#timestamps.stats;
   }
 
   /** True while the document reports this source's element as locked. */
@@ -259,21 +291,26 @@ export class PointerLockCaptureSource implements CaptureSource {
         typeof ev.getCoalescedEvents === "function"
           ? (ev.getCoalescedEvents() as MouseMoveLike[])
           : [];
+      // ONE observation-clock reading for the whole batch: every sample in a
+      // coalesced burst was observed at the same instant, so measuring each
+      // one against a separately-advancing `performance.now()` would report
+      // leads that grew with the loop index rather than with the transport.
+      const observedAt = nowMs();
       if (coalesced.length > 0) {
         for (const sub of coalesced) {
-          const ts =
-            typeof sub.timeStamp === "number" && Number.isFinite(sub.timeStamp)
-              ? sub.timeStamp
-              : nowMs();
-          emitSample(sub.movementX ?? 0, sub.movementY ?? 0, ts);
+          emitSample(
+            sub.movementX ?? 0,
+            sub.movementY ?? 0,
+            this.#timestamps.normalize(sub.timeStamp, observedAt),
+          );
         }
         return;
       }
-      const ts =
-        typeof ev.timeStamp === "number" && Number.isFinite(ev.timeStamp)
-          ? ev.timeStamp
-          : nowMs();
-      emitSample(ev.movementX ?? 0, ev.movementY ?? 0, ts);
+      emitSample(
+        ev.movementX ?? 0,
+        ev.movementY ?? 0,
+        this.#timestamps.normalize(ev.timeStamp, observedAt),
+      );
     };
 
     const capabilities = detectPointerEventCapabilities(element as never);
@@ -282,18 +319,28 @@ export class PointerLockCaptureSource implements CaptureSource {
       capabilities.capturePath === "mousemove" ? "mousemove" : "pointermove";
     this.#listen(element, moveType, handleMove);
 
+    // Buttons are stamped with their OCCURRENCE time, exactly like pointer
+    // samples. rc.7 stamped them with `performance.now()` read inside the
+    // handler — the observation clock — which put every shot one input-
+    // delivery lag (measured at up to 12.7 ms in Chromium) later than the
+    // motion stream it is compared against, inflating every acquisition time
+    // and shifting hit detection on moving targets to where the target was
+    // AFTER the click. Mixing two sampling instants of one clock is the same
+    // class of error as mixing two clocks.
     this.#listen(element, "mousedown", (raw) => {
       const ev = raw as MouseButtonLike;
       if (!this.#locked || ev.button !== 0) return;
-      sink.onEvent({ kind: "button", tMs: nowMs(), action: "press" });
+      sink.onEvent({ kind: "button", tMs: this.#eventTime(raw), action: "press" });
     });
     this.#listen(element, "mouseup", (raw) => {
       const ev = raw as MouseButtonLike;
       if (!this.#locked || ev.button !== 0) return;
-      sink.onEvent({ kind: "button", tMs: nowMs(), action: "release" });
+      sink.onEvent({ kind: "button", tMs: this.#eventTime(raw), action: "release" });
     });
-    this.#listen(element, "contextmenu", () => {
-      if (this.#locked) sink.onEvent({ kind: "button", tMs: nowMs(), action: "release" });
+    this.#listen(element, "contextmenu", (raw) => {
+      if (this.#locked) {
+        sink.onEvent({ kind: "button", tMs: this.#eventTime(raw), action: "release" });
+      }
     });
 
     // Pointer Lock dispatches `pointerlockchange` / `pointerlockerror` at the
@@ -301,7 +348,8 @@ export class PointerLockCaptureSource implements CaptureSource {
     // events"). Registering them on the canvas — as this source did until the
     // rc.3 hardware run — means they never fire: every requestLock() then sat
     // until its timeout and reported a denial that had not happened.
-    this.#listen(document, "pointerlockchange", () => {
+    this.#listen(document, "pointerlockchange", (raw) => {
+      const tMs = this.#eventTime(raw);
       const isLocked = this.#options.document.pointerLockElement != null;
       const wasLocked = this.#locked;
       this.#locked = isLocked;
@@ -310,7 +358,7 @@ export class PointerLockCaptureSource implements CaptureSource {
         if (deliberate) this.#pendingDeliberateReleases--;
         sink.onEvent({
           kind: "lock-change",
-          tMs: nowMs(),
+          tMs,
           locked: false,
           reason: deliberate ? CAPTURE_RELEASED_REASON : POINTER_LOCK_LOSS_REASON,
         });
@@ -322,16 +370,16 @@ export class PointerLockCaptureSource implements CaptureSource {
       } else if (isLocked && !wasLocked) {
         // A fresh lock supersedes any release we are still waiting on.
         this.#pendingDeliberateReleases = 0;
-        sink.onEvent({ kind: "lock-change", tMs: nowMs(), locked: true, reason: "acquired" });
+        sink.onEvent({ kind: "lock-change", tMs, locked: true, reason: "acquired" });
         this.#settleLock(LOCK_GRANTED);
       }
     });
 
-    this.#listen(document, "pointerlockerror", () => {
+    this.#listen(document, "pointerlockerror", (raw) => {
       this.#locked = false;
       sink.onEvent({
         kind: "lock-change",
-        tMs: nowMs(),
+        tMs: this.#eventTime(raw),
         locked: false,
         reason: "denied",
       });
@@ -342,42 +390,48 @@ export class PointerLockCaptureSource implements CaptureSource {
       });
     });
 
-    this.#listen(window, "blur", () => {
+    this.#listen(window, "blur", (raw) => {
       if (!this.#locked) return;
       sink.onEvent({
         kind: "focus-change",
-        tMs: nowMs(),
+        tMs: this.#eventTime(raw),
         focused: false,
         reason: WINDOW_BLUR_REASON,
       });
     });
-    this.#listen(window, "focus", () => {
-      sink.onEvent({ kind: "focus-change", tMs: nowMs(), focused: true, reason: WINDOW_BLUR_REASON });
+    this.#listen(window, "focus", (raw) => {
+      sink.onEvent({
+        kind: "focus-change",
+        tMs: this.#eventTime(raw),
+        focused: true,
+        reason: WINDOW_BLUR_REASON,
+      });
     });
 
-    this.#listen(document, "visibilitychange", () => {
+    this.#listen(document, "visibilitychange", (raw) => {
+      const tMs = this.#eventTime(raw);
       if (this.#options.document.hidden) {
         sink.onEvent({
           kind: "focus-change",
-          tMs: nowMs(),
+          tMs,
           focused: false,
           reason: TAB_HIDDEN_REASON,
         });
       } else {
         sink.onEvent({
           kind: "focus-change",
-          tMs: nowMs(),
+          tMs,
           focused: true,
           reason: TAB_HIDDEN_REASON,
         });
       }
     });
 
-    this.#listen(window, "resize", () => {
+    this.#listen(window, "resize", (raw) => {
       const viewport = this.#options.viewportProvider();
       sink.onEvent({
         kind: "resize",
-        tMs: nowMs(),
+        tMs: this.#eventTime(raw),
         widthPx: viewport.widthPx,
         heightPx: viewport.heightPx,
       });
@@ -525,6 +579,12 @@ export class PointerLockCaptureSource implements CaptureSource {
   simulateLockAcquiredForTesting(): void {
     this.#locked = true;
     this.#settleLock(LOCK_GRANTED);
+  }
+
+  /** Occurrence time of a DOM event, normalized into the renderer clock. */
+  #eventTime(raw: unknown): number {
+    const ev = raw as TimestampedDomEvent | null;
+    return this.#timestamps.normalize(ev?.timeStamp, nowMs());
   }
 
   #settleLock(outcome: LockOutcome): void {

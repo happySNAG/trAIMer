@@ -10,6 +10,7 @@
 import type { ArenaSnapshot, BrowserRunController } from "./runController.ts";
 import type { Recommendation } from "../../src/domain/recommendation.ts";
 import type { FinalResult } from "../../src/results/finalResult.ts";
+import type { SessionOutcomeReport } from "../../src/results/sessionOutcome.ts";
 
 interface TestHooks {
   mode: "virtual";
@@ -42,9 +43,11 @@ interface TestHooks {
    * results view (result-state torture automation). Test-only.
    */
   renderResultsForTesting(payload: {
-    recommendation: Recommendation;
+    recommendation: Recommendation | null;
     finalResult: FinalResult | null;
     trialsAnalyzed: number;
+    /** The full session report, so the player-facing screen can be driven. */
+    outcome?: SessionOutcomeReport | null;
   }): void;
 }
 
@@ -56,9 +59,10 @@ declare global {
 
 export interface TestHookExtras {
   renderResultsForTesting(payload: {
-    recommendation: Recommendation;
+    recommendation: Recommendation | null;
     finalResult: FinalResult | null;
     trialsAnalyzed: number;
+    outcome?: SessionOutcomeReport | null;
   }): void;
 }
 

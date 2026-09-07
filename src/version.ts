@@ -6,7 +6,21 @@
  * these strings so any historical result can be traced to the exact code that
  * produced it.
  *
- * The V1 release candidate is identified as 1.0.0-rc.7 (Pass 13: the product
+ * The V1 release candidate is identified as 1.0.0-rc.8 (Pass 14: measurement
+ * integrity, selectable calibration length, and a player-first results page.
+ * A completed real-hardware session on rc.7 threw away 43 of its 80 measured
+ * drills as "broken timestamps"; the cause was that browser Pointer Lock
+ * stamps a sample with the moment the input OCCURRED and delivers it a frame
+ * later, while the app started a trial by reading the clock at the moment it
+ * OBSERVED the trial beginning. Every capture source now declares its
+ * timestamp domain and its delivery lead, the native helper answers
+ * `time-sync` probes so its QueryPerformanceCounter origin can be translated
+ * into the renderer clock with a proven bound, calibration length is chosen
+ * as Quick / Standard / Precision against evidence targets rather than drill
+ * counts, and the results page answers the player's five questions before any
+ * statistic — with every statistic kept, under Advanced results. Pairing
+ * between candidates also became a property of the plan rather than of luck.)
+ * rc.7 (Pass 13: the product
  * is publicly named trAIMer; the first break silently ended the whole
  * calibration because a deliberate pointer-lock release was misreported as a
  * loss; the tracking drill was indistinguishable from a shooting drill; shots
@@ -53,7 +67,7 @@ export const PRODUCT_NAME = "trAIMer";
 export const PRODUCT_TAGLINE = "Train. Measure. Tune.";
 
 /** Application release version for the V1 release candidate. */
-export const APP_VERSION = "1.0.0-rc.7";
+export const APP_VERSION = "1.0.0-rc.8";
 
 /**
  * Engine contract version: bump when a persisted engine-facing data contract
@@ -88,7 +102,7 @@ export const NATIVE_PROTOCOL_VERSION = 1;
  * Native helper implementation version expected by this build. The helper's
  * self-reported HELPER_VERSION must match exactly (fail-closed handshake).
  */
-export const EXPECTED_HELPER_VERSION = "helper-1.0.0";
+export const EXPECTED_HELPER_VERSION = "helper-1.1.0";
 
 /**
  * Calibration workflow version: multi-turn reps, median/MAD robust fitting,

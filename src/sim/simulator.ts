@@ -80,10 +80,15 @@ export class SyntheticExperimentRunner {
       }
       lastCandidateId = spec.candidateId;
       const scenario = scenarioById(spec.scenarioId);
+      // The PAIRING index (src/experiments/protocol.ts): the simulator must
+      // give two candidates the same target layout for the same paired cell,
+      // exactly as the live runner does, or the campaigns would validate a
+      // statistical model the product does not run.
       let repIndex: number;
       if (spec.phase === "measured") {
-        repIndex = this.#repCounterByCandidate.get(spec.candidateId) ?? 0;
-        this.#repCounterByCandidate.set(spec.candidateId, repIndex + 1);
+        const counter = this.#repCounterByCandidate.get(spec.candidateId) ?? 0;
+        this.#repCounterByCandidate.set(spec.candidateId, counter + 1);
+        repIndex = spec.pairIndex ?? counter;
       } else {
         repIndex = spec.sequenceNumber;
       }

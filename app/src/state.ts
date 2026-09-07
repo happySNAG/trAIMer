@@ -1,8 +1,24 @@
 import { DEFAULT_SAFE_RANGE } from "../../src/domain/candidate.ts";
 import { PREFLIGHT_THRESHOLDS } from "../../src/preflight/preflight.ts";
+import {
+  CALIBRATION_MODES,
+  DEFAULT_CALIBRATION_MODE,
+  classifyPlan,
+  isCalibrationModeId,
+  type CalibrationMode,
+  type CalibrationModeId,
+} from "../../src/experiments/sessionModes.ts";
 
 export interface AppSettings {
   playerName: string;
+  /**
+   * How long a calibration should be, in evidence rather than in drills.
+   *
+   * Quick / Standard / Precision each fix `rounds`, `repsPerCandidate` and
+   * `warmupTrials`; "custom" means the player edited those directly in the
+   * advanced form and the plan no longer matches any named mode.
+   */
+  calibrationMode: CalibrationModeId;
   dpi: number;
   sensX: number;
   sensY: number;
@@ -32,13 +48,16 @@ export const LEGACY_SETTINGS_KEY = "aldo-aim-lab-settings";
 
 export const DEFAULT_SETTINGS: AppSettings = {
   playerName: "Aldo",
+  calibrationMode: DEFAULT_CALIBRATION_MODE,
   dpi: 800,
   sensX: 7,
   sensY: 7,
   experimentSeed: 20260822,
-  rounds: 2,
-  repsPerCandidate: 8,
-  warmupTrials: 2,
+  rounds: CALIBRATION_MODES[DEFAULT_CALIBRATION_MODE].rounds,
+  repsPerCandidate:
+    CALIBRATION_MODES[DEFAULT_CALIBRATION_MODE].measuredRepsPerCandidatePerRound,
+  warmupTrials:
+    CALIBRATION_MODES[DEFAULT_CALIBRATION_MODE].warmupTrialsPerCandidateBlock,
   yExploration: false,
   autoBreaks: true,
   breakSeconds: 10,
@@ -56,7 +75,37 @@ export function sanitizeSettings(raw: unknown): AppSettings {
   const sensXRaw = finiteNumber(obj.sensX);
   const sensYRaw = finiteNumber(obj.sensY);
 
+  const rounds =
+    finiteNumber(obj.rounds) !== null
+      ? clamp(Math.round(obj.rounds as number), 1, 4)
+      : DEFAULT_SETTINGS.rounds;
+  const repsPerCandidate =
+    finiteNumber(obj.repsPerCandidate) !== null
+      ? clamp(Math.round(obj.repsPerCandidate as number), 3, 20)
+      : DEFAULT_SETTINGS.repsPerCandidate;
+  const warmupTrials =
+    finiteNumber(obj.warmupTrials) !== null
+      ? clamp(Math.round(obj.warmupTrials as number), 0, 5)
+      : DEFAULT_SETTINGS.warmupTrials;
+
+  // The mode and the three plan numbers must never disagree. A stored blob
+  // from before modes existed (or one whose advanced fields were edited by
+  // hand) is classified from the plan it actually describes, so a session
+  // labelled "Standard" is always the Standard plan.
+  const plan = { rounds, measuredRepsPerCandidatePerRound: repsPerCandidate, warmupTrialsPerCandidateBlock: warmupTrials };
+  const storedMode = isCalibrationModeId(obj.calibrationMode)
+    ? obj.calibrationMode
+    : null;
+  const derivedMode = classifyPlan(plan);
+  const calibrationMode: CalibrationModeId =
+    storedMode !== null && storedMode !== "custom" && storedMode === derivedMode
+      ? storedMode
+      : derivedMode;
+  const resolved: CalibrationMode | null =
+    calibrationMode === "custom" ? null : CALIBRATION_MODES[calibrationMode];
+
   return {
+    calibrationMode,
     // Names render as textContent everywhere; cap length so even a hostile
     // blob can only ever produce an oversized-but-inert label.
     playerName:
@@ -79,18 +128,10 @@ export function sanitizeSettings(raw: unknown): AppSettings {
       finiteNumber(obj.experimentSeed) !== null
         ? Math.abs(Math.trunc(obj.experimentSeed as number)) % 0xffffffff
         : DEFAULT_SETTINGS.experimentSeed,
-    rounds:
-      finiteNumber(obj.rounds) !== null
-        ? clamp(Math.round(obj.rounds as number), 1, 4)
-        : DEFAULT_SETTINGS.rounds,
+    rounds: resolved?.rounds ?? rounds,
     repsPerCandidate:
-      finiteNumber(obj.repsPerCandidate) !== null
-        ? clamp(Math.round(obj.repsPerCandidate as number), 3, 20)
-        : DEFAULT_SETTINGS.repsPerCandidate,
-    warmupTrials:
-      finiteNumber(obj.warmupTrials) !== null
-        ? clamp(Math.round(obj.warmupTrials as number), 0, 5)
-        : DEFAULT_SETTINGS.warmupTrials,
+      resolved?.measuredRepsPerCandidatePerRound ?? repsPerCandidate,
+    warmupTrials: resolved?.warmupTrialsPerCandidateBlock ?? warmupTrials,
     yExploration: obj.yExploration === true,
     // Missing → default ON: a stored blob from before this setting existed
     // must keep the documented protocol, not silently drop its breaks.
@@ -100,6 +141,37 @@ export function sanitizeSettings(raw: unknown): AppSettings {
         ? clamp(Math.round(obj.breakSeconds as number), 5, 60)
         : DEFAULT_SETTINGS.breakSeconds,
   };
+}
+
+/**
+ * Applies a named mode to a settings object, or leaves the plan untouched for
+ * "custom". The three plan numbers are the ONLY thing a mode changes.
+ */
+export function withCalibrationMode(
+  settings: AppSettings,
+  modeId: CalibrationModeId,
+): AppSettings {
+  if (modeId === "custom") return { ...settings, calibrationMode: "custom" };
+  const mode: CalibrationMode = CALIBRATION_MODES[modeId];
+  return {
+    ...settings,
+    calibrationMode: modeId,
+    rounds: mode.rounds,
+    repsPerCandidate: mode.measuredRepsPerCandidatePerRound,
+    warmupTrials: mode.warmupTrialsPerCandidateBlock,
+  };
+}
+
+/** The mode object these settings describe, or null when the plan is custom. */
+export function resolveCalibrationMode(
+  settings: AppSettings,
+): CalibrationMode | null {
+  const id = classifyPlan({
+    rounds: settings.rounds,
+    measuredRepsPerCandidatePerRound: settings.repsPerCandidate,
+    warmupTrialsPerCandidateBlock: settings.warmupTrials,
+  });
+  return id === "custom" ? null : CALIBRATION_MODES[id];
 }
 
 export function loadSettings(): AppSettings {

@@ -77,7 +77,7 @@ specified executable is not a valid application for this OS platform."*
 
 ```bat
 traimer_capture_helper.exe --version
-rem -> traimer_capture_helper version=helper-1.0.0 protocol=1 arch=x64
+rem -> traimer_capture_helper version=helper-1.1.0 protocol=1 arch=x64
 ```
 
 `--version` registers no devices, opens no sockets and creates no windows; it

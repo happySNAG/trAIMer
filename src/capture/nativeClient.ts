@@ -2,6 +2,15 @@ import type { CaptureEvent, CaptureSource, CaptureSink } from "./events.ts";
 import { NATIVE_CAPTURE_PROTOCOL_VERSION } from "./native.ts";
 import type { NativeStreamHeader } from "./native.ts";
 import { EXPECTED_HELPER_VERSION } from "../version.ts";
+import {
+  describeClockSync,
+  HelperClockSync,
+  MAX_CLOCK_SYNC_UNCERTAINTY_MS,
+  MIN_CLOCK_SYNC_SAMPLES,
+  NATIVE_CAPTURE_LEAD_TOLERANCE_MS,
+  type ClockSyncEstimate,
+  type ClockSyncStatus,
+} from "./timebase.ts";
 
 /**
  * Local native-capture transport client (Pass 4, requirements A/B).
@@ -17,6 +26,29 @@ import { EXPECTED_HELPER_VERSION } from "../version.ts";
  *                      "events":[CaptureEvent...]}
  *                   | {"type":"lifecycle","phase":"started"|"stopping"|"reconnecting"}
  *                   | {"type":"ping"}   (client replies "pong")
+ *   client → helper : {"type":"time-sync","id":"N"}
+ *   helper → client : {"type":"time-sync-reply","id":"N","helperMonotonicMs":T}
+ *
+ * CLOCK DOMAINS. The helper counts milliseconds from ITS OWN process start
+ * (QueryPerformanceCounter); this client's consumers measure against the
+ * renderer's `performance.timeOrigin`. Those origins are unrelated, and
+ * feeding one into the other shifts every reaction time by an unknown
+ * constant — silently, and in a direction nothing downstream could detect.
+ *
+ * So NO event reaches a sink until the offset between the two clocks has been
+ * ESTABLISHED by measurement. On `welcome` the client runs a chain of
+ * sequential `time-sync` exchanges, each giving an offset estimate with a
+ * proven error bound of half its round trip (Cristian's algorithm — see
+ * src/capture/timebase.ts). Frames that arrive meanwhile are held in a bounded
+ * buffer. When the tightest bound is within MAX_CLOCK_SYNC_UNCERTAINTY_MS the
+ * offset is FROZEN for the stream epoch and the buffer is flushed, translated.
+ * Freezing is what preserves monotonic ordering: translation is then a single
+ * affine map, so a later, slightly different estimate can never reorder two
+ * events. Later probes keep running, but only to measure drift and to fail the
+ * stream if the clocks diverge — never to retroactively move a timestamp.
+ *
+ * If the offset cannot be established, the stream FAILS. It does not fall back
+ * to untranslated helper time, and it does not guess an offset.
  *
  * Fail-closed rules: malformed frames, protocol mismatch, duplicate or
  * non-monotonic sequences abort the stream loudly — data is never silently
@@ -77,9 +109,27 @@ export interface NativeTransportOptions {
   handshakeTimeoutMs?: number;
   onStatus?: ((status: NativeTransportStatus, detail: string) => void) | undefined;
   onError?: ((error: NativeTransportError) => void) | undefined;
+  /** Renderer-monotonic clock. Injectable so sync is testable without timers. */
+  nowMs?: (() => number) | undefined;
+  /** Sequential time-sync exchanges run before the offset is frozen. */
+  syncProbeCount?: number | undefined;
+  /** Largest half-round-trip bound accepted before the stream is trusted. */
+  maxClockSyncUncertaintyMs?: number | undefined;
+  /** Notified whenever the synchronization state changes. */
+  onClockSync?: ((status: ClockSyncStatus) => void) | undefined;
 }
 
 const DEFAULT_RECONNECT = { maxAttempts: 3, initialDelayMs: 250, maxDelayMs: 4000 };
+
+/** Sequential exchanges before an offset may be frozen. */
+const MIN_SYNC_PROBES = MIN_CLOCK_SYNC_SAMPLES;
+
+/**
+ * Events held while the offset is still being established. One second of a
+ * 1 kHz stream, which is far more than the handful of exchanges take; a
+ * stream that overruns it is not synchronizing and fails closed.
+ */
+const MAX_BUFFERED_EVENTS_AWAITING_SYNC = 2000;
 
 /** Security limits (Pass 5): a hostile/buggy helper cannot exhaust memory. */
 export const NATIVE_TRANSPORT_LIMITS = {
@@ -125,13 +175,20 @@ type ServerMessage =
   | { type: "reject"; reason: string }
   | { type: "frame"; sequence: number; tMonotonicMs: number; events: unknown[] }
   | { type: "lifecycle"; phase: "started" | "stopping" | "reconnecting"; detail?: string }
-  | { type: "ping" };
+  | { type: "ping" }
+  | { type: "time-sync-reply"; id: string; helperMonotonicMs: number };
 
 export class NativeTransportCaptureSource implements CaptureSource {
   readonly descriptor: {
     kind: "native";
     description: string;
     nominalSampleIntervalMs: number | null;
+    /**
+     * Events reach sinks in the RENDERER clock: the raw helper timestamps are
+     * translated by the established offset before anything is emitted.
+     */
+    timestampDomain: "renderer-monotonic";
+    leadToleranceMs: number;
   };
 
   readonly #options: Required<Pick<NativeTransportOptions, "url" | "sessionToken" | "appVersion" | "socketFactory">> &
@@ -155,6 +212,18 @@ export class NativeTransportCaptureSource implements CaptureSource {
     lastSequenceSeen: null,
   };
   #lastFrameMonotonicMs: number | null = null;
+  // ---- clock synchronization state (per stream epoch) ----
+  #clockSync = new HelperClockSync();
+  /** Frozen once established; never replaced within an epoch. */
+  #frozenEstimate: ClockSyncEstimate | null = null;
+  #syncState: ClockSyncStatus["state"] = "not-attempted";
+  #syncDetail = "no connection yet";
+  #pendingProbes = new Map<string, number>();
+  #nextProbeId = 0;
+  #probesSent = 0;
+  /** Frames received before the offset was established, awaiting translation. */
+  #pendingFrames: Extract<ServerMessage, { type: "frame" }>[] = [];
+  #bufferedEventCount = 0;
   /*
    * Sequence continuity is enforced via `lastSequenceSeen` alone. Sequences
    * are strictly increasing within an epoch, so a Set of seen sequences is
@@ -169,6 +238,8 @@ export class NativeTransportCaptureSource implements CaptureSource {
       kind: "native",
       description: `native capture helper (${options.url})`,
       nominalSampleIntervalMs: null,
+      timestampDomain: "renderer-monotonic",
+      leadToleranceMs: NATIVE_CAPTURE_LEAD_TOLERANCE_MS,
     };
   }
 
@@ -182,6 +253,35 @@ export class NativeTransportCaptureSource implements CaptureSource {
 
   get counters(): Readonly<NativeTransportCounters> {
     return { ...this.#counters };
+  }
+
+  /** Where helper↔renderer clock synchronization currently stands. */
+  get clockSync(): ClockSyncStatus {
+    return describeClockSync(
+      this.#clockSync,
+      this.#syncState,
+      this.#syncDetail,
+      this.#maxSyncUncertaintyMs,
+    );
+  }
+
+  /** The frozen offset used to translate this epoch, or null before it exists. */
+  get frozenClockOffsetMs(): number | null {
+    return this.#frozenEstimate?.offsetMs ?? null;
+  }
+
+  get #maxSyncUncertaintyMs(): number {
+    return this.#options.maxClockSyncUncertaintyMs ?? MAX_CLOCK_SYNC_UNCERTAINTY_MS;
+  }
+
+  get #syncProbeCount(): number {
+    return Math.max(MIN_SYNC_PROBES, this.#options.syncProbeCount ?? 8);
+  }
+
+  #now(): number {
+    const clock = this.#options.nowMs;
+    if (clock) return clock();
+    return typeof performance !== "undefined" ? performance.now() : Date.now();
   }
 
   start(sink: CaptureSink): void {
@@ -357,8 +457,13 @@ export class NativeTransportCaptureSource implements CaptureSource {
         // continuity state resets so reconnects are not miscounted as drops.
         this.#counters.lastSequenceSeen = null;
         this.#lastFrameMonotonicMs = null;
+        // A new epoch means a new helper clock reading base as far as this
+        // client is concerned: discard the previous offset rather than
+        // carrying it across a reconnect it was never measured for.
+        this.#resetClockSync();
         this.#setStatus("streaming", `accepted by ${this.#header.deviceId}`);
         this.#socket?.send(JSON.stringify({ type: "resume-from", lastSequence: null }));
+        this.#beginClockSync();
         return;
       }
       case "reject":
@@ -369,6 +474,9 @@ export class NativeTransportCaptureSource implements CaptureSource {
         return;
       case "ping":
         this.#socket?.send(JSON.stringify({ type: "pong" }));
+        return;
+      case "time-sync-reply":
+        this.#handleTimeSyncReply(msg);
         return;
       case "frame":
         this.#handleFrame(msg);
@@ -446,7 +554,162 @@ export class NativeTransportCaptureSource implements CaptureSource {
     this.#counters.lastSequenceSeen = seq;
     this.#lastFrameMonotonicMs = msg.tMonotonicMs;
     this.#counters.eventsReceived += events.length;
-    for (const ev of events) this.#sink?.onEvent(ev);
+
+    // Helper time is NOT renderer time. Nothing is emitted until the offset
+    // between them has been measured; frames that arrive first wait here.
+    if (this.#frozenEstimate === null) {
+      this.#pendingFrames.push({ ...msg, events });
+      this.#bufferedEventCount += events.length;
+      if (this.#bufferedEventCount > MAX_BUFFERED_EVENTS_AWAITING_SYNC) {
+        this.#failSync(
+          `clock synchronization did not complete within ${MAX_BUFFERED_EVENTS_AWAITING_SYNC} buffered events`,
+        );
+      }
+      return;
+    }
+    for (const ev of events) this.#sink?.onEvent(this.#translate(ev));
+  }
+
+  // -------------------------------------------------------------------------
+  // Clock synchronization
+  // -------------------------------------------------------------------------
+
+  #resetClockSync(): void {
+    this.#clockSync = new HelperClockSync();
+    this.#frozenEstimate = null;
+    this.#pendingProbes.clear();
+    this.#probesSent = 0;
+    this.#pendingFrames = [];
+    this.#bufferedEventCount = 0;
+    this.#setSyncState("not-attempted", "new stream epoch");
+  }
+
+  #setSyncState(state: ClockSyncStatus["state"], detail: string): void {
+    this.#syncState = state;
+    this.#syncDetail = detail;
+    this.#options.onClockSync?.(this.clockSync);
+  }
+
+  #beginClockSync(): void {
+    this.#setSyncState("syncing", "measuring helper↔renderer clock offset");
+    this.#sendSyncProbe();
+  }
+
+  #sendSyncProbe(): void {
+    const socket = this.#socket;
+    if (!socket || this.#stoppedByCaller) return;
+    const id = `s${this.#nextProbeId++}`;
+    this.#pendingProbes.set(id, this.#now());
+    this.#probesSent++;
+    socket.send(JSON.stringify({ type: "time-sync", id }));
+  }
+
+  #handleTimeSyncReply(
+    msg: Extract<ServerMessage, { type: "time-sync-reply" }>,
+  ): void {
+    const id = String(msg.id);
+    const t0 = this.#pendingProbes.get(id);
+    if (t0 === undefined) return; // stale or unsolicited; ignore quietly
+    this.#pendingProbes.delete(id);
+    if (
+      typeof msg.helperMonotonicMs !== "number" ||
+      !Number.isFinite(msg.helperMonotonicMs)
+    ) {
+      this.#failSync(`malformed time-sync reply: ${String(msg.helperMonotonicMs)}`);
+      return;
+    }
+    this.#clockSync.addSample({ t0, helperMs: msg.helperMonotonicMs, t2: this.#now() });
+
+    if (this.#frozenEstimate !== null) {
+      // Post-freeze probes exist only to watch the clocks stay together.
+      this.#checkDivergence();
+      return;
+    }
+    if (this.#probesSent < this.#syncProbeCount) {
+      // Sequential, never a burst: each exchange then measures a quiet round
+      // trip, which is what makes the proven bound tight.
+      this.#sendSyncProbe();
+      return;
+    }
+    this.#freezeOffsetOrFail();
+  }
+
+  #freezeOffsetOrFail(): void {
+    const estimate = this.#clockSync.estimate();
+    if (estimate === null) {
+      this.#failSync(
+        `only ${this.#clockSync.sampleCount} usable time-sync exchange(s); need ${MIN_SYNC_PROBES}`,
+      );
+      return;
+    }
+    if (estimate.uncertaintyHalfWidthMs > this.#maxSyncUncertaintyMs) {
+      this.#setSyncState(
+        "untrusted",
+        `best clock-offset bound is ±${estimate.uncertaintyHalfWidthMs.toFixed(3)} ms, above the ±${this.#maxSyncUncertaintyMs} ms this build will measure with`,
+      );
+      this.#fail(
+        new NativeTransportError(
+          `helper clock offset could only be bounded to ±${estimate.uncertaintyHalfWidthMs.toFixed(3)} ms (limit ±${this.#maxSyncUncertaintyMs} ms)`,
+        ),
+      );
+      return;
+    }
+    this.#frozenEstimate = estimate;
+    this.#setSyncState(
+      "established",
+      `offset ${estimate.offsetMs.toFixed(3)} ms ±${estimate.uncertaintyHalfWidthMs.toFixed(3)} ms from ${estimate.samples} exchanges`,
+    );
+    const buffered = this.#pendingFrames;
+    this.#pendingFrames = [];
+    this.#bufferedEventCount = 0;
+    for (const frame of buffered) {
+      for (const ev of frame.events as CaptureEvent[]) {
+        this.#sink?.onEvent(this.#translate(ev));
+      }
+    }
+  }
+
+  /**
+   * A frozen offset is only honest while the two clocks stay together. If a
+   * later exchange proves an offset that differs from the frozen one by more
+   * than the two bounds allow, the streams have diverged and the epoch is no
+   * longer measurable — fail closed rather than keep translating with a
+   * number the evidence has contradicted.
+   */
+  #checkDivergence(): void {
+    const frozen = this.#frozenEstimate;
+    const current = this.#clockSync.estimate();
+    if (frozen === null || current === null) return;
+    const drift = Math.abs(current.offsetMs - frozen.offsetMs);
+    const allowed =
+      frozen.uncertaintyHalfWidthMs +
+      current.uncertaintyHalfWidthMs +
+      this.#maxSyncUncertaintyMs;
+    if (drift > allowed) {
+      this.#failSync(
+        `helper and renderer clocks diverged by ${drift.toFixed(3)} ms (allowed ${allowed.toFixed(3)} ms)`,
+      );
+    }
+  }
+
+  #failSync(detail: string): void {
+    this.#setSyncState("failed", detail);
+    this.#pendingFrames = [];
+    this.#bufferedEventCount = 0;
+    this.#fail(new NativeTransportError(`native capture clock sync failed: ${detail}`));
+  }
+
+  /** Rewrites one event's timestamp from helper time into renderer time. */
+  #translate(event: CaptureEvent): CaptureEvent {
+    const estimate = this.#frozenEstimate;
+    if (estimate === null) throw new Error("translate before sync established");
+    return { ...event, tMs: event.tMs + estimate.offsetMs };
+  }
+
+  /** Runs one extra exchange; used by Diagnostics and by drift monitoring. */
+  probeClockSync(): void {
+    if (this.#status !== "streaming") return;
+    this.#sendSyncProbe();
   }
 }
 

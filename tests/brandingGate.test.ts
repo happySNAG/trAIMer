@@ -124,7 +124,7 @@ describe("the gate fails on a shipped bundle that still says the old name", () =
 describe("the gate fails on a legacy-named installer or installed layout", () => {
   it("rejects an installer still called AldoAimLab-Setup", () => {
     const dir = mkdtempSync(join(tmpdir(), "branding-inst-"));
-    const file = join(dir, "AldoAimLab-Setup-1.0.0-rc.7.exe");
+    const file = join(dir, "AldoAimLab-Setup-1.0.0-rc.8.exe");
     writeFileSync(file, "MZ");
     const result = runGate("--installer", file);
     expect(result.code).toBe(1);
@@ -133,7 +133,7 @@ describe("the gate fails on a legacy-named installer or installed layout", () =>
 
   it("accepts the trAIMer installer filename", () => {
     const dir = mkdtempSync(join(tmpdir(), "branding-inst2-"));
-    const file = join(dir, `${PRODUCT}-Setup-1.0.0-rc.7.exe`);
+    const file = join(dir, `${PRODUCT}-Setup-1.0.0-rc.8.exe`);
     writeFileSync(file, "MZ");
     expect(runGate("--installer", file).code).toBe(0);
   });

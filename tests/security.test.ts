@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { EXPECTED_HELPER_VERSION } from "../src/version.ts";
 import {
   exportBackupAll,
   importBackupAll,
@@ -108,7 +109,7 @@ describe("transport hardening against a hostile helper", () => {
     deviceDescription: "",
     nominalRateHz: 1000,
     timeOriginNote: "",
-    helperVersion: "helper-1.0.0",
+    helperVersion: EXPECTED_HELPER_VERSION,
   });
 
   it("rejects DNS names that merely LOOK like loopback", () => {

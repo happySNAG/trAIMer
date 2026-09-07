@@ -1,6 +1,6 @@
 {
   "name": "traimer",
-  "version": "1.0.0-rc.7",
+  "version": "1.0.0-rc.8",
   "private": true,
   "type": "module",
   "description": "trAIMer — Train. Measure. Tune. Fortnite-focused aim measurement and sensitivity optimization engine (headless core).",

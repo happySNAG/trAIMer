@@ -1,4 +1,5 @@
 import type { CaptureEvent } from "../capture/events.ts";
+import type { ClockSyncStatus } from "../capture/timebase.ts";
 import { median, percentile } from "../metrics/stats.ts";
 
 /**
@@ -31,6 +32,16 @@ export interface CaptureSelfTestMeta {
   deviceDescription: string | null;
   /** Nominal rate CLAIMED by the device/helper welcome, if any. */
   nominalRateHz: number | null;
+  /**
+   * Where helper↔renderer clock synchronization stood during the test.
+   *
+   * Native capture cannot carry measurement without it: the helper counts
+   * milliseconds from its own process start, and an untranslated helper
+   * timestamp compared against a renderer timestamp is off by an unknown
+   * constant. Absent for browser capture (already in the renderer clock) and
+   * for results recorded before the sync protocol existed.
+   */
+  clockSync?: ClockSyncStatus | null;
   /** Sequence counters from the transport layer, when native. */
   transportCounters?: {
     framesReceived: number;
@@ -252,6 +263,36 @@ export function analyzeCaptureSelfTest(
     checks.push({ name: "source-identity", status: "fail", detail: "capture source did not identify itself" });
   } else {
     checks.push({ name: "source-identity", status: "pass", detail: `${meta.sourceKind}${meta.deviceId ? ` · ${meta.deviceId}` : ""}` });
+  }
+
+  // Clock domain. A native stream whose timestamps have not been translated
+  // into the renderer clock is not usable for measurement at any rate.
+  if (meta.sourceKind.includes("native")) {
+    const sync = meta.clockSync ?? null;
+    if (sync === null) {
+      checks.push({
+        name: "clock-sync",
+        status: "fail",
+        detail:
+          "the helper clock was never synchronized to this window's clock, so its timestamps cannot be placed on the same timeline as the drills",
+      });
+    } else if (sync.state !== "established") {
+      checks.push({
+        name: "clock-sync",
+        status: "fail",
+        detail: `helper clock synchronization is ${sync.state}: ${sync.detail}`,
+      });
+    } else {
+      const est = sync.estimate;
+      checks.push({
+        name: "clock-sync",
+        status: "pass",
+        detail:
+          est !== null
+            ? `offset ${est.offsetMs.toFixed(3)} ms bounded to ±${est.uncertaintyHalfWidthMs.toFixed(3)} ms over ${est.samples} exchanges`
+            : "established",
+      });
+    }
   }
 
   const hasFail = checks.some((c) => c.status === "fail");

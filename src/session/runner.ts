@@ -7,6 +7,7 @@ import type { TrialRecord } from "../domain/trial.ts";
 import { validateTrial, DEFAULT_VALIDATION_CONFIG } from "../validation/validateTrial.ts";
 import { planCandidateBlocks, type TrialPlanSpec } from "../experiments/protocol.ts";
 import { SensitivityOptimizer } from "../optimizer/optimizer.ts";
+import { summarizeCaptureQuality } from "../diagnostics/captureQuality.ts";
 import type { Recommendation } from "../domain/recommendation.ts";
 import {
   nextSessionState,
@@ -17,9 +18,15 @@ import { assessFatigue } from "./fatigue.ts";
 import { AuditLog, type AuditEntry } from "./audit.ts";
 import { allocateReps, type AllocationDecision } from "./allocation.ts";
 import type {
+  ReplacementBlockNotice,
   SessionRunnerPorts,
   SessionProgressSnapshot,
 } from "./types.ts";
+import {
+  assessEvidenceShortfall,
+  classifyPlan,
+  type CalibrationModeId,
+} from "../experiments/sessionModes.ts";
 import {
   RESUME_CHECKPOINT_SCHEMA_VERSION,
   buildResumePlan,
@@ -32,10 +39,46 @@ import {
   buildSessionOutcomeReport,
   type CalibrationProgressSnapshot,
   type SessionEndKind,
+  type SessionInstrumentation,
   type SessionOutcomeReport,
 } from "../results/sessionOutcome.ts";
 
 const SEQUENCE_KEY = (round: number, seq: number): string => `${round}:${seq}`;
+
+/**
+ * What "finished" means for a session, in evidence rather than in drills.
+ *
+ * A calibration mode declares how many VALID measured drills each candidate
+ * should end with. Running the planned drills is how the session tries to get
+ * there; it is not the same thing as getting there, because a drill that
+ * could not be measured produces no evidence at all.
+ */
+export interface EvidenceTarget {
+  /** The mode this target came from, recorded for the outcome report. */
+  modeId: CalibrationModeId;
+  targetValidTrialsPerCandidate: number;
+  /**
+   * Hard ceiling on replacement blocks. The point of the ceiling is that a
+   * player whose machine cannot produce valid data must not be trapped in a
+   * session that keeps asking for more.
+   */
+  maxReplacementBlocks: number;
+}
+
+/**
+ * Replacement work is additionally capped as a fraction of the plan the
+ * player agreed to. Two independent limits (blocks and drills) so neither a
+ * large per-block deficit nor many small ones can turn a Quick session into a
+ * Precision one.
+ */
+const MAX_REPLACEMENT_FRACTION_OF_PLAN = 0.5;
+
+/**
+ * Round index replacement blocks run under. Far above any planned round, so a
+ * replacement drill's `round:sequence` key can never collide with a planned
+ * one in a resume checkpoint.
+ */
+const REPLACEMENT_ROUND_BASE = 1000;
 
 /** Machine-readable reason a session ended without reaching a recommendation. */
 export interface SessionAbortReason {
@@ -101,9 +144,39 @@ export class SessionRunner {
   #blockIndexInRound = 0;
   #lastCandidateIdForProgress: string | null = null;
 
-  constructor(definition: ExperimentDefinition, ports: SessionRunnerPorts) {
+  /**
+   * The evidence this session is trying to end with, and how far it may go to
+   * get there. Absent → the historical behaviour: the plan finishes when its
+   * drills finish, whatever survived validation.
+   */
+  readonly #evidenceTarget: EvidenceTarget | null;
+  /** Replacement blocks actually run, for the outcome report. */
+  #replacementBlocksRun = 0;
+  #replacementDrillsRun = 0;
+
+  constructor(
+    definition: ExperimentDefinition,
+    ports: SessionRunnerPorts,
+    config?: { evidenceTarget?: EvidenceTarget | null },
+  ) {
     this.#definition = definition;
     this.#ports = ports;
+    this.#evidenceTarget = config?.evidenceTarget ?? null;
+  }
+
+  /** Bounded replacement work this session actually performed. */
+  get replacementSummary(): {
+    blocksRun: number;
+    drillsRun: number;
+    maxBlocks: number;
+    maxDrills: number;
+  } {
+    return {
+      blocksRun: this.#replacementBlocksRun,
+      drillsRun: this.#replacementDrillsRun,
+      maxBlocks: this.#evidenceTarget?.maxReplacementBlocks ?? 0,
+      maxDrills: this.#maxReplacementDrills(),
+    };
   }
 
   /**
@@ -299,6 +372,12 @@ export class SessionRunner {
       );
     }
 
+    // Evidence, not drill count, decides whether the session is finished.
+    // A plan that ran to its end but lost measurements to unusable data gets
+    // a BOUNDED top-up rather than either shipping short evidence or asking
+    // the player to start over.
+    await this.#runReplacementBlocks();
+
     this.#setState("analyzing");
     const { recommendation } = await this.#analyze();
     this.#setState("complete");
@@ -315,8 +394,160 @@ export class SessionRunner {
         endKind: "completed",
         progress: this.calibrationProgress(),
         recommendation,
+        instrumentation: this.#instrumentation(),
       }),
     };
+  }
+
+  #maxReplacementDrills(): number {
+    const target = this.#evidenceTarget;
+    if (!target) return 0;
+    const plannedMeasured =
+      this.#definition.candidates.length *
+      this.#definition.measuredRepsPerCandidatePerRound *
+      Math.max(1, this.#definition.stoppingCriteria.maxSearchRounds);
+    return Math.ceil(plannedMeasured * MAX_REPLACEMENT_FRACTION_OF_PLAN);
+  }
+
+  /**
+   * Tops the session up to its mode's evidence target, within hard bounds.
+   *
+   * Four independent stops, so this can never become an open-ended chase:
+   *
+   *  1. the mode's `maxReplacementBlocks`;
+   *  2. a drill budget of half the plan the player agreed to;
+   *  3. the experiment's own `maxTotalMeasuredTrials`;
+   *  4. PROGRESS — a block that produces no new valid measurement ends the
+   *     phase immediately. If the machine cannot produce usable data, running
+   *     the same drills again will not change that, and the results screen is
+   *     a better place to say so than another five minutes of drills.
+   *
+   * A cancel, an engine abort or a failed resume during a replacement block
+   * ends the phase like any other; nothing here can keep a session alive that
+   * the player or the hardware has ended.
+   */
+  async #runReplacementBlocks(): Promise<void> {
+    const target = this.#evidenceTarget;
+    if (!target || this.#cancelRequested) return;
+    const drillBudget = this.#maxReplacementDrills();
+
+    for (let block = 0; block < target.maxReplacementBlocks; block++) {
+      if (this.#cancelRequested) return;
+      const shortfall = assessEvidenceShortfall(
+        this.#definition,
+        this.#allTrials,
+        target.targetValidTrialsPerCandidate,
+      );
+      if (shortfall.satisfied) return;
+
+      const measuredSoFar = this.#allTrials.filter((t) => t.phase === "measured").length;
+      const remainingByExperiment = Math.max(
+        0,
+        this.#definition.stoppingCriteria.maxTotalMeasuredTrials - measuredSoFar,
+      );
+      const remainingByBudget = Math.max(0, drillBudget - this.#replacementDrillsRun);
+      const allowance = Math.min(
+        shortfall.totalDeficit,
+        remainingByBudget,
+        remainingByExperiment,
+      );
+      if (allowance <= 0) return;
+
+      // Deficits are honoured largest-first so a candidate that lost the most
+      // measurements is refilled first when the allowance cannot cover
+      // everything — the alternative (proportional shaving) leaves every
+      // candidate short and the comparison still unpowered.
+      const ordered = [...shortfall.deficits.entries()].sort((a, b) => b[1] - a[1]);
+      const allocation = new Map<string, number>();
+      let assigned = 0;
+      for (const [candidateId, needed] of ordered) {
+        if (assigned >= allowance) break;
+        const take = Math.min(needed, allowance - assigned);
+        allocation.set(candidateId, take);
+        assigned += take;
+      }
+      if (assigned === 0) return;
+
+      const notice: ReplacementBlockNotice = {
+        blockIndex: this.#replacementBlocksRun + 1,
+        maxBlocks: target.maxReplacementBlocks,
+        drills: assigned,
+        perCandidate: [...allocation.entries()].map(([candidateId, needed]) => ({
+          candidateId,
+          blindedLabel: this.#blindLabelFor(candidateId),
+          needed,
+        })),
+        reason:
+          assigned === 1
+            ? "1 additional drill needed because a measurement could not be used"
+            : `${assigned} additional drills needed because some measurements could not be used`,
+      };
+      this.#audit.append(this.#ports.nowIso(), "replacement-block-started", {
+        blockIndex: notice.blockIndex,
+        maxBlocks: notice.maxBlocks,
+        drills: assigned,
+        targetValidPerCandidate: target.targetValidTrialsPerCandidate,
+        mode: target.modeId,
+      });
+      this.#ports.onReplacementBlock?.(notice);
+
+      // Replacement drills run under a distinct round index so their sequence
+      // keys can never collide with the planned rounds' — a resumed session
+      // must not mistake a replacement drill for a planned one.
+      const round = REPLACEMENT_ROUND_BASE + this.#replacementBlocksRun;
+      this.#currentRound = round;
+      const validBefore = this.#validMeasuredCount();
+      const plan = planCandidateBlocks(
+        this.#definition,
+        round,
+        [...allocation.keys()],
+        allocation,
+      ).filter((spec) => spec.phase === "measured");
+      this.#plannedStepsByRound.set(round, plan.length);
+      this.#blockIndexInRound = 0;
+      this.#lastCandidateIdForProgress = null;
+      this.#emitCalibrationProgress();
+      await this.#runPlan(plan, round);
+
+      this.#replacementBlocksRun++;
+      this.#replacementDrillsRun += plan.length;
+      const gained = this.#validMeasuredCount() - validBefore;
+      this.#audit.append(this.#ports.nowIso(), "replacement-block-finished", {
+        blockIndex: notice.blockIndex,
+        drillsRun: plan.length,
+        validGained: gained,
+      });
+      if (gained <= 0) {
+        // Nothing usable came back. Another identical block cannot help.
+        this.#audit.append(this.#ports.nowIso(), "replacement-stopped", {
+          reason: "a replacement block produced no usable measurement",
+        });
+        return;
+      }
+    }
+  }
+
+  /**
+   * The capture source that produced these trials, keyed per trial so the
+   * quality summary can report (and flag) a mid-session source change. One
+   * source per session today; the map is the shape the summary expects.
+   */
+  #captureSourceKindMap(): {
+    captureSourceKindsByTrialId?: ReadonlyMap<string, string>;
+  } {
+    const kind = this.#ports.captureSourceMetadata?.()?.kind;
+    if (!kind) return {};
+    return {
+      captureSourceKindsByTrialId: new Map(
+        this.#allTrials.map((t) => [t.id as string, kind]),
+      ),
+    };
+  }
+
+  #validMeasuredCount(): number {
+    return this.#allTrials.filter(
+      (t) => t.phase === "measured" && t.validity.status === "valid",
+    ).length;
   }
 
   /**
@@ -339,7 +570,21 @@ export class SessionRunner {
       });
       return { recommendation: null, sufficient: false };
     }
-    const optimizer = new SensitivityOptimizer(this.#definition);
+    // Capture quality is GRADED FROM THIS SESSION'S OWN RECORDED STREAM.
+    //
+    // The engine has always been able to do this; nothing ever asked it to,
+    // so every live session reached the results page saying "Capture quality:
+    // Not graded for this session — run the capture check in Diagnostics
+    // before your next test". That told a player to prepare for a session
+    // that had already happened, and left the optimizer's capture-quality
+    // confidence cap permanently disarmed.
+    const captureQualitySession = summarizeCaptureQuality({
+      trials: this.#allTrials,
+      ...this.#captureSourceKindMap(),
+    });
+    const optimizer = new SensitivityOptimizer(this.#definition, {
+      captureQualitySession,
+    });
     for (const trial of this.#allTrials) optimizer.addTrials([trial]);
     const recommendation = optimizer.recommend();
     const sufficiency = assessEvidenceSufficiency(
@@ -390,12 +635,19 @@ export class SessionRunner {
     for (let round = 0; round < roundsPlanned; round++) {
       stepsPlanned += this.#plannedStepsByRound.get(round) ?? perRoundFallback;
     }
+    // Replacement blocks are real planned work; leaving them out of the
+    // denominator would show "Calibration 100 %" while drills were still
+    // running.
+    for (const [round, steps] of this.#plannedStepsByRound) {
+      if (round >= REPLACEMENT_ROUND_BASE) stepsPlanned += steps;
+    }
     const stepsCompleted = this.#allTrials.length;
     const measuredCompleted = this.#allTrials.filter(
       (t) => t.phase === "measured",
     ).length;
     const measuredPlanned = Math.min(
-      d.candidates.length * d.measuredRepsPerCandidatePerRound * roundsPlanned,
+      d.candidates.length * d.measuredRepsPerCandidatePerRound * roundsPlanned +
+        this.#replacementDrillsRun,
       d.stoppingCriteria.maxTotalMeasuredTrials,
     );
     return {
@@ -403,7 +655,7 @@ export class SessionRunner {
       stepsPlanned: Math.max(stepsPlanned, stepsCompleted),
       fraction:
         stepsPlanned > 0 ? Math.min(1, stepsCompleted / stepsPlanned) : 0,
-      roundIndex: Math.max(1, this.#currentRound + 1),
+      roundIndex: Math.min(roundsPlanned, Math.max(1, this.#currentRound + 1)),
       roundsPlanned,
       blockIndex: Math.max(1, this.#blockIndexInRound),
       blocksPerRound: d.candidates.length,
@@ -485,8 +737,15 @@ export class SessionRunner {
         this.#setState("trial-ready", `${label} · ${scenario.label}`);
       }
 
-      const repIndex =
+      // The PAIRING index, not a per-candidate running counter: it is what
+      // makes two candidates' comparable drills land in the same paired cell
+      // and receive the same target layout (src/experiments/protocol.ts).
+      // The running counter survives only so existing checkpoints keep
+      // restoring, and so a plan built before pairIndex existed still runs.
+      const counterIndex =
         spec.phase === "measured" ? this.#nextRepIndex(spec.candidateId) : null;
+      const repIndex =
+        spec.phase === "measured" ? (spec.pairIndex ?? counterIndex) : null;
 
       // Pre-trial checkpoint WITH the pending-trial marker: if the process
       // dies mid-trial, the persisted state names exactly which trial was in
@@ -588,6 +847,9 @@ export class SessionRunner {
     );
     if (!allHaveMinimum) return undefined;
 
+    // Allocation only reads per-candidate evaluations and paired
+    // comparisons, so it deliberately does NOT pass a capture-quality
+    // summary: allocation must not change because the stream was noisy.
     const optimizer = new SensitivityOptimizer(this.#definition);
     for (const trial of this.#allTrials) optimizer.addTrials([trial]);
     const decisions: AllocationDecision[] = allocateReps({
@@ -808,7 +1070,25 @@ export class SessionRunner {
         abortReason,
         progress: this.calibrationProgress(),
         recommendation,
+        instrumentation: this.#instrumentation(),
       }),
+    };
+  }
+
+  /** Shell-supplied diagnostics, plus the plan facts only the runner knows. */
+  #instrumentation(): Partial<SessionInstrumentation> {
+    const target = this.#evidenceTarget;
+    return {
+      ...(this.#ports.sessionInstrumentation?.() ?? {}),
+      modeId: target?.modeId ?? classifyPlan({
+        rounds: Math.max(1, this.#definition.stoppingCriteria.maxSearchRounds),
+        measuredRepsPerCandidatePerRound:
+          this.#definition.measuredRepsPerCandidatePerRound,
+        warmupTrialsPerCandidateBlock:
+          this.#definition.warmupTrialsPerCandidateBlock,
+      }),
+      targetValidTrialsPerCandidate: target?.targetValidTrialsPerCandidate ?? null,
+      replacement: target ? this.replacementSummary : null,
     };
   }
 

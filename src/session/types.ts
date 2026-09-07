@@ -4,7 +4,10 @@ import type { CaptureSourceMetadata } from "../capture/negotiation.ts";
 import type { TrialRecord } from "../domain/trial.ts";
 import type { TrialPlanSpec } from "../experiments/protocol.ts";
 import type { LocalJsonStore } from "../persistence/store.ts";
-import type { CalibrationProgressSnapshot } from "../results/sessionOutcome.ts";
+import type {
+  CalibrationProgressSnapshot,
+  SessionInstrumentation,
+} from "../results/sessionOutcome.ts";
 
 export interface PlannedTrial {
   spec: TrialPlanSpec;
@@ -63,9 +66,41 @@ export interface SessionRunnerPorts {
    */
   onRest?: ((rest: RestNotice | null) => void) | undefined;
   onTrialPersisted?: ((trial: TrialRecord) => void) | undefined;
+  /**
+   * A bounded replacement block is being added because measurements were lost,
+   * not because the plan was short. The player is told the count and the
+   * reason before the drills start.
+   */
+  onReplacementBlock?: ((notice: ReplacementBlockNotice) => void) | undefined;
   /** Persisted into every checkpoint (requirement E/L provenance). */
   captureSourceMetadata?: (() => CaptureSourceMetadata | null) | undefined;
   playerIdentity?: (() => { playerId: string; playerName: string }) | undefined;
+  /**
+   * Local-only session diagnostics the shell can see and the engine cannot:
+   * the capture tier that actually ran, clock-sync state, and the observed
+   * DOM timestamp lead. Folded into every SessionOutcomeReport.
+   */
+  sessionInstrumentation?:
+    | (() => Partial<SessionInstrumentation>)
+    | undefined;
+}
+
+/**
+ * Why extra drills are being added, in the player's own units.
+ *
+ * "3 additional drills needed because some measurements were unusable" — not
+ * "the session was extended". A replacement block never adds evidence beyond
+ * the mode's target; it replaces evidence the session already tried to
+ * collect and lost.
+ */
+export interface ReplacementBlockNotice {
+  blockIndex: number;
+  maxBlocks: number;
+  /** Measured drills this block contains. */
+  drills: number;
+  /** Candidate ids the drills are for, with how many each still needs. */
+  perCandidate: { candidateId: string; blindedLabel: string; needed: number }[];
+  reason: string;
 }
 
 export interface RestNotice {

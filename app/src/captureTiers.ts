@@ -21,18 +21,33 @@ import { desktopBridge } from "./desktopBridge.ts";
 
 /**
  * Why tier 1 is not the live measurement transport yet, even on a machine
- * whose helper is ready.
+ * whose helper is ready and whose clocks are now synchronized.
  *
- * The helper timestamps frames with milliseconds since ITS OWN start
- * (QueryPerformanceCounter origin). The recorder compares sample times with
- * target spawn times, which come from the renderer's `performance.now()`
- * origin. Feeding one clock's samples into the other's timeline would shift
- * every reaction time by an unknown constant — silently, and in a direction
- * nothing downstream could detect. Aligning the two origins is a measurement
- * change, not a UI change, and is deliberately not part of this pass.
+ * The clock-domain blocker is GONE: the helper answers `time-sync` probes and
+ * the transport translates every event into the renderer clock before it
+ * emits anything, with a proven bound (src/capture/timebase.ts). What remains
+ * is an integration question, not a correctness one.
+ *
+ * The arena's capture source owns three things the native helper does not:
+ * Pointer Lock, window focus, and the virtual reticle every drill is drawn
+ * against. Running native motion through it means suppressing the browser's
+ * own pointermove for the same physical movement — and getting that exactly
+ * right, because a single missed suppression applies every mouse movement
+ * twice and silently doubles the sensitivity the player is being measured at.
+ * That composite has never run on real hardware; shipping it untested in the
+ * build that exists to make measurement trustworthy would risk the very
+ * session it is meant to protect.
+ *
+ * Diagnostics runs native capture (and its clock sync) end to end today, so
+ * the path is exercised and reported honestly — it just does not yet carry
+ * the scored drills.
  */
 export const NATIVE_LIVE_BLOCKER =
-  "helper and renderer clock origins are not aligned yet (docs/NATIVE-CAPTURE.md)";
+  "native motion has not yet been integrated with the arena's Pointer Lock reticle on real hardware (docs/NATIVE-CAPTURE.md)";
+
+/** Why tier 1 was refused because the two clocks were never put on one timeline. */
+export const NATIVE_CLOCK_SYNC_BLOCKER =
+  "the capture helper's clock was never synchronized with this window's clock";
 
 export interface CaptureTierReport {
   /** The tier actually producing measured samples this session. */
@@ -51,6 +66,8 @@ export interface CaptureTierReport {
     helperReady: boolean;
     /** A capture self-test proved the stream, per docs/CAPTURE.md tier-1 rule. */
     validatedByDiagnostics: boolean;
+    /** Helper↔renderer clock offset was established during that check. */
+    clockSynchronized: boolean;
     /** Why tier 1 is not carrying this session, or null when it is. */
     rejectedBecause: string | null;
   };
@@ -65,9 +82,16 @@ export function decideCaptureTier(input: {
   shellPresent: boolean;
   platformSupported: boolean;
   helperState: string;
-  selfTest: Pick<CaptureSelfTestResult, "verdict" | "sourceKind"> | null;
+  selfTest:
+    | (Pick<CaptureSelfTestResult, "verdict" | "sourceKind"> & {
+        clockSync?: { state: string } | null | undefined;
+      })
+    | null;
   browser: PointerEventCapabilities;
-  /** Set only once native frames can share the renderer's clock origin. */
+  /**
+   * Set only once native motion is integrated with the arena's Pointer Lock
+   * reticle on real hardware. See {@link NATIVE_LIVE_BLOCKER}.
+   */
   nativeLiveTransportEnabled: boolean;
 }): CaptureTierReport {
   const helperReady = input.shellPresent && input.helperState === "ready";
@@ -75,6 +99,8 @@ export function decideCaptureTier(input: {
     input.selfTest !== null &&
     input.selfTest.sourceKind === "native" &&
     input.selfTest.verdict === "pass";
+  const clockSynchronized =
+    input.selfTest?.clockSync?.state === "established";
 
   let rejectedBecause: string | null = null;
   if (!input.shellPresent) {
@@ -86,6 +112,8 @@ export function decideCaptureTier(input: {
   } else if (!validatedByDiagnostics) {
     rejectedBecause =
       "helper is ready but unvalidated — run the capture check in Diagnostics";
+  } else if (!clockSynchronized) {
+    rejectedBecause = NATIVE_CLOCK_SYNC_BLOCKER;
   } else if (!input.nativeLiveTransportEnabled) {
     rejectedBecause = NATIVE_LIVE_BLOCKER;
   }
@@ -103,6 +131,7 @@ export function decideCaptureTier(input: {
         helperState: input.helperState,
         helperReady,
         validatedByDiagnostics,
+        clockSynchronized,
         rejectedBecause: null,
       },
       browser: input.browser,
@@ -123,6 +152,7 @@ export function decideCaptureTier(input: {
       helperState: input.helperState,
       helperReady,
       validatedByDiagnostics,
+      clockSynchronized,
       rejectedBecause,
     },
     browser: input.browser,
@@ -159,7 +189,11 @@ export async function reportCaptureTier(
     }
   }
 
-  let selfTest: Pick<CaptureSelfTestResult, "verdict" | "sourceKind"> | null = null;
+  let selfTest:
+    | (Pick<CaptureSelfTestResult, "verdict" | "sourceKind"> & {
+        clockSync?: { state: string } | null | undefined;
+      })
+    | null = null;
   if (store) {
     try {
       const paths = await store.listByPrefix("self-tests");
@@ -171,7 +205,11 @@ export async function reportCaptureTier(
         );
         const payload = loaded?.payload ?? null;
         if (payload) {
-          selfTest = { verdict: payload.verdict, sourceKind: payload.sourceKind };
+          selfTest = {
+            verdict: payload.verdict,
+            sourceKind: payload.sourceKind,
+            clockSync: payload.clockSync ?? null,
+          };
         }
       }
     } catch {
@@ -185,7 +223,8 @@ export async function reportCaptureTier(
     helperState,
     selfTest,
     browser,
-    // Flipped on by the pass that aligns helper and renderer clock origins.
+    // Flipped on by the pass that integrates native motion with the arena's
+    // Pointer Lock reticle and validates it on real hardware.
     nativeLiveTransportEnabled: false,
   });
 }

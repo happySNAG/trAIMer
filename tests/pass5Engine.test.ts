@@ -104,6 +104,21 @@ function selfTestMeta(overrides: Partial<CaptureSelfTestMeta> = {}): CaptureSelf
     deviceId: "mouse-abcd1234",
     deviceDescription: "Logitech Lightspeed",
     nominalRateHz: 1000,
+    // A native stream is only usable once its clock has been put on the
+    // renderer's timeline; the self-test now checks that explicitly.
+    clockSync: {
+      state: "established",
+      detail: "offset 123.000 ms ±0.100 ms from 6 exchanges",
+      estimate: {
+        offsetMs: 123,
+        uncertaintyHalfWidthMs: 0.1,
+        minRoundTripMs: 0.2,
+        samples: 6,
+        driftPpm: null,
+        lastSyncedAtMs: 1000,
+      },
+      maxUncertaintyMs: 2,
+    },
     transportCounters: {
       framesReceived: 1000,
       duplicateSequences: 0,
@@ -191,7 +206,7 @@ function recommendationFixture(overrides: Record<string, unknown> = {}) {
 
 describe("V1 RC version metadata", () => {
   it("freezes the RC identifier and component versions", () => {
-    expect(APP_VERSION).toBe("1.0.0-rc.7");
+    expect(APP_VERSION).toBe("1.0.0-rc.8");
     expect(OPTIMIZER_VERSION).toBe("optimizer-v3");
     expect(NATIVE_PROTOCOL_VERSION).toBe(1);
     expect(EXPECTED_HELPER_VERSION).toMatch(/^helper-/);
@@ -344,6 +359,17 @@ describe("capture self-test", () => {
     expect(result.activeMotionRateHz!).toBeGreaterThan(900);
     expect(result.clickPresses).toBeGreaterThanOrEqual(1);
     expect(result.movementSamples).toBeGreaterThan(2500);
+  });
+
+  it("REFUSES to validate a native stream whose clock was never synchronized", () => {
+    const result = analyzeCaptureSelfTest(
+      eventsAt(1000, 3000),
+      selfTestMeta({ clockSync: null }),
+      APP_VERSION,
+      ENGINE_VERSION,
+    );
+    expect(result.verdict).toBe("fail");
+    expect(result.checks.find((c) => c.name === "clock-sync")?.status).toBe("fail");
   });
 
   it("REFUSES to validate '1000 Hz' hardware that only delivers ~125 Hz", () => {

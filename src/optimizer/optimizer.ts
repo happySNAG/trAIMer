@@ -31,6 +31,7 @@ import type { CaptureQualitySummary } from "../diagnostics/captureQuality.ts";
 import {
   computeConfidence,
   dunnettAdjustedExclusionZ,
+  equivalentNormalZ,
   labelForConfidence,
 } from "./confidence.ts";
 import { buildExplanation } from "./explainability.ts";
@@ -413,7 +414,10 @@ export class SensitivityOptimizer {
       const pairedCmp = lookupComparison(paired, best.candidateId, runnerUp.candidateId);
       if (pairedCmp && pairedCmp.pairedCells >= 3 && pairedCmp.diffStandardError > 0) {
         gap = pairedCmp.diffMean;
-        z = pairedCmp.z;
+        // mean/SE over n paired cells is a t statistic on n−1 degrees of
+        // freedom. Read as a normal z it claims more evidence than a handful
+        // of cells can carry — see equivalentNormalZ().
+        z = equivalentNormalZ(pairedCmp.z, pairedCmp.pairedCells - 1);
         gapBasis = "paired";
       } else {
         gap = best.utilityMean - runnerUp.utilityMean;
@@ -435,7 +439,8 @@ export class SensitivityOptimizer {
       if (e.candidateId === best.candidateId) continue;
       const cmp = lookupComparison(paired, best.candidateId, e.candidateId);
       if (cmp && cmp.pairedCells >= 3 && cmp.diffStandardError > 0) {
-        if (cmp.z > -exclusionZ) tiedSet.add(e.candidateId);
+        const cmpZ = equivalentNormalZ(cmp.z, cmp.pairedCells - 1);
+        if (cmpZ > -exclusionZ) tiedSet.add(e.candidateId);
       } else {
         const upper = e.utilityMean + 1.96 * e.utilityStandardError;
         const bestLower = best.utilityMean - 1.96 * best.utilityStandardError;

@@ -152,7 +152,37 @@ export interface TrialPlanSpec {
   scenarioId: string;
   phase: "warmup" | "measured";
   sequenceNumber: number;
+  /**
+   * Which paired-comparison cell this measured trial belongs to.
+   *
+   * The paired model cancels scenario and instance effects by comparing two
+   * candidates on the SAME cell — `scenarioId#pairIndex` (see
+   * src/optimizer/paired.ts). For that to work, two candidates playing the
+   * same drill for the same time in the same round must land on the same
+   * index, and must be given the same target layout.
+   *
+   * Until this field existed the index was a per-candidate running counter,
+   * so candidate A's third measured drill and candidate B's third measured
+   * drill shared a cell only when their independently shuffled block orders
+   * happened to agree. Measured over 200 seeds with the standard five-
+   * candidate ladder: about 20–25 % of cells paired, and in a 5-rep block the
+   * average candidate PAIR shared one cell — some shared none. The paired
+   * comparison was running at roughly a quarter of its design power, and the
+   * shorter the session, the worse it got.
+   *
+   * `pairIndex` is the occurrence number of this scenario within this
+   * candidate's block, offset by the round. Every candidate in a round draws
+   * the identical multiset, so every occurrence has a partner BY
+   * CONSTRUCTION. Null for warm-ups, which are never scored.
+   */
+  pairIndex: number | null;
 }
+
+/**
+ * Rounds are separate exposures with their own target layouts, so their cells
+ * must not merge. Far above any plausible per-round rep count.
+ */
+export const PAIR_INDEX_ROUND_STRIDE = 1000;
 
 export function planCandidateBlocks(
   definition: ExperimentDefinition,
@@ -194,17 +224,40 @@ export function planCandidateBlocks(
     const permRng = new Rng(definition.orderSeed * 31 + round * 977 + hashString(candidateId));
     const candidateReps = repsFromAllocation(candidateId);
     if (candidateReps <= 0) continue;
-    // Per-candidate order, arranged so the same drill never runs twice in a
-    // row inside a block (when the multiset allows it).
+    // The MULTISET is a prefix of the shared draw — identical for every
+    // candidate on a full allocation, and nested for a reduced one, so a
+    // candidate that plays fewer reps still pairs on every cell it does play.
+    // Only the ORDER varies per candidate (arranged so the same drill never
+    // runs twice in a row inside a block).
+    //
+    // rc.7 shuffled the shared draw per candidate BEFORE slicing, which made
+    // a reduced allocation a random subset rather than a nested one.
     const candidateScenarios = arrangeWithoutAdjacentRepeats(
-      permRng.shuffle(sharedScenarioDraws).slice(0, candidateReps),
+      sharedScenarioDraws.slice(0, candidateReps),
       permRng,
     );
     for (const scenarioId of warmups) {
-      specs.push({ candidateId, scenarioId, phase: "warmup", sequenceNumber: seq++ });
+      specs.push({
+        candidateId,
+        scenarioId,
+        phase: "warmup",
+        sequenceNumber: seq++,
+        pairIndex: null,
+      });
     }
+    // Occurrence number per scenario, so the same drill played twice in one
+    // block occupies two distinct cells rather than collapsing into one.
+    const occurrence = new Map<string, number>();
     for (const scenarioId of candidateScenarios) {
-      specs.push({ candidateId, scenarioId, phase: "measured", sequenceNumber: seq++ });
+      const n = occurrence.get(scenarioId) ?? 0;
+      occurrence.set(scenarioId, n + 1);
+      specs.push({
+        candidateId,
+        scenarioId,
+        phase: "measured",
+        sequenceNumber: seq++,
+        pairIndex: round * PAIR_INDEX_ROUND_STRIDE + n,
+      });
     }
   }
   return specs;

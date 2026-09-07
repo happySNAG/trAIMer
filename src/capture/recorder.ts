@@ -35,6 +35,12 @@ export interface TrialRecordingRequest {
   sensitivity: SensitivityConfiguration;
   dpi: number;
   expectedSampleIntervalMs: number | null;
+  /**
+   * The capture source's declared occurrence→observation lead tolerance.
+   * Omitted (or 0) for sources that stamp events with the same clock reading
+   * the caller uses to start the trial — synthetic and replay streams.
+   */
+  timestampLeadToleranceMs?: number;
   startedAtMonotonicMs: number;
   seedTag?: string;
 }
@@ -266,6 +272,10 @@ export class TrialRecorder {
         sensitivity: req.sensitivity,
         dpi: req.dpi,
         expectedSampleIntervalMs: req.expectedSampleIntervalMs,
+        ...(req.timestampLeadToleranceMs !== undefined &&
+        req.timestampLeadToleranceMs > 0
+          ? { timestampLeadToleranceMs: req.timestampLeadToleranceMs }
+          : {}),
       },
       startedAtMonotonicMs: req.startedAtMonotonicMs,
       endedAtMonotonicMs,

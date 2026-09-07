@@ -5,7 +5,7 @@ import {
   buildHardwareValidationBundle,
   type RuntimeFacts,
 } from "../src/diagnostics/hardwareValidation.ts";
-import { APP_VERSION } from "../src/version.ts";
+import { APP_VERSION, EXPECTED_HELPER_VERSION } from "../src/version.ts";
 
 /**
  * Hardware-validation bundle (Pass 7, requirement V): assembles compact,
@@ -94,7 +94,7 @@ describe("hardware validation bundle", () => {
     expect(bundle.schemaVersion).toBe(1);
     expect(bundle.release.appVersion).toBe(APP_VERSION);
     expect(bundle.release.engineVersion).toBe("engine-v4");
-    expect(bundle.release.expectedHelperVersion).toBe("helper-1.0.0");
+    expect(bundle.release.expectedHelperVersion).toBe(EXPECTED_HELPER_VERSION);
     expect(bundle.runtime.devicePixelRatio).toBe(1.25);
     expect(bundle.runtime.estimatedRefreshHz).toBe(200);
 

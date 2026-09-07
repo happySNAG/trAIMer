@@ -27,10 +27,22 @@
  *                      "events":[{"kind":"pointer-sample"|"button", ...}]}
  *                   | {"type":"lifecycle","phase":"started"|"stopping"|"reconnecting","detail":"..."}
  *                   | {"type":"ping"}          (client answers "pong")
+ *   client → helper : {"type":"time-sync","id":"N"}
+ *   helper → client : {"type":"time-sync-reply","id":"N","helperMonotonicMs":T}
  *
  * Frames preserve RAW mouse counts (no interpolation, no smoothing, no
  * fabricated samples). Timestamps are high-resolution monotonic milliseconds
  * from helper start via QueryPerformanceCounter.
+ *
+ * CLOCK DOMAIN. Those milliseconds are counted from THIS PROCESS's start, not
+ * from the renderer's `performance.timeOrigin`. The two origins are unrelated,
+ * so a frame timestamp is meaningless to the client until it is translated.
+ * `time-sync` exists for exactly that: the client stamps its own clock before
+ * sending and after receiving, the helper reads QPC once in between and
+ * replies immediately, and the client derives the offset with a bound of half
+ * the round trip (Cristian's algorithm — see src/capture/timebase.ts). The
+ * reply is written and sent with nothing between the QPC read and the send,
+ * so the helper contributes as little as possible to that bound.
  *
  * Build (see native/windows/BUILD.md): cl /O2 /W4 traimer_capture_helper.c
  *   or: gcc -O2 -o traimer_capture_helper.exe traimer_capture_helper.c -lws2_32
@@ -46,7 +58,7 @@
 #include <string.h>
 #include <stdint.h>
 
-#define HELPER_VERSION            "helper-1.0.0"
+#define HELPER_VERSION            "helper-1.1.0"
 
 /* Reported by --version so the release pipeline can assert the shipped
    binary really is the 64-bit build (constant folded, not a runtime test:
@@ -607,6 +619,27 @@ static void handle_wm_input(HRAWINPUT hRawInput, SOCKET sock)
 /* Hello / welcome                                                     */
 /* ------------------------------------------------------------------ */
 
+/* Answers a client clock-synchronization probe.
+ *
+ * The QPC read happens as late as possible and the frame is sent immediately
+ * afterwards: everything between the client's two clock readings widens the
+ * uncertainty bound the client can prove, so this function deliberately does
+ * no formatting work before taking the reading. */
+static void send_time_sync_reply(SOCKET sock, const char *id)
+{
+    LARGE_INTEGER now;
+    QueryPerformanceCounter(&now);
+    double ms = qpc_to_ms(now);
+    JsonBuf b;
+    jb_reset(&b);
+    jb_raw(&b, "{\"type\":\"time-sync-reply\",\"id\":");
+    jb_string(&b, id);
+    jb_raw(&b, ",\"helperMonotonicMs\":");
+    jb_double(&b, ms);
+    jb_raw(&b, "}");
+    jb_send(&b, sock);
+}
+
 static void send_welcome(SOCKET sock)
 {
     JsonBuf b;
@@ -620,7 +653,7 @@ static void send_welcome(SOCKET sock)
     const wchar_t *wname = primary_device_name();
     WideCharToMultiByte(CP_UTF8, 0, wname, -1, desc, (int)sizeof(desc), NULL, NULL);
     jb_string(&b, desc);
-    jb_raw(&b, ",\"nominalRateHz\":1000,\"timeOriginNote\":\"monotonic ms from helper process start (QueryPerformanceCounter)\",\"helperVersion\":");
+    jb_raw(&b, ",\"nominalRateHz\":1000,\"timeOriginNote\":\"monotonic ms from helper process start (QueryPerformanceCounter); translate to the client clock with time-sync\",\"supportsTimeSync\":true,\"helperVersion\":");
     jb_string(&b, HELPER_VERSION);
     jb_raw(&b, "}");
     jb_send(&b, sock);
@@ -923,6 +956,16 @@ int main(int argc, char **argv)
                 if (plen >= 0) {
                     if (opcode == 0x8) break; /* close frame */
                     if (opcode == 0x9) send_text(client, "\x8A\x00"); /* pong */
+                    if (opcode == 0x1) {
+                        char mtype[32] = { 0 };
+                        json_find_string(payload, "type", mtype, sizeof(mtype));
+                        if (!strcmp(mtype, "time-sync")) {
+                            char syncId[32] = { 0 };
+                            json_find_string(payload, "id", syncId,
+                                             sizeof(syncId));
+                            send_time_sync_reply(client, syncId);
+                        }
+                    }
                     memmove(rx, rx + offset, (size_t)(rxLen - (int)offset));
                     rxLen -= (int)offset;
                     rx[rxLen] = '\0';

@@ -103,9 +103,57 @@ describe("UI/engine contract (static audit of app/src)", () => {
     expect(main).toContain("planNextTest");
     expect(main).toContain("runPreflightChecks");
     const results = sources.get("app/src/resultsView.ts") ?? "";
-    // Confidence tone derives from the engine label field.
-    expect(results).toContain("confidenceLabelTone(fr.confidenceLabel)");
+    // How strongly a result may be PRESENTED is an engine decision, not a UI
+    // one: the view asks `classifyRecommendation` (src/results/
+    // recommendationState.ts) for the title, the tone and whether the range
+    // or the point estimate leads, so the words, the colour and the layout
+    // can never disagree with the confidence the optimizer produced.
+    expect(results).toContain("classifyRecommendation({");
+    expect(results).toContain("presentation.tone");
+    expect(results).toContain("presentation.emphasizeRange");
+    // The view must not invent its own confidence thresholds.
+    expect(/confidence\s*[<>]=?\s*0\.\d/.test(results)).toBe(false);
+    // The legacy (pre-FinalResult) path still takes its tone from the engine
+    // label field rather than re-deriving one from the number.
     expect(results).toContain("confidenceLabelTone(rec.confidenceLabel)");
+    // Plain-language aim tendency is an engine claim with its own support
+    // test, never a sentence the UI composes from two percentages.
+    expect(results).toContain("describeAimTendency({");
+    // Every exclusion sentence comes from the engine's own explanation table.
+    expect(results).toContain("explainExclusions(");
+    expect(results).toContain("summarizeExclusions(");
+  });
+
+  /**
+   * Pass 14. The default results view answers the player's five questions and
+   * nothing else; every statistic rc.7 printed above the fold is still
+   * rendered, inside Advanced results.
+   */
+  it("keeps statistical detail under Advanced results rather than deleting it", () => {
+    const results = sources.get("app/src/resultsView.ts") ?? "";
+    const advancedStart = results.indexOf("function renderAdvancedResults(");
+    expect(advancedStart).toBeGreaterThan(0);
+    const advanced = results.slice(advancedStart);
+    // Nothing statistical was discarded to simplify the first screen.
+    for (const kept of [
+      "candidateComparisons",
+      "utilityStandardError",
+      "scenarioContributions",
+      "searchAdequacyClassification",
+      "boundaryStatus",
+      "captureQualityGrade",
+      "rationaleLines",
+      "jsonBlock(fr)",
+      "jsonBlock(rec)",
+    ]) {
+      expect(advanced).toContain(kept);
+    }
+    // And none of it is rendered before the player-facing summary.
+    const summaryEnd = results.indexOf("function renderAdvancedResults(");
+    const defaultView = results.slice(0, summaryEnd);
+    expect(defaultView).not.toContain("jsonBlock(");
+    expect(defaultView).not.toContain("scenarioContributions");
+    expect(defaultView).not.toContain("utilityStandardError");
   });
 
   it("history summaries carry the engine confidence label (no numeric reinterpretation)", () => {

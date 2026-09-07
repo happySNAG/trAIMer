@@ -10,6 +10,7 @@ import { gatherRuntimeFacts } from "./preflightClient.ts";
 import type { LocalDiagnosticLog } from "../../src/diagnostics/localLog.ts";
 import type { CaptureSink } from "../../src/capture/events.ts";
 import type { NativeFrame } from "../../src/capture/native.ts";
+import type { ClockSyncStatus } from "../../src/capture/timebase.ts";
 import type { LocalJsonStore } from "../../src/persistence/store.ts";
 import { el, clear, downloadJson } from "./dom.ts";
 import {
@@ -224,7 +225,24 @@ export function renderDiagnosticsView(
       onError: (err) => {
         log.error("NATIVE_PROBE_FAILED", err.message);
       },
+      onClockSync: (status) => {
+        clockSyncStatus = status;
+        log.log("info", "clock-sync", {
+          state: status.state,
+          offsetMs:
+            status.estimate !== null ? Number(status.estimate.offsetMs.toFixed(3)) : "",
+          uncertaintyMs:
+            status.estimate !== null
+              ? Number(status.estimate.uncertaintyHalfWidthMs.toFixed(3))
+              : "",
+        });
+      },
     });
+    // Where helper↔renderer clock synchronization stood during this check.
+    // Recorded into the persisted self-test: a native stream whose timestamps
+    // were never translated into this window's clock cannot carry a
+    // measurement, so the tier decision reads this back later.
+    let clockSyncStatus: ClockSyncStatus | null = null;
     const frames: NativeFrame[] = [];
     let seq = 0;
     const startedAt = performance.now();
@@ -306,6 +324,7 @@ export function renderDiagnosticsView(
           deviceId: source.header.deviceId,
           deviceDescription: source.header.deviceDescription,
           nominalRateHz: source.header.nominalRateHz,
+          clockSync: clockSyncStatus ?? source.clockSync,
           transportCounters: {
             framesReceived: source.counters.framesReceived,
             duplicateSequences: source.counters.duplicateSequences,
@@ -376,6 +395,32 @@ export function renderDiagnosticsView(
           `~${report.observedRateHz.toFixed(0)} Hz observed`,
           report.requestedRateHz ? `device claims ${report.requestedRateHz} Hz` : undefined,
         ),
+        (() => {
+          // The helper counts milliseconds from its own process start. Until
+          // that origin is measured against this window's clock, its
+          // timestamps cannot be placed on the same timeline as the drills —
+          // so this tile is the difference between a usable native stream and
+          // an unusable one, and it says which.
+          const sync = clockSyncStatus ?? source.clockSync;
+          const est = sync.estimate;
+          const tone: Tone =
+            sync.state === "established"
+              ? "ok"
+              : sync.state === "syncing"
+                ? "warn"
+                : "danger";
+          return diagTile(
+            "Clock sync",
+            "clock",
+            tone,
+            sync.state === "established"
+              ? `±${(est?.uncertaintyHalfWidthMs ?? 0).toFixed(3)} ms`
+              : sync.state,
+            est !== null
+              ? `offset ${est.offsetMs.toFixed(3)} ms from ${est.samples} exchanges${est.driftPpm !== null ? ` · drift ${est.driftPpm.toFixed(1)} ppm` : ""}`
+              : sync.detail,
+          );
+        })(),
         diagTile(
           "Timing stability",
           "clock",

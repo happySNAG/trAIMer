@@ -6,6 +6,7 @@ import {
 import type { NativeTransportError } from "../src/capture/nativeClient.ts";
 import type { CaptureSink } from "../src/capture/events.ts";
 import { NATIVE_CAPTURE_PROTOCOL_VERSION } from "../src/capture/native.ts";
+import { EXPECTED_HELPER_VERSION } from "../src/version.ts";
 
 type Loopback = ReturnType<typeof createLoopbackSocketPair>;
 
@@ -40,6 +41,43 @@ function handshake(pair: Loopback, source: NativeTransportCaptureSource): void {
   pair.server.deliverClientToServer();
 }
 
+/**
+ * Answers the client's `time-sync` chain so the transport can establish the
+ * helper→renderer offset. No event reaches a sink before this completes: an
+ * untranslated helper timestamp is in the wrong clock domain entirely.
+ */
+function installHelperResponder(
+  pair: Loopback,
+  source: NativeTransportCaptureSource,
+  record?: string[],
+): void {
+  pair.server.onMessage((data) => {
+    record?.push(data);
+    let msg: { type?: string; id?: string };
+    try {
+      msg = JSON.parse(data) as { type?: string; id?: string };
+    } catch {
+      return;
+    }
+    if (msg.type === "time-sync" && msg.id) {
+      source.handleRawMessage(
+        JSON.stringify({
+          type: "time-sync-reply",
+          id: msg.id,
+          helperMonotonicMs: performance.now() - 1000,
+        }),
+      );
+    }
+  });
+}
+
+function completeSync(pair: Loopback, source: NativeTransportCaptureSource): void {
+  for (let i = 0; i < 60 && source.clockSync.state === "syncing"; i++) {
+    pair.server.deliverClientToServer();
+  }
+  expect(source.clockSync.state).toBe("established");
+}
+
 const WELCOME = JSON.stringify({
   type: "welcome",
   protocolVersion: NATIVE_CAPTURE_PROTOCOL_VERSION,
@@ -48,7 +86,7 @@ const WELCOME = JSON.stringify({
   deviceDescription: "Test mouse",
   nominalRateHz: 1000,
   timeOriginNote: "helper start",
-  helperVersion: "helper-1.0.0",
+  helperVersion: EXPECTED_HELPER_VERSION,
 });
 
 function frame(seq: number, tMs: number, dx = 2): string {
@@ -64,8 +102,8 @@ describe("native transport protocol", () => {
   it("performs the versioned hello/welcome handshake and streams frames", () => {
     const pair = createLoopbackSocketPair();
     const sentToServer: string[] = [];
-    pair.server.onMessage((data) => sentToServer.push(data));
     const { source, events } = makeSource(() => pair.client);
+    installHelperResponder(pair, source, sentToServer);
 
     handshake(pair, source);
 
@@ -82,6 +120,7 @@ describe("native transport protocol", () => {
     expect(source.status).toBe("streaming");
     expect(source.header?.deviceId).toBe("mouse-1");
     expect(source.descriptor.nominalSampleIntervalMs).toBeCloseTo(1, 6);
+    completeSync(pair, source);
 
     source.handleRawMessage(frame(0, 10));
     source.handleRawMessage(frame(1, 11));
@@ -125,7 +164,7 @@ describe("native transport protocol", () => {
     const { source, errors } = makeSource(() => pair.client);
     pair.open();
     source.handleRawMessage(
-      JSON.stringify({ type: "welcome", protocolVersion: NATIVE_CAPTURE_PROTOCOL_VERSION, sourceKind: "native", deviceId: "d", deviceDescription: "", nominalRateHz: "many", timeOriginNote: "", helperVersion: "helper-1.0.0" }),
+      JSON.stringify({ type: "welcome", protocolVersion: NATIVE_CAPTURE_PROTOCOL_VERSION, sourceKind: "native", deviceId: "d", deviceDescription: "", nominalRateHz: "many", timeOriginNote: "", helperVersion: EXPECTED_HELPER_VERSION }),
     );
     expect(errors).toHaveLength(1);
     expect(errors[0]!.message).toMatch(/malformed welcome/);
@@ -135,8 +174,10 @@ describe("native transport protocol", () => {
   it("rejects malformed JSON, malformed events, and bad sequences loudly", () => {
     const pair = createLoopbackSocketPair();
     const { source, errors } = makeSource(() => pair.client);
+    installHelperResponder(pair, source);
     pair.open();
     source.handleRawMessage(WELCOME);
+    completeSync(pair, source);
 
     source.handleRawMessage("not json at all");
     expect(errors.at(-1)!.message).toMatch(/malformed message/);
@@ -161,8 +202,10 @@ describe("native transport protocol", () => {
   it("detects duplicate sequences and counts gaps without fabrication", () => {
     const pair = createLoopbackSocketPair();
     const { source, errors } = makeSource(() => pair.client);
+    installHelperResponder(pair, source);
     pair.open();
     source.handleRawMessage(WELCOME);
+    completeSync(pair, source);
 
     source.handleRawMessage(frame(0, 1));
     source.handleRawMessage(frame(0, 2)); // duplicate → fail closed
@@ -173,8 +216,10 @@ describe("native transport protocol", () => {
     // Fresh stream for the gap case.
     const pair2 = createLoopbackSocketPair();
     const { source: s2, errors: e2, events: ev2 } = makeSource(() => pair2.client);
+    installHelperResponder(pair2, s2);
     pair2.open();
     s2.handleRawMessage(WELCOME);
+    completeSync(pair2, s2);
     s2.handleRawMessage(frame(0, 1));
     s2.handleRawMessage(frame(5, 5));
     expect(e2).toHaveLength(0); // gaps surface as counters, not fabricated data
@@ -186,8 +231,10 @@ describe("native transport protocol", () => {
   it("non-monotonic timestamps fail the stream", () => {
     const pair = createLoopbackSocketPair();
     const { source, errors } = makeSource(() => pair.client);
+    installHelperResponder(pair, source);
     pair.open();
     source.handleRawMessage(WELCOME);
+    completeSync(pair, source);
     source.handleRawMessage(JSON.stringify({
       type: "frame", sequence: 0, tMonotonicMs: 10,
       events: [{ kind: "pointer-sample", tMs: 10, dx: 1, dy: 1 }],

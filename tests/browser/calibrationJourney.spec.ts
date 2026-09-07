@@ -55,10 +55,18 @@ test.describe("calibration journey", () => {
 
     // WHAT HAPPENED — always, before anything else.
     await expect(results).toContainText("Calibration complete");
-    await expect(results).toContainText("Calibration 100%");
-    await expect(results).toContainText("Drills completed");
+    await expect(results).toContainText("measured drills");
 
-    // WHAT THE EVIDENCE IS — shown even without a recommendation.
+    // WHAT THE EVIDENCE IS — the player-facing cards come FIRST.
+    await expect(results).toContainText("How you performed");
+    await expect(results).toContainText("Accuracy");
+    await expect(results).toContainText("Aim control");
+    await expect(results).toContainText("Tracking");
+    await expect(results).toContainText("Evidence quality");
+
+    // …and the engineering detail is still all there, under Advanced results.
+    await expect(results).toContainText("Advanced results");
+    await expect(results).toContainText("100% · 15 of 15 drills");
     await expect(results).toContainText("The evidence so far");
     await expect(results).toContainText("Valid for scoring");
     await expect(results).toContainText("Hit accuracy");
@@ -139,13 +147,22 @@ test.describe("calibration journey", () => {
     // The exact reason, not a generic "session ended".
     await expect(results).toContainText("You ended this calibration early");
     await expect(results).toContainText("You ended the session from the arena controls");
-    // Said ONCE. The reason must not be echoed after the ending's own wording.
-    const reasonText = (await results.textContent()) ?? "";
+    // Said ONCE in prose. rc.6 shipped "You ended the session from the arena
+    // controls. You ended the session from the arena controls." The raw
+    // contract dumps under Advanced results legitimately carry the same
+    // sentence as a field value, so they are excluded from the count.
+    const proseText = await page.evaluate(() => {
+      const view = document.getElementById("view-results");
+      if (!view) return "";
+      const clone = view.cloneNode(true) as HTMLElement;
+      for (const pre of clone.querySelectorAll("pre.json")) pre.remove();
+      return clone.textContent ?? "";
+    });
     expect(
-      reasonText.split("You ended the session from the arena controls").length - 1,
+      proseText.split("You ended the session from the arena controls").length - 1,
     ).toBe(1);
     // Progress is honest: it did NOT finish.
-    await expect(results).not.toContainText("Calibration 100%");
+    await expect(results).not.toContainText("100% ·");
     await expect(results).toContainText("Every drill you finished was saved the moment it finished");
     await expect(results).toContainText("The evidence so far");
     await expect(results).toContainText("More data needed");

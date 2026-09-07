@@ -18,6 +18,8 @@ TrialRecorder → validation → metrics → optimizer   (unchanged pipeline)
 ## Wire protocol (v1)
 
 - client → helper: `{"type":"hello","protocolVersion":1,"sessionToken":T,"appVersion":V}`
+- client → helper: `{"type":"time-sync","id":"N"}`
+- helper → client: `{"type":"time-sync-reply","id":"N","helperMonotonicMs":T}`
 - helper → client: `welcome` (protocolVersion, deviceId/description,
   nominalRateHz, timeOriginNote, helperVersion) **or** `reject{reason}`
 - helper → client: frames
@@ -33,7 +35,7 @@ TrialRecorder → validation → metrics → optimizer   (unchanged pipeline)
 | --- | --- |
 | physical raw counts | RAWMOUSE lLastX/lLastY (relative devices only; absolute skipped) |
 | 125/250/500/1000 Hz | event-driven WM_INPUT — delivers whatever the hardware/OS deliver |
-| monotonic timestamps | QueryPerformanceCounter, ms since helper start |
+| monotonic timestamps | QueryPerformanceCounter, ms since helper start — **translated into the renderer clock before any event is emitted** (see [CLOCK-DOMAINS.md](CLOCK-DOMAINS.md)) |
 | sequence numbers | per-connection epoch, continuity checked client-side |
 | buttons | RI_MOUSE_BUTTON_1/2/3 down/up mapped to press/release |
 | device metadata | GetRawInputDeviceInfo (interface path → stable hashed id) |

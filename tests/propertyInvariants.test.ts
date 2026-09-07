@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { Rng } from "../src/util/rng.ts";
 import { TrialRecorder } from "../src/capture/recorder.ts";
 import { validateTrial, DEFAULT_VALIDATION_CONFIG } from "../src/validation/validateTrial.ts";
+import { EXPECTED_HELPER_VERSION } from "../src/version.ts";
 import {
   NativeTransportCaptureSource,
   createLoopbackSocketPair,
@@ -201,7 +202,7 @@ describe("property invariants (deterministic randomized)", () => {
           deviceDescription: "",
           nominalRateHz: 1000,
           timeOriginNote: "",
-          helperVersion: "helper-1.0.0",
+          helperVersion: EXPECTED_HELPER_VERSION,
         }),
       );
       // Fuzz: corrupt one aspect of a valid frame.

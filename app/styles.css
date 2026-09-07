@@ -2309,3 +2309,191 @@ body.drill-tracking .run-bottombar {
   gap: 12px;
   margin-top: 6px;
 }
+
+/* ===========================================================================
+   Pass 14 — calibration length modes, player-first results, advanced results
+   =========================================================================== */
+
+/* ---- setup: calibration length -------------------------------------------
+   Three cards, one selected. The selected state is carried by a border and a
+   background, never by colour alone, and `aria-pressed` carries it for
+   assistive technology. */
+.mode-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 12px;
+}
+
+@media (max-width: 900px) {
+  .mode-grid { grid-template-columns: 1fr; }
+}
+
+.mode-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  text-align: left;
+  padding: 16px;
+  border-radius: var(--radius-s);
+  border: 1px solid var(--line-1);
+  background: var(--bg-0);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  transition: border-color 140ms var(--ease), background 140ms var(--ease), transform 140ms var(--ease);
+}
+
+.mode-card:hover { border-color: var(--line-2); transform: translateY(-1px); }
+.mode-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.mode-card.selected {
+  border-color: rgba(200, 242, 78, 0.55);
+  background:
+    radial-gradient(420px 140px at 50% 0%, rgba(200, 242, 78, 0.08), transparent 70%),
+    var(--bg-0);
+  box-shadow: inset 0 0 0 1px rgba(200, 242, 78, 0.18);
+}
+
+.mode-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.mode-card-title { font-size: 16px; font-weight: 700; }
+.mode-card-tagline { margin: 0; color: var(--text-2); font-size: 12.5px; }
+
+.mode-card-facts {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.mode-fact {
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: var(--bg-1);
+  border: 1px solid var(--line-1);
+}
+
+.mode-card-evidence { margin: 0; font-size: 12px; color: var(--text-1); }
+.mode-card-claim { margin: 0; font-size: 12px; color: var(--text-2); line-height: 1.45; }
+
+.setup-capture { display: flex; flex-direction: column; gap: 8px; }
+.setup-capture-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* ---- results: headline ---------------------------------------------------
+   The rule: a low-confidence value is never typeset like a strong one. When
+   the engine cannot back the point estimate, `.range-first` shrinks the
+   number and the range bar carries the result. */
+.result-headline .result-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--line-1);
+  background: var(--bg-0);
+  margin-bottom: 4px;
+}
+
+.result-status-title { font-weight: 700; font-size: 13px; }
+.result-status-strength { font-size: 12px; color: var(--text-2); }
+
+.sens-headline { display: flex; flex-direction: column; gap: 2px; }
+
+.sens-headline.range-first .sens-big {
+  font-size: 30px;
+  color: var(--text-1);
+  opacity: 0.82;
+}
+
+.sens-headline.range-first .sens-axis { opacity: 0.7; }
+
+.range-lead {
+  margin: 10px 0 4px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--warn);
+  line-height: 1.5;
+}
+
+.result-summary {
+  margin: 8px 0 0;
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--text-1);
+}
+
+/* ---- results: player cards ---- */
+.player-cards {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+@media (max-width: 1100px) {
+  .player-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 620px) {
+  .player-cards { grid-template-columns: 1fr; }
+}
+
+/* ---- results: next steps ---- */
+.next-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+
+/* ---- results: exclusions ---- */
+.exclusion-summary {
+  margin: 0 0 10px;
+  font-size: 13.5px;
+  line-height: 1.55;
+}
+
+.exclusion-row {
+  padding: 10px 0;
+  border-top: 1px solid var(--line-1);
+}
+
+.exclusion-row:first-child { border-top: none; }
+
+.exclusion-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+
+.exclusion-count { font-weight: 800; font-size: 13px; }
+.exclusion-label { font-weight: 600; font-size: 13px; }
+.exclusion-action { margin: 4px 0 0; font-size: 12.5px; color: var(--text-1); }
+
+/* ---- results: advanced ---- */
+.advanced-results .advanced-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.advanced-results .advanced-body > .card { background: var(--bg-0); }
+
+/* ---- run screen: replacement block notice ---- */
+.replacement-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--warn);
+}

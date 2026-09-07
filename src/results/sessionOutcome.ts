@@ -9,6 +9,7 @@ import {
   median,
 } from "../metrics/stats.ts";
 import { APP_VERSION, ENGINE_VERSION } from "../version.ts";
+import type { CalibrationModeId } from "../experiments/sessionModes.ts";
 
 /**
  * What the player is told happened to their calibration session, and what
@@ -111,6 +112,54 @@ export interface SessionPerformanceSummary {
   /** Coefficient of variation of acquisition time; lower is steadier. */
   acquisitionTimeCv: number | null;
   trackingTrials: number;
+  /** Measured drills excluded, counted by engine reason code. */
+  exclusionsByReason: Record<string, number>;
+}
+
+/**
+ * Everything a second real-hardware session needs to be diagnosable without
+ * showing a player raw debug output.
+ *
+ * Local only. Nothing here is transmitted; it is persisted with the session
+ * and rendered under Advanced results and in Diagnostics.
+ */
+export interface SessionInstrumentation {
+  /** The capture path that actually produced the measured samples. */
+  captureTier: number | null;
+  captureTierCaption: string | null;
+  captureTierDetail: string | null;
+  /** Why native high-rate capture did not carry this session, if it did not. */
+  nativeRejectedBecause: string | null;
+  /** Helper↔renderer clock synchronization state at session start. */
+  clockSyncState: string | null;
+  clockSyncDetail: string | null;
+  clockOffsetMs: number | null;
+  clockSyncUncertaintyMs: number | null;
+  /**
+   * Observed occurrence→observation lead of the DOM capture stream. The
+   * distribution that proves this machine's input delivery sits inside the
+   * tolerance the validator applies.
+   */
+  timestampLead: {
+    samples: number;
+    maxLeadMs: number;
+    meanLeadMs: number | null;
+    toleranceMs: number;
+    aheadOfNow: number;
+    foreignDomain: number;
+    missing: number;
+  } | null;
+  /** Calibration mode the session was planned under. */
+  modeId: CalibrationModeId | null;
+  targetValidTrialsPerCandidate: number | null;
+  replacement: {
+    blocksRun: number;
+    drillsRun: number;
+    maxBlocks: number;
+    maxDrills: number;
+  } | null;
+  /** Valid measured drills per candidate, by eDPI (candidates are unblinded here). */
+  validTrialsByCandidateEdpi: { edpi: number; valid: number }[];
 }
 
 export interface SessionOutcomeReport {
@@ -129,6 +178,11 @@ export interface SessionOutcomeReport {
   sufficiency: EvidenceSufficiency;
   /** True when `sufficiency.sufficient` AND a recommendation was produced. */
   recommendationAvailable: boolean;
+  /**
+   * Local diagnostics for this session. Optional so a report loaded from an
+   * earlier build still parses.
+   */
+  instrumentation?: SessionInstrumentation;
 }
 
 export interface SessionOutcomeInput {
@@ -140,6 +194,8 @@ export interface SessionOutcomeInput {
   progress: CalibrationProgressSnapshot;
   /** The optimizer's output, when one was produced. */
   recommendation?: Recommendation | null | undefined;
+  /** Local-only diagnostics gathered by the shell during the session. */
+  instrumentation?: Partial<SessionInstrumentation> | null | undefined;
 }
 
 const CLICK_TO_HIT_KINDS = new Set(["flick-static", "flick-dynamic", "target-switch"]);
@@ -175,7 +231,200 @@ export function buildSessionOutcomeReport(
     sufficiency,
     recommendationAvailable:
       sufficiency.sufficient && (input.recommendation ?? null) !== null,
+    instrumentation: buildInstrumentation(input, performance),
   };
+}
+
+function buildInstrumentation(
+  input: SessionOutcomeInput,
+  performance: SessionPerformanceSummary,
+): SessionInstrumentation {
+  const provided = input.instrumentation ?? {};
+  const validByEdpi: { edpi: number; valid: number }[] = [];
+  for (const candidate of input.definition.candidates) {
+    let valid = 0;
+    for (const trial of input.trials) {
+      if (trial.phase !== "measured") continue;
+      if (trial.validity.status !== "valid") continue;
+      if (trial.candidateId !== candidate.id) continue;
+      valid++;
+    }
+    validByEdpi.push({
+      edpi: Math.round(input.definition.dpi * candidate.sensitivity.sensX),
+      valid,
+    });
+  }
+  void performance;
+  return {
+    captureTier: provided.captureTier ?? null,
+    captureTierCaption: provided.captureTierCaption ?? null,
+    captureTierDetail: provided.captureTierDetail ?? null,
+    nativeRejectedBecause: provided.nativeRejectedBecause ?? null,
+    clockSyncState: provided.clockSyncState ?? null,
+    clockSyncDetail: provided.clockSyncDetail ?? null,
+    clockOffsetMs: provided.clockOffsetMs ?? null,
+    clockSyncUncertaintyMs: provided.clockSyncUncertaintyMs ?? null,
+    timestampLead: provided.timestampLead ?? null,
+    modeId: provided.modeId ?? null,
+    targetValidTrialsPerCandidate: provided.targetValidTrialsPerCandidate ?? null,
+    replacement: provided.replacement ?? null,
+    validTrialsByCandidateEdpi: validByEdpi,
+  };
+}
+
+/**
+ * Player-facing explanations for why measured drills could not be scored.
+ *
+ * A player should never have to know what "broken timestamps" means. Each
+ * entry says, in one sentence, what actually happened and whether it is
+ * something they can change. The technical code stays available beside it.
+ */
+export interface ExclusionExplanation {
+  code: string;
+  count: number;
+  /** Short label for a chip. */
+  label: string;
+  /** One sentence of plain language. */
+  plain: string;
+  /** What (if anything) the player can do. Null when nothing is asked of them. */
+  action: string | null;
+  /** True when this category indicates an app defect rather than the player. */
+  softwareFault: boolean;
+}
+
+const EXCLUSION_EXPLANATIONS: Record<
+  string,
+  { label: string; plain: string; action: string | null; softwareFault: boolean }
+> = {
+  IMPOSSIBLE_TIMESTAMPS: {
+    label: "Unreliable input timing",
+    plain:
+      "The timing of the mouse data for these drills could not be trusted, so they were not scored.",
+    action: null,
+    softwareFault: true,
+  },
+  IMPOSSIBLE_MOVEMENT: {
+    label: "Impossible movement",
+    plain:
+      "The cursor appeared to jump further than a hand can move in the time available — usually a driver or macro layer injecting movement.",
+    action: "Turn off mouse macros, smoothing or acceleration software and retest.",
+    softwareFault: false,
+  },
+  LARGE_SAMPLE_GAP: {
+    label: "Mouse data dropped out",
+    plain:
+      "The mouse stopped reporting mid-drill for long enough that the aim path has a hole in it.",
+    action: "Close background apps that hog the CPU, and check the mouse cable or receiver.",
+    softwareFault: false,
+  },
+  INSUFFICIENT_SAMPLES: {
+    label: "Too little movement",
+    plain: "Too few mouse samples arrived during these drills to measure anything.",
+    action: null,
+    softwareFault: false,
+  },
+  MISSING_TARGET_APPEARANCE: {
+    label: "No target appeared",
+    plain: "The drill ended before a target was shown, so there was nothing to measure.",
+    action: null,
+    softwareFault: true,
+  },
+  POINTER_LOCK_LOSS: {
+    label: "Mouse was released",
+    plain:
+      "Windows took the mouse back mid-drill (Esc, Alt-Tab, or another window stealing focus).",
+    action: "Keep the trAIMer window focused for the whole session.",
+    softwareFault: false,
+  },
+  TAB_HIDDEN: {
+    label: "Window was hidden",
+    plain: "The window was minimised or covered mid-drill.",
+    action: "Keep the trAIMer window in front for the whole session.",
+    softwareFault: false,
+  },
+  FOCUS_LOSS: {
+    label: "Window lost focus",
+    plain: "Another window took focus mid-drill.",
+    action: "Keep the trAIMer window focused for the whole session.",
+    softwareFault: false,
+  },
+  RESIZE_DURING_TRIAL: {
+    label: "Window changed size",
+    plain: "The window was resized mid-drill, which changes what the aim distances mean.",
+    action: "Leave the window size alone once a session has started.",
+    softwareFault: false,
+  },
+  CONFIG_MISMATCH: {
+    label: "Settings changed mid-session",
+    plain:
+      "The drill ran at a different sensitivity or DPI than it was planned for, so it cannot be compared with the rest.",
+    action: "Do not change mouse DPI or in-game sensitivity during a calibration.",
+    softwareFault: true,
+  },
+  DUPLICATE_CLICKS: {
+    label: "Double clicks",
+    plain: "More clicks arrived than the drill asked for, usually a bouncing mouse switch.",
+    action: "One deliberate click per target; a worn switch can double-fire on its own.",
+    softwareFault: false,
+  },
+  CLICK_BEFORE_TARGET_APPEARANCE: {
+    label: "Clicked before the target",
+    plain: "A click landed before the target appeared, so the reaction cannot be measured.",
+    action: "Wait for the target rather than pre-firing.",
+    softwareFault: false,
+  },
+  TRIAL_TIMEOUT: {
+    label: "Ran out of time",
+    plain: "No shot was fired before the drill's window closed.",
+    action: null,
+    softwareFault: false,
+  },
+  TRIAL_ABORTED_BY_USER: {
+    label: "Drill was interrupted",
+    plain: "The drill was stopped before it finished.",
+    action: null,
+    softwareFault: false,
+  },
+};
+
+export function explainExclusions(
+  byReason: Record<string, number>,
+): ExclusionExplanation[] {
+  return Object.entries(byReason)
+    .filter(([, count]) => count > 0)
+    .sort((a, b) => b[1] - a[1])
+    .map(([code, count]) => {
+      const known = EXCLUSION_EXPLANATIONS[code];
+      if (known) return { code, count, ...known };
+      const words = code.toLowerCase().replaceAll("_", " ");
+      return {
+        code,
+        count,
+        label: words.charAt(0).toUpperCase() + words.slice(1),
+        plain: `${count} drill(s) were excluded for: ${words}.`,
+        action: null,
+        softwareFault: false,
+      };
+    });
+}
+
+/** The single sentence shown before the per-reason breakdown. */
+export function summarizeExclusions(
+  excluded: number,
+  measured: number,
+  byReason: Record<string, number>,
+): string {
+  if (excluded === 0) {
+    return measured === 0
+      ? "No measured drills were completed."
+      : "Every measured drill produced usable data.";
+  }
+  const top = explainExclusions(byReason)[0];
+  const noun = excluded === 1 ? "measurement" : "measurements";
+  if (!top) {
+    return `${excluded} ${noun} out of ${measured} could not be used for scoring.`;
+  }
+  return `${excluded} of ${measured} ${noun} could not be used for scoring. ${top.plain}`;
 }
 
 /**
@@ -292,6 +541,19 @@ export function summarizePerformance(
   const warmup = trials.filter((t) => t.phase === "warmup");
   const validMeasured = measured.filter((t) => t.validity.status === "valid");
 
+  // Counted per DRILL, not per reason: a drill excluded for two reasons is one
+  // lost measurement, and attributing it to its most severe reason keeps the
+  // breakdown summing to the excluded total the player is shown.
+  const exclusionsByReason: Record<string, number> = {};
+  for (const trial of measured) {
+    if (trial.validity.status === "valid") continue;
+    const reasons = trial.validity.reasons;
+    const primary =
+      reasons.find((r) => r.severity === "fatal") ?? reasons[0] ?? null;
+    const code = primary?.code ?? "UNKNOWN";
+    exclusionsByReason[code] = (exclusionsByReason[code] ?? 0) + 1;
+  }
+
   const clickTrials = validMeasured.filter((t) =>
     CLICK_TO_HIT_KINDS.has(t.scenarioKind),
   );
@@ -345,6 +607,7 @@ export function summarizePerformance(
     acquisitionTimeCv:
       acquisition.length >= 3 ? coefficientOfVariation(acquisition) : null,
     trackingTrials: trackingTrials.length,
+    exclusionsByReason,
   };
 }
 

@@ -31,6 +31,9 @@ export const AUDIT_CATEGORIES = [
    * was persisted. Recorded rather than silently skipped.
    */
   "evidence-insufficient",
+  "replacement-block-started",
+  "replacement-block-finished",
+  "replacement-stopped",
 ] as const;
 
 export type AuditCategory = (typeof AUDIT_CATEGORIES)[number];

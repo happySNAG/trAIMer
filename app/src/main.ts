@@ -1,4 +1,4 @@
-import { renderSetupView } from "./setupView.ts";
+import { renderSetupCaptureStatus, renderSetupView } from "./setupView.ts";
 import { loadSettings, type AppSettings } from "./state.ts";
 import {
   BrowserRunController,
@@ -211,6 +211,7 @@ function activate(tab: string): void {
       clear(resumeContainer);
       void mountResumeList(resumeContainer);
     }
+    void mountSetupCaptureStatus();
   }
   if (tab === "data") {
     void renderDataView(views.data).catch((err) => {
@@ -336,6 +337,7 @@ async function renderResults(): Promise<void> {
       finalResult: lastOutcomeReport.recommendationAvailable ? lastFinalResult : null,
       outcome: lastOutcomeReport,
       onStartTest: () => activate("setup"),
+      onRunCaptureCheck: () => activate("diagnostics"),
       onContinueCalibration: lastOutcomeReport.recommendationAvailable
         ? null
         : () => void continueCalibration(experimentId),
@@ -348,6 +350,7 @@ async function renderResults(): Promise<void> {
       trialsAnalyzed: lastTrialsAnalyzed.count,
       finalResult: lastFinalResult,
       onStartTest: () => activate("setup"),
+      onRunCaptureCheck: () => activate("diagnostics"),
     });
     return;
   }
@@ -389,6 +392,7 @@ async function renderResults(): Promise<void> {
         trialsAnalyzed: rec.evidence.trialsAnalyzed,
         finalResult,
         onStartTest: () => activate("setup"),
+        onRunCaptureCheck: () => activate("diagnostics"),
       });
       return;
     }
@@ -402,6 +406,7 @@ async function renderResults(): Promise<void> {
     trialsAnalyzed: 0,
     finalResult: null,
     onStartTest: () => activate("setup"),
+    onRunCaptureCheck: () => activate("diagnostics"),
   });
 }
 
@@ -828,6 +833,22 @@ function makeCallbacks(run: RunView): RunControllerCallbacks {
     onCalibrationProgress(progress) {
       run.setCalibrationProgress(progress);
     },
+    onReplacementBlock(notice) {
+      // The player is told the count and the reason BEFORE the drills start,
+      // in their units. A session that silently grew would feel broken.
+      diagnosticLog.log("info", "replacement-block", {
+        blockIndex: notice.blockIndex,
+        maxBlocks: notice.maxBlocks,
+        drills: notice.drills,
+      });
+      run.showOverlay(
+        "target",
+        notice.drills === 1 ? "One more drill" : `${notice.drills} more drills`,
+        `${notice.reason}. This is block ${notice.blockIndex} of at most ${notice.maxBlocks}; the session stops as soon as it has the evidence it planned for.`,
+      );
+      run.setIntentHint(notice.reason);
+      window.setTimeout(() => run.hideOverlay(), 2600);
+    },
     onTrialPersisted(trial) {
       if (trial.phase === "measured") {
         lastTrialsAnalyzed.count++;
@@ -961,6 +982,7 @@ function makeCallbacks(run: RunView): RunControllerCallbacks {
             finalResult,
             outcome: outcomeReport,
             onStartTest: () => activate("setup"),
+            onRunCaptureCheck: () => activate("diagnostics"),
             onContinueCalibration: continueTarget
               ? () => void continueCalibration(continueTarget.experimentId)
               : null,
@@ -1103,16 +1125,23 @@ function startSession(settings: AppSettings, resume?: ResumeInput): void {
     installTestHooks(created, {
       // Result-state torture automation: render through the exact
       // production results path (same view + navigation as a real finish).
-      renderResultsForTesting: ({ recommendation, finalResult, trialsAnalyzed }) => {
+      renderResultsForTesting: ({ recommendation, finalResult, trialsAnalyzed, outcome }) => {
         lastRecommendation = recommendation;
         lastFinalResult = finalResult;
         lastTrialsAnalyzed.count = trialsAnalyzed;
+        // Store the report too: activate("results") below re-renders from the
+        // module state, so a hook that only painted the DOM would be undone
+        // by its own navigation.
+        lastOutcomeReport = outcome ?? null;
         exitSessionChrome();
         renderResultsView(views.results, {
           recommendation,
           trialsAnalyzed,
           finalResult,
+          outcome: outcome ?? null,
           onStartTest: () => activate("setup"),
+          onRunCaptureCheck: () => activate("diagnostics"),
+          onContinueCalibration: outcome ? () => activate("setup") : null,
         });
         activate("results");
       },
@@ -1152,6 +1181,7 @@ function startSession(settings: AppSettings, resume?: ResumeInput): void {
       );
       void reportCaptureTier(c.store, run.canvas)
         .then((report) => {
+          c.setCaptureTier(report);
           run.setCaptureNote(report.caption, report.detail);
           diagnosticLog.log("info", "capture-tier", {
             activeTier: report.activeTier,
@@ -1200,7 +1230,45 @@ function e2eRestMs(): number {
 
 renderSetupView(views.setup, {
   onStart: startSession,
+  onRunCaptureCheck: () => activate("diagnostics"),
 });
+
+/**
+ * Tells the player, on the SETUP screen, what capture path a calibration
+ * started now would actually be measured on.
+ *
+ * rc.7 only ever reported this afterwards, on the results page, as "Capture
+ * quality: not graded for this session — run the capture check in Diagnostics
+ * before your next test". That is advice for a session that has already
+ * happened. It is not a gate: a calibration on browser capture is a real
+ * calibration, and the banner says how the evidence is affected rather than
+ * standing in the way.
+ */
+async function mountSetupCaptureStatus(): Promise<void> {
+  const holder = views.setup.querySelector<HTMLElement>("#setup-capture");
+  if (!holder) return;
+  try {
+    const report = await reportCaptureTier(await store().catch(() => null), null);
+    const rejected = report.native.rejectedBecause;
+    renderSetupCaptureStatus(
+      holder,
+      {
+        tier: report.activeTier,
+        caption: report.caption,
+        rejectedBecause: rejected,
+        // Only offer the capture check when running it could actually change
+        // the tier. Telling a player on a machine with no helper to "run the
+        // capture check" is exactly the technically unnecessary setup this
+        // pass was told not to force.
+        actionable:
+          report.native.helperReady && !report.native.validatedByDiagnostics,
+      },
+      () => activate("diagnostics"),
+    );
+  } catch {
+    clear(holder);
+  }
+}
 
 // ---- shared resume list mount (contract: renderResumeList seam) ----
 

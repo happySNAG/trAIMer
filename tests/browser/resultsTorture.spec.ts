@@ -301,9 +301,22 @@ for (const state of STATES) {
     // A next action is always present.
     expect(bodyText).toContain("What to do next");
 
-    // Confidence wording matches the engine's own label.
-    if (finalResult.confidenceLabel === "high") {
-      expect(bodyText).toContain("high");
+    // The words above the number come from the engine's confidence, and the
+    // strongest wording is reserved for the strongest evidence.
+    const titles: Record<string, string> = {
+      high: "High-confidence recommendation",
+      moderate: "Moderate-confidence recommendation",
+    };
+    const expectedTitle = titles[finalResult.confidenceLabel];
+    if (expectedTitle) {
+      expect(bodyText).toContain(expectedTitle);
+    } else {
+      // A "low" label must never be typeset as a confident verdict.
+      expect(bodyText).not.toContain("High-confidence recommendation");
+      expect(bodyText).not.toContain("Moderate-confidence recommendation");
+      expect(bodyText).toMatch(/Preliminary recommendation|Directional estimate/);
+      // …and the RANGE, not the point estimate, carries the message.
+      expect(bodyText).toContain("The evidence supports this RANGE");
     }
 
     // Range bars have finite widths (no broken chart geometry).

@@ -101,7 +101,7 @@ never execute. No flag can bypass either rule.
 CI adds the two gates that only a Windows host can prove:
 
 - **execution**: the freshly compiled helper is run with `--version` and must
-  exit 0 printing `version=helper-1.0.0 protocol=1 arch=x64`;
+  exit 0 printing `version=helper-1.1.0 protocol=1 arch=x64`;
 - **startup/shutdown**: the installed application is launched with
   `--smoke-test --require-helper`, which asserts the frontend rendered, the
   context bridge is live, IndexedDB works, the helper reached `ready`, and the

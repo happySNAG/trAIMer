@@ -1,3 +1,4 @@
+import { DOM_CAPTURE_LEAD_TOLERANCE_MS } from "../capture/timebase.ts";
 import type { SensitivityConfiguration } from "../domain/settings.ts";
 import type { TrialRecord } from "../domain/trial.ts";
 import type { InvalidReason, InvalidReasonCode, TrialValidity } from "../domain/validity.ts";
@@ -28,6 +29,13 @@ export interface ValidationConfig {
   stallDirectionCosMin?: number;
   /** Post/pre-gap per-step speed ratio bounds consistent with a true stall. */
   stallSpeedRatioMax?: number;
+  /**
+   * Ceiling on the per-trial `timestampLeadToleranceMs` a capture source may
+   * claim. A source that declares a larger tolerance than this is not
+   * trusted: the ceiling exists so a future source cannot widen the rule by
+   * declaring its way out of it.
+   */
+  maxTimestampLeadToleranceMs?: number;
 }
 
 export const DEFAULT_VALIDATION_CONFIG: ValidationConfig = {
@@ -45,6 +53,7 @@ export const DEFAULT_VALIDATION_CONFIG: ValidationConfig = {
   requireTargetAppearance: true,
   stallDirectionCosMin: 0.5,
   stallSpeedRatioMax: 5,
+  maxTimestampLeadToleranceMs: DOM_CAPTURE_LEAD_TOLERANCE_MS,
 };
 
 export interface ValidationExpectations {
@@ -67,6 +76,32 @@ export function validateTrial(
   expectations: ValidationExpectations = {},
 ): TrialValidity {
   const reasons: InvalidReason[] = [];
+
+  /**
+   * How far a sample may precede the trial's recorded start.
+   *
+   * A capture source stamps an event with the moment the input OCCURRED; the
+   * app starts a trial by reading the clock at the moment it OBSERVES that
+   * the trial has begun. Same clock, different instants. Chromium delivers
+   * coalesced pointer input aligned to the frame that consumes it, so the
+   * first batch after a trial begins legitimately carries samples from a few
+   * milliseconds earlier — measured at up to 12.7 ms in Chromium, and the
+   * cause of 43 of 80 measured drills being thrown away as "broken
+   * timestamps" on real Windows hardware in 1.0.0-rc.7.
+   *
+   * The tolerance comes from the SOURCE, is recorded in the trial, and is
+   * capped here so no source can declare its way out of the rule. Absent (any
+   * record written by rc.7 or earlier, and every synthetic stream) means 0 —
+   * the historical rule, unchanged.
+   *
+   * This does not weaken the check it replaces: a genuine clock-domain error
+   * produces leads of seconds, three orders of magnitude outside the window.
+   */
+  const leadToleranceMs = Math.min(
+    Math.max(record.captureContext.timestampLeadToleranceMs ?? 0, 0),
+    config.maxTimestampLeadToleranceMs ?? DOM_CAPTURE_LEAD_TOLERANCE_MS,
+  );
+  const earliestAllowedSampleMs = record.startedAtMonotonicMs - leadToleranceMs;
 
   const samples = record.samples;
   if (samples.length < config.minSamples) {
@@ -114,12 +149,13 @@ export function validateTrial(
       );
       break;
     }
-    if (s.tMs < record.startedAtMonotonicMs - 1e-6) {
+    if (s.tMs < earliestAllowedSampleMs - 1e-6) {
+      const leadMs = record.startedAtMonotonicMs - s.tMs;
       reasons.push(
         reason(
           "IMPOSSIBLE_TIMESTAMPS",
           "fatal",
-          `sample at ${s.tMs}ms precedes trial start ${record.startedAtMonotonicMs}ms`,
+          `sample at ${s.tMs}ms precedes trial start ${record.startedAtMonotonicMs}ms by ${leadMs.toFixed(1)}ms, beyond the ${leadToleranceMs}ms this capture source can lead by`,
         ),
       );
       break;
