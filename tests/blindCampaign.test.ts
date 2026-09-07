@@ -100,7 +100,7 @@ describe("blind regression campaigns (Pass 2 hardening)", () => {
     expect(rec.confidenceLabel).not.toBe("high");
   });
 
-  it("case E — noisy plateau away from baseline: refuses overclaim (seed population)", () => {
+  it("case E — noisy plateau away from baseline: refuses overclaim (seed population)", async () => {
     // A noisy beginner whose optimum sits at the edge of the ladder is the
     // hardest honesty case: the search must either refuse high confidence or
     // bracket the truth. This is a population property, not a per-seed one —
@@ -112,6 +112,10 @@ describe("blind regression campaigns (Pass 2 hardening)", () => {
     let overclaims = 0;
     let furtherTesting = 0;
     for (let seed = 1; seed <= SEEDS; seed++) {
+      // Yield between seeds: twenty synchronous optimizations back to back
+      // block the worker's event loop long enough to trip vitest's reporter
+      // RPC timeout on a slow Windows runner.
+      await new Promise((resolve) => setImmediate(resolve));
       const rec = standardSearch(7000, { preset: "noisy-beginner", seed });
       const covers = rec.edpiRange.min <= 7000 && rec.edpiRange.max >= 7000;
       if (!(rec.refusedHighConfidence || covers)) overclaims++;

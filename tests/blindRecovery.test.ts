@@ -95,11 +95,12 @@ function runBlindOptimization(
 describe("blind optimum recovery", () => {
   const truths = new Map<string, number>();
 
-  beforeAll(() => {
+  beforeAll(async () => {
     for (const testCase of RECOVERY_CASES) {
       const cacheKey = testCase.label;
       const existing = truths.get(cacheKey);
       if (existing !== undefined) continue;
+      await new Promise((resolve) => setImmediate(resolve));
       truths.set(cacheKey, estimateCompositeOptimumEdpi(testCase.makePlayer()));
     }
   }, 400000);
@@ -165,12 +166,18 @@ describe("blind optimum recovery", () => {
    */
   it.each(RECOVERY_CASES.map((c) => [c.label, c] as const))(
     "%s: the reported range brackets the optimum across a seed population",
-    (label, testCase) => {
+    async (label, testCase) => {
       const hiddenTruth = truths.get(label)!;
       const nominalKnob = testCase.makePlayer().trueOptimalEdpi;
       const SEEDS = 20;
       let bracketed = 0;
       for (let seed = 101; seed < 101 + SEEDS; seed++) {
+        // Yield between seeds. Each run is a fully synchronous optimization,
+        // and twenty back to back blocked the vitest worker's event loop long
+        // enough that it could not answer the reporter RPC — the whole suite
+        // then failed with "Timeout calling onTaskUpdate" on a Windows runner
+        // while every one of its 809 tests had passed.
+        await new Promise((resolve) => setImmediate(resolve));
         const rec = runBlindOptimization(testCase.makePlayer(), seed);
         const octaveError = Math.log2(rec.recommendedEdpi / hiddenTruth);
         const containsTruth =
