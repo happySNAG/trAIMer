@@ -3,13 +3,10 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  ALLOWED,
-  LEGACY_PRODUCT_PATTERNS,
-  PRODUCT_NAME,
-  PRODUCT_TAGLINE,
-  isCommentLine,
-} from "../scripts/verify-branding.mjs";
+
+const PRODUCT = "trAIMer";
+const TAGLINE = "Train. Measure. Tune.";
+
 
 /**
  * THE BRANDING GATE ITSELF (Pass 13, requirement 7).
@@ -20,6 +17,38 @@ import {
  * `scripts/verify-branding.mjs` makes that a build failure — so it has to be
  * proven to FAIL on the things it claims to catch, not merely to pass today.
  */
+
+interface BrandingContract {
+  productName: string;
+  tagline: string;
+  patterns: string[];
+  allowed: { file: string; text: string; reason: string }[];
+}
+
+/**
+ * The gate's own contract, read across a PROCESS boundary as JSON.
+ *
+ * Importing the `.mjs` directly resolved fine on Linux and macOS and failed to
+ * parse at all on the Windows CI runners; the release gate should not inherit
+ * a toolchain quirk from the suite that checks it.
+ */
+function contract(): BrandingContract {
+  const out = execFileSync(
+    process.execPath,
+    ["scripts/verify-branding.mjs", "--print-contract"],
+    { encoding: "utf8" },
+  );
+  return JSON.parse(out) as BrandingContract;
+}
+
+function classify(ext: string, line: string): boolean {
+  const out = execFileSync(
+    process.execPath,
+    ["scripts/verify-branding.mjs", "--classify", ext, "--line", line],
+    { encoding: "utf8" },
+  );
+  return (JSON.parse(out) as { comment: boolean }).comment;
+}
 
 function runGate(...args: string[]): { code: number; out: string } {
   try {
@@ -43,8 +72,9 @@ describe("the gate passes on the current tree", () => {
   });
 
   it("every documented survival names a file, a string and a reason", () => {
-    expect(ALLOWED.length).toBeGreaterThan(0);
-    for (const entry of ALLOWED) {
+    const { allowed } = contract();
+    expect(allowed.length).toBeGreaterThan(0);
+    for (const entry of allowed) {
       expect(entry.file.length).toBeGreaterThan(0);
       expect(entry.text.length).toBeGreaterThan(0);
       expect(entry.reason.length).toBeGreaterThan(40);
@@ -67,7 +97,7 @@ describe("the gate fails on a shipped bundle that still says the old name", () =
 
   it("catches the legacy product name in the built JavaScript", () => {
     const dir = bundleDir(
-      `<title>${PRODUCT_NAME}</title>`,
+      `<title>${PRODUCT}</title>`,
       'const brand = "Aldo Aim Lab";',
     );
     const result = runGate("--bundle", dir);
@@ -79,12 +109,12 @@ describe("the gate fails on a shipped bundle that still says the old name", () =
     const dir = bundleDir("<title>App</title>", "const x = 1;");
     const result = runGate("--bundle", dir);
     expect(result.code).toBe(1);
-    expect(result.out).toContain(`does not mention "${PRODUCT_NAME}"`);
+    expect(result.out).toContain(`does not mention "${PRODUCT}"`);
   });
 
   it("passes a correctly branded bundle", () => {
     const dir = bundleDir(
-      `<title>${PRODUCT_NAME}</title><p>${PRODUCT_TAGLINE}</p>`,
+      `<title>${PRODUCT}</title><p>${TAGLINE}</p>`,
       'const brand = "trAIMer";',
     );
     expect(runGate("--bundle", dir).code).toBe(0);
@@ -98,12 +128,12 @@ describe("the gate fails on a legacy-named installer or installed layout", () =>
     writeFileSync(file, "MZ");
     const result = runGate("--installer", file);
     expect(result.code).toBe(1);
-    expect(result.out).toContain(`must start with "${PRODUCT_NAME}-Setup"`);
+    expect(result.out).toContain(`must start with "${PRODUCT}-Setup"`);
   });
 
   it("accepts the trAIMer installer filename", () => {
     const dir = mkdtempSync(join(tmpdir(), "branding-inst2-"));
-    const file = join(dir, `${PRODUCT_NAME}-Setup-1.0.0-rc.7.exe`);
+    const file = join(dir, `${PRODUCT}-Setup-1.0.0-rc.7.exe`);
     writeFileSync(file, "MZ");
     expect(runGate("--installer", file).code).toBe(0);
   });
@@ -115,13 +145,13 @@ describe("the gate fails on a legacy-named installer or installed layout", () =>
     writeFileSync(join(dir, "resources", "aldo_capture_helper.exe"), "MZ");
     const result = runGate("--installed-app", dir);
     expect(result.code).toBe(1);
-    expect(result.out).toContain(`missing ${PRODUCT_NAME}.exe`);
+    expect(result.out).toContain(`missing ${PRODUCT}.exe`);
     expect(result.out).toContain("legacy-named file");
   });
 
   it("accepts a correctly named installed layout", () => {
     const dir = mkdtempSync(join(tmpdir(), "branding-app2-"));
-    writeFileSync(join(dir, `${PRODUCT_NAME}.exe`), "MZ");
+    writeFileSync(join(dir, `${PRODUCT}.exe`), "MZ");
     mkdirSync(join(dir, "resources"));
     writeFileSync(join(dir, "resources", "traimer_capture_helper.exe"), "MZ");
     expect(runGate("--installed-app", dir).code).toBe(0);
@@ -137,15 +167,18 @@ describe("historical accuracy is preserved", () => {
   });
 
   it("source comments may narrate the rename; strings may not carry it", () => {
-    expect(isCommentLine("// rc.6 was called Aldo Aim Lab", ".ts")).toBe(true);
-    expect(isCommentLine(" * Renamed from Aldo Aim Lab", ".ts")).toBe(true);
-    expect(isCommentLine('const name = "Aldo Aim Lab";', ".ts")).toBe(false);
-    expect(isCommentLine("; NSIS comment", ".nsh")).toBe(true);
-    expect(isCommentLine("# yaml comment", ".yml")).toBe(true);
+    expect(classify(".ts", "// rc.6 was called Aldo Aim Lab")).toBe(true);
+    expect(classify(".ts", " * Renamed from Aldo Aim Lab")).toBe(true);
+    expect(classify(".ts", 'const name = "Aldo Aim Lab";')).toBe(false);
+    expect(classify(".nsh", "; NSIS comment")).toBe(true);
+    expect(classify(".yml", "# yaml comment")).toBe(true);
   });
 
-  it("the patterns it hunts for are the ones the pass named", () => {
-    expect(LEGACY_PRODUCT_PATTERNS).toContain("Aldo Aim Lab");
-    expect(LEGACY_PRODUCT_PATTERNS).toContain("AldoAimLab");
+  it("the patterns it hunts for are the ones the pass named, and the brand is right", () => {
+    const c = contract();
+    expect(c.patterns).toContain("Aldo Aim Lab");
+    expect(c.patterns).toContain("AldoAimLab");
+    expect(c.productName).toBe("trAIMer");
+    expect(c.tagline).toBe("Train. Measure. Tune.");
   });
 });

@@ -1,4 +1,3 @@
-#!/usr/bin/env node
 /**
  * RELEASE GATE — the shipped product presents only "trAIMer".
  *
@@ -336,7 +335,42 @@ function arg(flag) {
   return i >= 0 ? process.argv[i + 1] : null;
 }
 
+/**
+ * Machine-readable contract, so the test suite can assert on the allowlist and
+ * the patterns WITHOUT importing this module.
+ *
+ * A `.ts` test importing a `.mjs` script resolved fine on Linux and macOS and
+ * failed to parse at all on the Windows CI runners, which is a toolchain
+ * problem the release gate has no business inheriting. Everything the tests
+ * need now crosses a process boundary as JSON.
+ */
+function printContract() {
+  console.log(
+    JSON.stringify({
+      productName: PRODUCT_NAME,
+      tagline: PRODUCT_TAGLINE,
+      patterns: LEGACY_PRODUCT_PATTERNS,
+      allowed: ALLOWED,
+    }),
+  );
+}
+
+/** Classifies one line the way the comment-tolerant source rule does. */
+function classifyLine(ext, line) {
+  console.log(JSON.stringify({ comment: isCommentLine(line, ext) }));
+}
+
 function main() {
+  if (process.argv.includes("--print-contract")) {
+    printContract();
+    return;
+  }
+  if (process.argv.includes("--classify")) {
+    const ext = arg("--classify") ?? ".ts";
+    const line = arg("--line") ?? "";
+    classifyLine(ext, line);
+    return;
+  }
   const bundle = arg("--bundle");
   const installedApp = arg("--installed-app");
   const installer = arg("--installer");
