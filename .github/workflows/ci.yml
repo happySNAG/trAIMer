@@ -89,23 +89,12 @@ jobs:
         shell: bash
         run: node scripts/verify-windows-artifacts.mjs --helper native/windows/traimer_capture_helper.exe
       - name: RELEASE GATE - helper actually executes on Windows x64
-        shell: pwsh
-        run: |
-          # rc.1 shipped a "helper.exe" that was the C source file. A format
-          # check alone would not have caught a cross-compiled or corrupt
-          # binary, so the freshly built artifact is RUN here.
-          $exe = "native/windows/traimer_capture_helper.exe"
-          $out = (& $exe --version 2>&1 | Out-String).Trim()
-          if ($LASTEXITCODE -ne 0) { throw "helper --version exited $LASTEXITCODE : $out" }
-          Write-Host "helper --version -> $out"
-          # Read the expected version from the single source of truth rather
-          # than pinning a literal here: a copy in this file is one more thing
-          # that can drift on its own, and did.
-          $expected = (node -e "process.stdout.write(require('fs').readFileSync('src/version.ts','utf8').match(/EXPECTED_HELPER_VERSION = \"([^\"]+)\"/)[1])")
-          Write-Host "expected -> $expected"
-          if ($out -notmatch [regex]::Escape("version=$expected")) { throw "unexpected helper version line: $out (expected $expected)" }
-          if ($out -notmatch 'protocol=1') { throw "unexpected protocol version: $out" }
-          if ($out -notmatch 'arch=x64') { throw "helper is not the x64 build: $out" }
+        shell: bash
+        # rc.1 shipped a "helper.exe" that was the C source file. A format
+        # check alone would not have caught a cross-compiled or corrupt
+        # binary, so the freshly built artifact is RUN here. Expected values
+        # come from src/version.ts, never from a literal in this file.
+        run: node scripts/verify-helper-version.mjs native/windows/traimer_capture_helper.exe
       - name: RELEASE GATE - helper clock synchronizes with a client (real binary)
         shell: bash
         # The helper counts milliseconds from its own process start. Until
