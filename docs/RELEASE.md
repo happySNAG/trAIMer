@@ -6,8 +6,10 @@
   candidate and shipped a non-executable helper; rc.2 was the Pass 8
   pre-hardware candidate and still launched via PowerShell; rc.3 was the Pass 9
   installed-desktop-application candidate, which installed and launched on
-  real Windows hardware but could not start a test; rc.4 is the Pass 10
-  candidate that fixes the arena capture-entry path).
+  real Windows hardware but could not start a test; rc.4 was the Pass 10
+  candidate that fixed the arena capture-entry path; rc.5 is the Pass 11
+  gameplay pass: sequential three-target drill, skippable breaks, balanced
+  drill sequencing, new arena presentation).
 - `ENGINE_VERSION` — `engine-v4` (bumped per engineering pass with contract
   changes).
 - `OPTIMIZER_VERSION_V4` — `optimizer-v3` (paired-effects surrogate,
@@ -57,7 +59,7 @@
 
 | Component | Version |
 |---|---|
-| App | 1.0.0-rc.4 |
+| App | 1.0.0-rc.5 |
 | Engine | engine-v4 |
 | Optimizer | optimizer-v3 (paired fit + adequacy gating + change-point) |
 | Scoring model | scoring-v1 (weights: accuracy .28, speed .14, tracking .14, correction .12, overshoot .11, undershoot .11, consistency .10) |

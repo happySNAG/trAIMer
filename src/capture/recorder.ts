@@ -39,6 +39,26 @@ export interface TrialRecordingRequest {
   seedTag?: string;
 }
 
+/** Presentation view of a live target (positions in logical px). */
+export interface ActiveTargetView {
+  id: TargetSpan["targetId"];
+  x: number;
+  y: number;
+  radius: number;
+  appearedMs: number;
+  moving: boolean;
+}
+
+/** Presentation view of a target that has just left the arena. */
+export interface RemovedTargetView {
+  id: TargetSpan["targetId"];
+  x: number;
+  y: number;
+  radius: number;
+  removedMs: number;
+  reason: "hit" | "expired" | "trial-end";
+}
+
 export class TrialRecorder {
   readonly #request: TrialRecordingRequest;
   #cursor: Vec2;
@@ -58,8 +78,8 @@ export class TrialRecorder {
     return this.#cursor;
   }
 
-  activeTargetsAt(tMs: number): { x: number; y: number; radius: number }[] {
-    const out: { x: number; y: number; radius: number }[] = [];
+  activeTargetsAt(tMs: number): ActiveTargetView[] {
+    const out: ActiveTargetView[] = [];
     for (const span of this.#targets) {
       if (span.removedMs !== null && span.removedMs <= tMs) continue;
       if (span.appearedMs > tMs) continue;
@@ -68,13 +88,51 @@ export class TrialRecorder {
           ? span.motion.position
           : targetPositionAt(span, tMs);
       if (!pos) continue;
-      out.push({ x: pos.x, y: pos.y, radius: span.radiusPx });
+      out.push({
+        id: span.targetId,
+        x: pos.x,
+        y: pos.y,
+        radius: span.radiusPx,
+        appearedMs: span.appearedMs,
+        moving: span.motion.kind === "path",
+      });
+    }
+    return out;
+  }
+
+  /**
+   * Targets removed at or before `tMs` — presentation reads this to animate a
+   * pop (hit) or a fade (expired) at the place the target was. Never used for
+   * measurement.
+   */
+  removedTargetsAt(tMs: number): RemovedTargetView[] {
+    const out: RemovedTargetView[] = [];
+    for (const span of this.#targets) {
+      if (span.removedMs === null || span.removedMs > tMs) continue;
+      const pos =
+        span.motion.kind === "static"
+          ? span.motion.position
+          : targetPositionAt(span, span.removedMs);
+      if (!pos) continue;
+      out.push({
+        id: span.targetId,
+        x: pos.x,
+        y: pos.y,
+        radius: span.radiusPx,
+        removedMs: span.removedMs,
+        reason: span.removalReason ?? "trial-end",
+      });
     }
     return out;
   }
 
   get state(): {
-    spawnedTargets: { removedMs: number | null; removalReason: string | null }[];
+    spawnedTargets: {
+      targetId: TargetSpan["targetId"];
+      appearedMs: number;
+      removedMs: number | null;
+      removalReason: string | null;
+    }[];
     shotCount: number;
     hitCount: number;
     latestShot: { aimTargetId: string | null; hit: boolean; tMs: number } | null;
@@ -82,6 +140,8 @@ export class TrialRecorder {
     const last = this.#shots.at(-1);
     return {
       spawnedTargets: this.#targets.map((t) => ({
+        targetId: t.targetId,
+        appearedMs: t.appearedMs,
         removedMs: t.removedMs,
         removalReason: t.removalReason,
       })),

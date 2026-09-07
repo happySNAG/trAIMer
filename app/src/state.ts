@@ -11,6 +11,10 @@ export interface AppSettings {
   repsPerCandidate: number;
   warmupTrials: number;
   yExploration: boolean;
+  /** Automatic breaks between candidate blocks (always skippable). */
+  autoBreaks: boolean;
+  /** Length of an automatic break, seconds (5–60). */
+  breakSeconds: number;
 }
 
 export const SETTINGS_KEY = "aldo-aim-lab-settings";
@@ -25,6 +29,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   repsPerCandidate: 8,
   warmupTrials: 2,
   yExploration: false,
+  autoBreaks: true,
+  breakSeconds: 10,
 };
 
 /** Shared sanitizer: every persisted settings blob goes through this. */
@@ -75,6 +81,13 @@ export function sanitizeSettings(raw: unknown): AppSettings {
         ? clamp(Math.round(obj.warmupTrials as number), 0, 5)
         : DEFAULT_SETTINGS.warmupTrials,
     yExploration: obj.yExploration === true,
+    // Missing → default ON: a stored blob from before this setting existed
+    // must keep the documented protocol, not silently drop its breaks.
+    autoBreaks: obj.autoBreaks === undefined ? DEFAULT_SETTINGS.autoBreaks : obj.autoBreaks === true,
+    breakSeconds:
+      finiteNumber(obj.breakSeconds) !== null
+        ? clamp(Math.round(obj.breakSeconds as number), 5, 60)
+        : DEFAULT_SETTINGS.breakSeconds,
   };
 }
 

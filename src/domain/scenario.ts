@@ -11,6 +11,12 @@ export interface ScenarioDefinition {
   targetSpeedPxPerSec?: { min: number; max: number };
   trackingDurationMs?: number;
   targetsPerTrial?: number;
+  /**
+   * Sequential multi-target scenarios: how long each target stays up before
+   * it expires and the next one appears. The trial's `timeoutMs` is the hard
+   * ceiling for the whole sequence.
+   */
+  perTargetTimeoutMs?: number;
   difficulty: {
     tier: "easy" | "medium" | "hard";
     discriminatesDimensions: string[];
@@ -69,7 +75,13 @@ const TARGET_SWITCH_SEQUENCE: ScenarioDefinition = {
   id: "target-switch-triple",
   kind: "target-switch",
   label: "Three-target switch sequence",
-  timeoutMs: 2400,
+  // One target at a time (Pass 11): each gets its own 1100 ms window — the
+  // same order of budget a single static flick gets — and the sequence ceiling
+  // covers three windows, the inter-target gaps and the spawn delays. rc.4 showed all three
+  // targets at once inside a single 2400 ms budget, so the third acquisition
+  // was routinely cut off by the trial timeout mid-flick.
+  timeoutMs: 3800,
+  perTargetTimeoutMs: 1100,
   targetRadiusPx: 24,
   distanceRangePx: { min: 220, max: 480 },
   angleMode: "any",

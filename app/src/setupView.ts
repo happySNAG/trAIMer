@@ -31,12 +31,25 @@ export function renderSetupView(
   const dpiInput = el("input", { type: "number", value: settings.dpi, id: "setup-dpi" });
   const sensXInput = el("input", { type: "number", step: "0.1", value: settings.sensX, id: "setup-sensx" });
   const sensYInput = el("input", { type: "number", step: "0.1", value: settings.sensY, id: "setup-sensy" });
-  const seedInput = el("input", { type: "number", value: settings.experimentSeed });
-  const roundsInput = el("input", { type: "number", min: "1", max: "4", value: settings.rounds });
-  const repsInput = el("input", { type: "number", min: "3", max: "20", value: settings.repsPerCandidate });
-  const warmupsInput = el("input", { type: "number", min: "0", max: "5", value: settings.warmupTrials });
+  const seedInput = el("input", { type: "number", value: settings.experimentSeed, id: "setup-seed" });
+  const roundsInput = el("input", { type: "number", min: "1", max: "4", value: settings.rounds, id: "setup-rounds" });
+  const repsInput = el("input", { type: "number", min: "3", max: "20", value: settings.repsPerCandidate, id: "setup-reps" });
+  const warmupsInput = el("input", { type: "number", min: "0", max: "5", value: settings.warmupTrials, id: "setup-warmups" });
   const yCheck = el("input", { type: "checkbox", id: "setup-ycheck" }) as HTMLInputElement;
   yCheck.checked = settings.yExploration;
+  const breaksCheck = el("input", { type: "checkbox", id: "setup-autobreaks" }) as HTMLInputElement;
+  breaksCheck.checked = settings.autoBreaks;
+  const breakSecondsInput = el("input", {
+    type: "number",
+    min: "5",
+    max: "60",
+    value: settings.breakSeconds,
+    id: "setup-breakseconds",
+  }) as HTMLInputElement;
+  breakSecondsInput.disabled = !settings.autoBreaks;
+  breaksCheck.addEventListener("change", () => {
+    breakSecondsInput.disabled = !breaksCheck.checked;
+  });
 
   // Live eDPI preview (engine sensmath, display only).
   const edpiPreview = el("span", { class: "mono", text: "" });
@@ -69,6 +82,16 @@ export function renderSetupView(
   const yRow = el("label", { class: "check-row", for: "setup-ycheck" }, [
     yCheck,
     el("span", { text: "Explore independent vertical sensitivity after the X search" }),
+  ]);
+
+  const breaksRow = el("label", { class: "check-row", for: "setup-autobreaks" }, [
+    breaksCheck,
+    el("span", { text: "Automatic break between candidate blocks (always skippable — Space, Enter, or Skip break)" }),
+  ]);
+  const breaksGrid = el("div", { class: "form-grid" }, [
+    field("Break length (seconds)", breakSecondsInput, {
+      hint: "5–60. A short reset when the blinded sensitivity changes. Skip it any time; a fatigue-triggered rest is longer but also skippable.",
+    }),
   ]);
 
   const advancedGrid = el("div", { class: "form-grid" }, [
@@ -110,6 +133,9 @@ export function renderSetupView(
       edpiPreview,
     ]),
     yRow,
+    sectionLabel("Breaks"),
+    breaksRow,
+    breaksGrid,
     detailsBlock(
       "Advanced session parameters",
       advancedGrid,
@@ -131,6 +157,8 @@ export function renderSetupView(
       repsPerCandidate: Math.max(3, Math.min(20, Number(repsInput.value) || 8)),
       warmupTrials: Math.max(0, Math.min(5, Number(warmupsInput.value) || 2)),
       yExploration: yCheck.checked,
+      autoBreaks: breaksCheck.checked,
+      breakSeconds: Math.max(5, Math.min(60, Number(breakSecondsInput.value) || 10)),
     };
     saveSettings(next);
     callbacks.onStart(next);

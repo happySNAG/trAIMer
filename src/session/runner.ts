@@ -58,6 +58,8 @@ export class SessionRunner {
   #blindedLabels = new Map<string, string>();
   #pauseRequested = false;
   #cancelRequested = false;
+  /** Resolves the rest currently in progress early (Skip break / Space / Enter). */
+  #restSkip: (() => void) | null = null;
   readonly #audit = new AuditLog();
   #resumedFrom: ResumeCheckpoint | null = null;
   #startedAtIso = new Date().toISOString();
@@ -283,10 +285,12 @@ export class SessionRunner {
       await this.#awaitIfPaused();
 
       if (lastCandidateId !== null && spec.candidateId !== lastCandidateId) {
-        this.#setState("rest", "between candidate blocks");
-        this.#audit.append(this.#ports.nowIso(), "rest-started", { reason: "candidate-transition" });
-        await this.#ports.sleep(this.#definition.restBetweenCandidatesMs);
-        this.#audit.append(this.#ports.nowIso(), "rest-ended", {});
+        // A zero-length break (auto breaks off) is not a break: no rest state,
+        // no overlay, straight to the next block.
+        if (this.#definition.restBetweenCandidatesMs > 0) {
+          this.#setState("rest", "between candidate blocks");
+          await this.#rest(this.#definition.restBetweenCandidatesMs, "candidate-transition");
+        }
         this.#continuousTestingMs = 0;
         this.#measuredTrialsSinceRest = [];
         this.#setState("candidate-transition");
@@ -306,12 +310,13 @@ export class SessionRunner {
         );
         if (fatigue.shouldRest) {
           this.#setState("rest", fatigue.reason ?? "fatigue protocol");
-          this.#audit.append(this.#ports.nowIso(), "rest-started", { reason: fatigue.reason ?? "fatigue" });
-          await this.#ports.sleep(this.#definition.fatigueProtocol.restDurationMs);
+          await this.#rest(
+            this.#definition.fatigueProtocol.restDurationMs,
+            fatigue.reason ?? "fatigue",
+          );
           this.#continuousTestingMs = 0;
           this.#measuredTrialsSinceRest = [];
           this.#setState("inter-trial", "fatigue rest finished");
-          this.#audit.append(this.#ports.nowIso(), "rest-ended", {});
         }
         this.#setState("trial-ready", `${label} · ${scenario.label}`);
       }
@@ -456,6 +461,53 @@ export class SessionRunner {
   cancel(): void {
     this.#cancelRequested = true;
     this.#pauseRequested = false;
+    // Never make the player wait out a break to leave.
+    this.#restSkip?.();
+  }
+
+  /**
+   * Ends the break in progress now. Breaks protect measurement quality, but
+   * they are the player's to take: a rest the player did not want is idle
+   * time, not recovery. The audit trail records that it was skipped and how
+   * much of it was used.
+   */
+  skipRest(): void {
+    this.#restSkip?.();
+  }
+
+  /** True while a rest is in progress and can be skipped. */
+  get resting(): boolean {
+    return this.#restSkip !== null;
+  }
+
+  /**
+   * A skippable wait. Resolves when `durationMs` elapses, when skipRest() is
+   * called, or when the session is cancelled — whichever comes first.
+   */
+  async #rest(durationMs: number, reason: string): Promise<void> {
+    this.#audit.append(this.#ports.nowIso(), "rest-started", { reason, durationMs });
+    this.#ports.onRest?.({ durationMs, reason, skippable: true });
+    const startedAt = this.#ports.clock.nowMs();
+    let skipped = false;
+    await new Promise<void>((resolve) => {
+      let settled = false;
+      const finish = (viaSkip: boolean): void => {
+        if (settled) return;
+        settled = true;
+        skipped = viaSkip;
+        this.#restSkip = null;
+        resolve();
+      };
+      this.#restSkip = () => finish(true);
+      void this.#ports.sleep(durationMs).then(() => finish(false));
+    });
+    const usedMs = Math.max(0, this.#ports.clock.nowMs() - startedAt);
+    this.#audit.append(this.#ports.nowIso(), "rest-ended", {
+      skipped: skipped ? 1 : 0,
+      usedMs: Math.round(usedMs),
+      plannedMs: durationMs,
+    });
+    this.#ports.onRest?.(null);
   }
 
   async #awaitIfPaused(): Promise<void> {

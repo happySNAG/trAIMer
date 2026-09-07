@@ -38,13 +38,11 @@ test("complete session flows to results with a persisted recommendation", async 
   await page.locator("#view-setup input[type=text]").first().fill("E2EPlayer");
   // Advanced parameters live behind a collapsed details element.
   await page.click("#view-setup details.details summary");
-  const numbers = page.locator('#view-setup input[type="number"]');
-  // Order: dpi(0) sensX(1) sensY(2) seed(3) rounds(4) reps(5) warmups(6)
-  await numbers.nth(3).fill("1234"); // seed
-  await numbers.nth(4).fill("1"); // rounds
-  await numbers.nth(5).fill("3"); // reps per candidate
-  await numbers.nth(6).fill("0"); // warmups
-  await page.locator('#view-setup input[type="checkbox"]').uncheck();
+  await page.locator("#setup-seed").fill("1234");
+  await page.locator("#setup-rounds").fill("1");
+  await page.locator("#setup-reps").fill("3");
+  await page.locator("#setup-warmups").fill("0");
+  await page.locator("#setup-ycheck").uncheck();
 
   await page.click(`#view-setup button[type=submit]`);
   await expect(page.locator("#run-canvas")).toBeVisible();
@@ -55,7 +53,10 @@ test("complete session flows to results with a persisted recommendation", async 
   // Grant lock via the adapter by clicking the canvas (pendingStart).
   await page.click("#run-canvas");
 
-  for (let trial = 0; trial < 25; trial++) {
+  // Drive until the engine is done. The cap is a safety net, not a plan: the
+  // scripted player rarely completes a sequential switch drill in one pass,
+  // so trials can take their full window.
+  for (let trial = 0; trial < 90; trial++) {
     const state = await sessionState(page);
     if (state === "analyzing" || state === "complete") break;
     if (state === "awaiting-lock") {
@@ -80,12 +81,11 @@ test("pointer-lock loss mid-trial invalidates the trial and ends the session vis
   await page.click(`#tabs button[data-tab="setup"]`);
   await page.locator("#view-setup input[type=text]").first().fill("E2EPlayer");
   await page.click("#view-setup details.details summary");
-  const numbers = page.locator('#view-setup input[type="number"]');
-  await numbers.nth(3).fill("99");
-  await numbers.nth(4).fill("1"); // rounds
-  await numbers.nth(5).fill("3"); // reps
-  await numbers.nth(6).fill("0"); // warmups
-  await page.locator('#view-setup input[type="checkbox"]').uncheck();
+  await page.locator("#setup-seed").fill("99");
+  await page.locator("#setup-rounds").fill("1");
+  await page.locator("#setup-reps").fill("3");
+  await page.locator("#setup-warmups").fill("0");
+  await page.locator("#setup-ycheck").uncheck();
   await page.click(`#view-setup button[type=submit]`);
   await page.click("#run-canvas");
 

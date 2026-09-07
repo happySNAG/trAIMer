@@ -16,14 +16,15 @@ import {
   createInstanceRng,
   planScenarioInstance,
 } from "../../src/scenarios/planner.ts";
-import { scenarioById } from "../../src/domain/scenario.ts";
+import { scenarioById, type ScenarioDefinition } from "../../src/domain/scenario.ts";
+import type { ActiveTargetView } from "../../src/capture/recorder.ts";
 import type { TrialRecord } from "../../src/domain/trial.ts";
 import { buildExperimentDefinition, type TrialPlanSpec } from "../../src/experiments/protocol.ts";
 import { LocalJsonStore } from "../../src/persistence/store.ts";
 import { IndexedDbBackend } from "../../src/persistence/backends.ts";
 import { openAimLabDb } from "./idb.ts";
 import { SessionRunner, type SessionRunOutcome } from "../../src/session/runner.ts";
-import type { SessionStateName } from "../../src/session/types.ts";
+import type { RestNotice, SessionStateName } from "../../src/session/types.ts";
 import { makeExperimentId, makeSessionId, makeTrialId } from "../../src/domain/ids.ts";
 import type { AppSettings } from "./state.ts";
 import {
@@ -36,16 +37,33 @@ import { assessTimeJump } from "../../src/lifecycle/lifecycle.ts";
 
 export const LOGICAL_VIEWPORT = { widthPx: 1280, heightPx: 720 };
 
-const SCENARIO_INSTRUCTIONS: Record<string, string> = {
+/** Keyed by scenario KIND (the map once mixed ids in, so one drill had no instruction). */
+const SCENARIO_INSTRUCTIONS: Record<ScenarioDefinition["kind"], string> = {
   "flick-static": "Click the target as fast as you can.",
-  "flick-static-small": "Small target — click it as fast as you can.",
-  "flick-dynamic-horizontal": "Lead the moving target and click it.",
-  "target-switch": "Hit every target in the sequence.",
+  "flick-dynamic": "Lead the moving target and click it.",
+  "target-switch": "Hit each target as it appears — three in a row.",
   tracking: "Keep the crosshair on the moving target.",
 };
 
+export interface DrillInfo {
+  round: number;
+  rounds: number;
+  block: number;
+  blocks: number;
+  drill: number;
+  /** Planned drills in this block (warm-ups + measured); adaptive allocation may shorten later blocks. */
+  drillsPlanned: number;
+  phase: "warmup" | "measured";
+  scenarioLabel: string;
+  instruction: string;
+}
+
 export interface RunControllerCallbacks {
   onHud(state: SessionStateName, detail: string): void;
+  /** A break began (with its planned length) or ended (null). */
+  onRest?(rest: RestNotice | null): void;
+  /** The next drill is about to start: where it sits in the session and what to do. */
+  onDrill?(info: DrillInfo): void;
   onTrialPersisted(trial: TrialRecord): void;
   onExperimentFinished(
     status: "complete" | "aborted",
@@ -129,9 +147,12 @@ export class BrowserRunController {
       warmupTrialsPerCandidateBlock: settings.warmupTrials,
       stoppingCriteria: { maxSearchRounds: Math.max(1, settings.rounds) },
       yExploration: { enabled: settings.yExploration },
-      ...(options.restBetweenCandidatesMs !== undefined
-        ? { restBetweenCandidatesMs: options.restBetweenCandidatesMs }
-        : {}),
+      // Breaks are the player's: off ⇒ no rest state at all; on ⇒ the chosen
+      // length, and always skippable. The E2E override wins so automation can
+      // run short rests.
+      restBetweenCandidatesMs:
+        options.restBetweenCandidatesMs ??
+        (settings.autoBreaks ? settings.breakSeconds * 1000 : 0),
       notes: "browser live session",
     });
   }
@@ -238,6 +259,7 @@ export class BrowserRunController {
         },
       },
       onStateChange: (state, detail) => this.#callbacks.onHud(state, detail ?? ""),
+      onRest: (rest) => this.#callbacks.onRest?.(rest),
       onTrialPersisted: (trial) => {
         if (trial.phase === "measured") this.#measuredCount++;
         else this.#warmupCount++;
@@ -341,6 +363,16 @@ export class BrowserRunController {
     this.#runner?.resume();
   }
 
+  /** Ends the break in progress now (Skip break button, Space, Enter). */
+  skipRest(): void {
+    this.#runner?.skipRest();
+  }
+
+  /** True while a skippable break is in progress. */
+  get resting(): boolean {
+    return this.#runner?.resting ?? false;
+  }
+
   /**
    * Ends the session. This MUST work in every state, including before the
    * runner exists — "End session" that silently does nothing is the trap this
@@ -403,8 +435,7 @@ export class BrowserRunController {
   }
 
   instructionFor(scenarioId: string): string {
-    const kind = scenarioById(scenarioId).kind;
-    return SCENARIO_INSTRUCTIONS[kind] ?? "";
+    return SCENARIO_INSTRUCTIONS[scenarioById(scenarioId).kind];
   }
 
   async #executeTrial(
@@ -420,6 +451,7 @@ export class BrowserRunController {
       (c) => c.id === spec.candidateId,
     );
     if (!candidate) throw new Error(`unknown candidate ${spec.candidateId}`);
+    this.#announceDrill(spec, round, scenario);
 
     const instanceSeed =
       spec.phase === "measured" && repIndex !== null
@@ -472,6 +504,7 @@ export class BrowserRunController {
     });
 
     this.#capture.reticle.reset();
+    this.#beginTrialPresentation(scenario);
     director.start(performance.now());
     this.#startRenderLoop(director);
 
@@ -522,9 +555,10 @@ export class BrowserRunController {
           reason: "hit",
         });
         active.director.observeRemoval(latest.tMs + 1);
-        // Presentation-only hit confirmation: a brief ring at the reticle.
+      } else if (latest && !latest.hit) {
+        // Presentation only: a faint ripple where a shot landed short.
         const pos = this.#capture?.reticle.position;
-        if (pos) this.#hitFx.push({ x: pos.x, y: pos.y, t0: performance.now() });
+        if (pos) this.#fx.missAt(pos.x, pos.y, performance.now());
       }
     }
 
@@ -559,7 +593,7 @@ export class BrowserRunController {
       }
       previousFrameNowMs = now;
       const status = director.tick(now);
-      this.#drawFrame(ctx, director.recorder.activeTargetsAt(now));
+      this.#drawFrame(ctx, director.recorder.activeTargetsAt(now), now, director);
       if (status.finished || this.#fatalInterruptionSeen) {
         const endedAt = performance.now();
         const outcome =
@@ -590,79 +624,394 @@ export class BrowserRunController {
     this.#active = null;
   }
 
-  #stageGradient: CanvasGradient | null = null;
+  // -------------------------------------------------------------------------
+  // Presentation. Everything below is visual only: hit detection, target
+  // geometry and timing come from the recorder/director and are never
+  // re-derived here. Effects are bounded arrays of tiny objects so a long
+  // session allocates nothing per frame beyond what the canvas needs.
+  // -------------------------------------------------------------------------
 
-  /** Short-lived hit-confirmation rings (visual only, never measured). */
-  #hitFx: { x: number; y: number; t0: number }[] = [];
-  static readonly #HIT_FX_MS = 160;
+  #stage: HTMLCanvasElement | null = null;
+  readonly #fx = new ArenaFx();
+  #activeScenario: ScenarioDefinition | null = null;
+  /** Target ids whose departure has already been animated this trial. */
+  #removalFxSeen = new Set<string>();
+  #block = 0;
+  #blockCandidateId: string | null = null;
+  #drillInBlock = 0;
+
+  #announceDrill(spec: TrialPlanSpec, round: number, scenario: ScenarioDefinition): void {
+    if (spec.candidateId !== this.#blockCandidateId) {
+      this.#blockCandidateId = spec.candidateId;
+      this.#block++;
+      this.#drillInBlock = 0;
+    }
+    this.#drillInBlock++;
+    const d = this.#definition;
+    this.#callbacks.onDrill?.({
+      round: round + 1,
+      rounds: Math.max(1, d.stoppingCriteria.maxSearchRounds),
+      block: ((this.#block - 1) % d.candidates.length) + 1,
+      blocks: d.candidates.length,
+      drill: this.#drillInBlock,
+      drillsPlanned: d.warmupTrialsPerCandidateBlock + d.measuredRepsPerCandidatePerRound,
+      phase: spec.phase,
+      scenarioLabel: scenario.label,
+      instruction: SCENARIO_INSTRUCTIONS[scenario.kind],
+    });
+  }
+
+  #beginTrialPresentation(scenario: ScenarioDefinition): void {
+    this.#activeScenario = scenario;
+    this.#removalFxSeen = new Set();
+  }
+
+  #stageBackdrop(): HTMLCanvasElement {
+    if (this.#stage) return this.#stage;
+    const { widthPx: w, heightPx: h } = LOGICAL_VIEWPORT;
+    const stage = document.createElement("canvas");
+    stage.width = w;
+    stage.height = h;
+    const ctx = stage.getContext("2d");
+    if (!ctx) throw new Error("2d canvas unavailable");
+    // Deep, slightly blue-black stage with a soft centre lift.
+    const g = ctx.createRadialGradient(w / 2, h / 2, h / 6, w / 2, h / 2, h * 0.95);
+    g.addColorStop(0, "#0d1118");
+    g.addColorStop(0.6, "#080b10");
+    g.addColorStop(1, "#04060a");
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, w, h);
+    // Faint grid: enough to read motion against, never enough to compete
+    // with a target.
+    ctx.strokeStyle = "rgba(120, 150, 190, 0.055)";
+    ctx.lineWidth = 1;
+    const step = 64;
+    ctx.beginPath();
+    for (let x = (w / 2) % step; x <= w; x += step) {
+      ctx.moveTo(x + 0.5, 0);
+      ctx.lineTo(x + 0.5, h);
+    }
+    for (let y = (h / 2) % step; y <= h; y += step) {
+      ctx.moveTo(0, y + 0.5);
+      ctx.lineTo(w, y + 0.5);
+    }
+    ctx.stroke();
+    // Vignette so the edges recede.
+    const v = ctx.createRadialGradient(w / 2, h / 2, h * 0.45, w / 2, h / 2, h * 1.05);
+    v.addColorStop(0, "rgba(0,0,0,0)");
+    v.addColorStop(1, "rgba(0,0,0,0.55)");
+    ctx.fillStyle = v;
+    ctx.fillRect(0, 0, w, h);
+    this.#stage = stage;
+    return stage;
+  }
 
   #drawFrame(
     ctx: CanvasRenderingContext2D,
-    targets: { x: number; y: number; radius: number }[],
+    targets: ActiveTargetView[],
+    now: number,
+    director: ScenarioDirector,
   ): void {
     const { widthPx: w, heightPx: h } = LOGICAL_VIEWPORT;
-    // Subtle vignette stage (cached gradient; purely visual).
-    if (!this.#stageGradient) {
-      const g = ctx.createRadialGradient(w / 2, h / 2, h / 4, w / 2, h / 2, h);
-      g.addColorStop(0, "#0a0d12");
-      g.addColorStop(1, "#05070a");
-      this.#stageGradient = g;
-    }
-    ctx.fillStyle = this.#stageGradient;
-    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(this.#stageBackdrop(), 0, 0);
 
-    // Targets: high-visibility volt spheres with a soft core highlight.
-    for (const target of targets) {
-      ctx.beginPath();
-      ctx.arc(target.x, target.y, target.radius, 0, Math.PI * 2);
-      ctx.fillStyle = "#c8f24e";
-      ctx.fill();
-      ctx.strokeStyle = "rgba(233, 255, 168, 0.9)";
-      ctx.lineWidth = 1.5;
-      ctx.stroke();
-      const core = Math.max(1.5, target.radius * 0.28);
-      ctx.beginPath();
-      ctx.arc(target.x, target.y, core, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(10, 13, 18, 0.55)";
-      ctx.fill();
-    }
+    const kind = this.#activeScenario?.kind ?? "flick-static";
+    const palette = TARGET_PALETTE[kind];
+    const reticlePos = this.#capture?.reticle.position ?? null;
 
-    // Hit confirmation: an expanding ring that fades within ~160 ms. It draws
-    // where the shot landed and never moves, so it cannot suggest motion.
-    if (this.#hitFx.length > 0) {
-      const now = performance.now();
-      this.#hitFx = this.#hitFx.filter((fx) => now - fx.t0 < BrowserRunController.#HIT_FX_MS);
-      for (const fx of this.#hitFx) {
-        const p = (now - fx.t0) / BrowserRunController.#HIT_FX_MS;
-        ctx.beginPath();
-        ctx.arc(fx.x, fx.y, 10 + p * 14, 0, Math.PI * 2);
-        ctx.strokeStyle = `rgba(233, 255, 168, ${(0.7 * (1 - p)).toFixed(3)})`;
-        ctx.lineWidth = 2;
-        ctx.stroke();
+    // Departures: pop on hit, fade on expiry. Read from the recorder so the
+    // animation happens exactly where the engine says the target was.
+    for (const gone of director.recorder.removedTargetsAt(now)) {
+      if (this.#removalFxSeen.has(gone.id)) continue;
+      this.#removalFxSeen.add(gone.id);
+      if (gone.reason === "hit") {
+        this.#fx.hitAt(gone.x, gone.y, gone.radius, gone.removedMs, palette.core);
+      } else if (gone.reason === "expired") {
+        this.#fx.expireAt(gone.x, gone.y, gone.radius, gone.removedMs);
       }
     }
 
-    // Reticle: white cross with a dark halo for readability on any target.
-    const reticlePos = this.#capture?.reticle.position;
-    if (reticlePos) {
-      const drawCross = (color: string, width: number): void => {
-        ctx.strokeStyle = color;
-        ctx.lineWidth = width;
-        ctx.lineCap = "round";
-        ctx.beginPath();
-        ctx.moveTo(reticlePos.x - 10, reticlePos.y);
-        ctx.lineTo(reticlePos.x - 3, reticlePos.y);
-        ctx.moveTo(reticlePos.x + 3, reticlePos.y);
-        ctx.lineTo(reticlePos.x + 10, reticlePos.y);
-        ctx.moveTo(reticlePos.x, reticlePos.y - 10);
-        ctx.lineTo(reticlePos.x, reticlePos.y - 3);
-        ctx.moveTo(reticlePos.x, reticlePos.y + 3);
-        ctx.lineTo(reticlePos.x, reticlePos.y + 10);
-        ctx.stroke();
-      };
-      drawCross("rgba(0, 0, 0, 0.65)", 3.5);
-      drawCross("#ffffff", 1.5);
+    for (const target of targets) {
+      const age = now - target.appearedMs;
+      drawTarget(ctx, target, age, palette, kind === "tracking" && reticlePos !== null
+        ? Math.hypot(reticlePos.x - target.x, reticlePos.y - target.y) <= target.radius
+        : false);
+    }
+
+    this.#fx.draw(ctx, now);
+
+    // Sequence pips for the switch drill: how many of the three are done.
+    if (kind === "target-switch") {
+      const total = this.#activeScenario?.targetsPerTrial ?? 3;
+      const done = director.recorder.state.spawnedTargets.filter((t) => t.removalReason === "hit").length;
+      const missed = director.recorder.state.spawnedTargets.filter((t) => t.removalReason === "expired").length;
+      drawSequencePips(ctx, w / 2, h - 26, total, done, missed, palette.core);
+    }
+
+    if (reticlePos) drawReticle(ctx, reticlePos.x, reticlePos.y);
+  }
+}
+
+
+
+// ---------------------------------------------------------------------------
+// Arena presentation helpers (visual only).
+// ---------------------------------------------------------------------------
+
+interface TargetPalette {
+  /** Main disc colour. */
+  core: string;
+  /** Bright rim. */
+  rim: string;
+  /** Soft outer glow (rgba). */
+  glow: string;
+}
+
+/**
+ * One colour family per drill kind so a session reads as distinct drills
+ * rather than "green circles", all high-contrast on the dark stage.
+ */
+const TARGET_PALETTE: Record<ScenarioDefinition["kind"], TargetPalette> = {
+  "flick-static": { core: "#c8f24e", rim: "#eaffb0", glow: "rgba(200, 242, 78, 0.28)" },
+  "flick-dynamic": { core: "#4fd8f0", rim: "#c6f6ff", glow: "rgba(79, 216, 240, 0.28)" },
+  "target-switch": { core: "#ffb64a", rim: "#ffe0ae", glow: "rgba(255, 182, 74, 0.30)" },
+  tracking: { core: "#ff6fd8", rim: "#ffd0f2", glow: "rgba(255, 111, 216, 0.26)" },
+};
+
+const SPAWN_ANIM_MS = 140;
+
+function easeOutCubic(p: number): number {
+  const q = 1 - Math.min(1, Math.max(0, p));
+  return 1 - q * q * q;
+}
+
+function drawTarget(
+  ctx: CanvasRenderingContext2D,
+  target: ActiveTargetView,
+  ageMs: number,
+  palette: TargetPalette,
+  onTarget: boolean,
+): void {
+  const { x, y, radius } = target;
+  // The TRUE hit radius is outlined from the very first frame, so the visual
+  // spawn-in never misrepresents where a shot counts.
+  const spawn = easeOutCubic(ageMs / SPAWN_ANIM_MS);
+
+  // Soft glow.
+  ctx.beginPath();
+  ctx.arc(x, y, radius * (1.55 + 0.25 * (1 - spawn)), 0, Math.PI * 2);
+  ctx.fillStyle = palette.glow;
+  ctx.globalAlpha = 0.45 + 0.55 * spawn;
+  ctx.fill();
+  ctx.globalAlpha = 1;
+
+  // Hit-area ring (always full size).
+  ctx.beginPath();
+  ctx.arc(x, y, radius, 0, Math.PI * 2);
+  ctx.strokeStyle = palette.rim;
+  ctx.lineWidth = 1.5;
+  ctx.globalAlpha = 0.9;
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+
+  // Disc, scaling in.
+  const discR = radius * (0.35 + 0.65 * spawn) - 1;
+  if (discR > 0) {
+    const g = ctx.createRadialGradient(x - discR * 0.35, y - discR * 0.35, discR * 0.1, x, y, discR);
+    g.addColorStop(0, palette.rim);
+    g.addColorStop(0.45, palette.core);
+    g.addColorStop(1, shade(palette.core, 0.62));
+    ctx.beginPath();
+    ctx.arc(x, y, discR, 0, Math.PI * 2);
+    ctx.fillStyle = g;
+    ctx.fill();
+  }
+
+  // Dark centre so the reticle stays readable over the disc.
+  const core = Math.max(1.5, radius * 0.22);
+  ctx.beginPath();
+  ctx.arc(x, y, core, 0, Math.PI * 2);
+  ctx.fillStyle = "rgba(8, 11, 16, 0.6)";
+  ctx.fill();
+
+  // Tracking: an "on target" lock ring so the player feels the contact.
+  if (onTarget) {
+    ctx.beginPath();
+    ctx.arc(x, y, radius + 5, 0, Math.PI * 2);
+    ctx.strokeStyle = "rgba(255,255,255,0.85)";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+}
+
+function drawReticle(ctx: CanvasRenderingContext2D, x: number, y: number): void {
+  const cross = (color: string, width: number): void => {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(x - 11, y);
+    ctx.lineTo(x - 4, y);
+    ctx.moveTo(x + 4, y);
+    ctx.lineTo(x + 11, y);
+    ctx.moveTo(x, y - 11);
+    ctx.lineTo(x, y - 4);
+    ctx.moveTo(x, y + 4);
+    ctx.lineTo(x, y + 11);
+    ctx.stroke();
+  };
+  cross("rgba(0, 0, 0, 0.7)", 3.5);
+  cross("#ffffff", 1.5);
+  ctx.beginPath();
+  ctx.arc(x, y, 1.4, 0, Math.PI * 2);
+  ctx.fillStyle = "#ffffff";
+  ctx.fill();
+}
+
+function drawSequencePips(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  total: number,
+  done: number,
+  missed: number,
+  color: string,
+): void {
+  const gap = 18;
+  const startX = cx - ((total - 1) * gap) / 2;
+  for (let i = 0; i < total; i++) {
+    ctx.beginPath();
+    ctx.arc(startX + i * gap, cy, 4.5, 0, Math.PI * 2);
+    if (i < done) {
+      ctx.fillStyle = color;
+      ctx.fill();
+    } else if (i < done + missed) {
+      ctx.fillStyle = "rgba(255, 96, 96, 0.7)";
+      ctx.fill();
+    } else {
+      ctx.strokeStyle = "rgba(255,255,255,0.35)";
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
     }
   }
 }
 
+/** Darkens a #rrggbb colour by `factor` (0–1). */
+function shade(hex: string, factor: number): string {
+  const n = parseInt(hex.slice(1), 16);
+  const r = Math.round(((n >> 16) & 255) * factor);
+  const g = Math.round(((n >> 8) & 255) * factor);
+  const b = Math.round((n & 255) * factor);
+  return `rgb(${r}, ${g}, ${b})`;
+}
+
+interface Burst {
+  x: number;
+  y: number;
+  radius: number;
+  t0: number;
+  color: string;
+  /** Deterministic shard angles (no per-frame randomness). */
+  seed: number;
+}
+interface Ripple {
+  x: number;
+  y: number;
+  radius: number;
+  t0: number;
+  kind: "miss" | "expired";
+}
+
+/**
+ * Bounded, allocation-light effect layer. Hits pop (flash + ring + shards),
+ * expiries fade and sink, misses ripple. Durations are short enough never to
+ * cover the next target.
+ */
+class ArenaFx {
+  static readonly HIT_MS = 260;
+  static readonly EXPIRE_MS = 240;
+  static readonly MISS_MS = 180;
+  static readonly MAX = 24;
+  #bursts: Burst[] = [];
+  #ripples: Ripple[] = [];
+  #seed = 1;
+
+  hitAt(x: number, y: number, radius: number, t0: number, color: string): void {
+    this.#seed = (this.#seed * 1103515245 + 12345) >>> 0;
+    this.#bursts.push({ x, y, radius, t0, color, seed: this.#seed });
+    if (this.#bursts.length > ArenaFx.MAX) this.#bursts.shift();
+  }
+
+  expireAt(x: number, y: number, radius: number, t0: number): void {
+    this.#ripples.push({ x, y, radius, t0, kind: "expired" });
+    if (this.#ripples.length > ArenaFx.MAX) this.#ripples.shift();
+  }
+
+  missAt(x: number, y: number, t0: number): void {
+    this.#ripples.push({ x, y, radius: 10, t0, kind: "miss" });
+    if (this.#ripples.length > ArenaFx.MAX) this.#ripples.shift();
+  }
+
+  draw(ctx: CanvasRenderingContext2D, now: number): void {
+    if (this.#bursts.length > 0) {
+      this.#bursts = this.#bursts.filter((b) => now - b.t0 < ArenaFx.HIT_MS);
+      for (const b of this.#bursts) {
+        const p = Math.min(1, Math.max(0, (now - b.t0) / ArenaFx.HIT_MS));
+        const fade = 1 - p;
+        // Flash disc.
+        if (p < 0.35) {
+          ctx.beginPath();
+          ctx.arc(b.x, b.y, b.radius * (1 + p * 0.6), 0, Math.PI * 2);
+          ctx.fillStyle = `rgba(255,255,255,${(0.75 * (1 - p / 0.35)).toFixed(3)})`;
+          ctx.fill();
+        }
+        // Expanding ring.
+        ctx.beginPath();
+        ctx.arc(b.x, b.y, b.radius * (1 + p * 1.4), 0, Math.PI * 2);
+        ctx.strokeStyle = b.color;
+        ctx.globalAlpha = 0.8 * fade;
+        ctx.lineWidth = 2.5 * fade + 0.5;
+        ctx.stroke();
+        // Shards.
+        const shards = 10;
+        const e = easeOutCubic(p);
+        for (let i = 0; i < shards; i++) {
+          const jitter = ((b.seed >>> (i % 16)) & 7) / 7 - 0.5;
+          const a = (i / shards) * Math.PI * 2 + jitter * 0.4;
+          const dist = b.radius * (0.6 + 1.9 * e);
+          const sx = b.x + Math.cos(a) * dist;
+          const sy = b.y + Math.sin(a) * dist + 12 * p * p; // slight gravity
+          ctx.beginPath();
+          ctx.arc(sx, sy, Math.max(0.6, 2.6 * fade), 0, Math.PI * 2);
+          ctx.fillStyle = i % 3 === 0 ? "#ffffff" : b.color;
+          ctx.fill();
+        }
+        ctx.globalAlpha = 1;
+      }
+    }
+    if (this.#ripples.length > 0) {
+      this.#ripples = this.#ripples.filter(
+        (r) => now - r.t0 < (r.kind === "miss" ? ArenaFx.MISS_MS : ArenaFx.EXPIRE_MS),
+      );
+      for (const r of this.#ripples) {
+        const dur = r.kind === "miss" ? ArenaFx.MISS_MS : ArenaFx.EXPIRE_MS;
+        const p = Math.min(1, Math.max(0, (now - r.t0) / dur));
+        ctx.beginPath();
+        if (r.kind === "miss") {
+          ctx.arc(r.x, r.y, r.radius + p * 16, 0, Math.PI * 2);
+          ctx.strokeStyle = `rgba(255, 110, 110, ${(0.55 * (1 - p)).toFixed(3)})`;
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+        } else {
+          // Expired: the ring dims to red and sinks slightly.
+          ctx.arc(r.x, r.y + p * 6, r.radius * (1 - 0.25 * p), 0, Math.PI * 2);
+          ctx.strokeStyle = `rgba(255, 96, 96, ${(0.6 * (1 - p)).toFixed(3)})`;
+          ctx.lineWidth = 2;
+          ctx.stroke();
+          ctx.fillStyle = `rgba(255, 96, 96, ${(0.12 * (1 - p)).toFixed(3)})`;
+          ctx.fill();
+        }
+      }
+    }
+  }
+}

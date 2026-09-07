@@ -269,12 +269,11 @@ for (const state of STATES) {
     // therefore the test hooks) exists.
     await page.locator("#view-setup input[type=text]").first().fill("TorturePlayer");
     await page.click("#view-setup details.details summary");
-    const numbers = page.locator('#view-setup input[type="number"]');
-    await numbers.nth(3).fill("7");
-    await numbers.nth(4).fill("1");
-    await numbers.nth(5).fill("3");
-    await numbers.nth(6).fill("0");
-    await page.locator('#view-setup input[type="checkbox"]').uncheck();
+    await page.locator("#setup-seed").fill("7");
+    await page.locator("#setup-rounds").fill("1");
+    await page.locator("#setup-reps").fill("3");
+    await page.locator("#setup-warmups").fill("0");
+    await page.locator("#setup-ycheck").uncheck();
     await page.click("#view-setup button[type=submit]");
     await page.waitForFunction(() => window.__ALDO_TEST_HOOKS__ !== undefined);
 

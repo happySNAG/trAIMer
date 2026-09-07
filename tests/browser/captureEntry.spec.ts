@@ -26,11 +26,10 @@ async function openArena(page: Page): Promise<void> {
   await page.click(`#tabs button[data-tab="setup"]`);
   await page.locator("#view-setup input[type=text]").first().fill("HardwareProbe");
   await page.click("#view-setup details.details summary");
-  const numbers = page.locator('#view-setup input[type="number"]');
-  await numbers.nth(3).fill("4242"); // seed
-  await numbers.nth(4).fill("1"); // rounds
-  await numbers.nth(5).fill("3"); // reps
-  await numbers.nth(6).fill("0"); // warmups
+  await page.locator("#setup-seed").fill("4242");
+  await page.locator("#setup-rounds").fill("1");
+  await page.locator("#setup-reps").fill("3");
+  await page.locator("#setup-warmups").fill("0");
   await page.click(`#view-setup button[type=submit]`);
   await expect(page.locator("#run-canvas")).toBeVisible();
   // The arena only invites a click once the capture source exists; clicking

@@ -33,10 +33,21 @@ export interface SessionRunnerPorts {
   execution: TrialExecutionPort;
   onStateChange?: ((state: SessionStateName, detail?: string) => void) | undefined;
   onProgress?: ((progress: SessionProgressSnapshot) => void) | undefined;
+  /**
+   * A break started (with its planned length) or ended (null). Breaks are
+   * always skippable through SessionRunner.skipRest().
+   */
+  onRest?: ((rest: RestNotice | null) => void) | undefined;
   onTrialPersisted?: ((trial: TrialRecord) => void) | undefined;
   /** Persisted into every checkpoint (requirement E/L provenance). */
   captureSourceMetadata?: (() => CaptureSourceMetadata | null) | undefined;
   playerIdentity?: (() => { playerId: string; playerName: string }) | undefined;
+}
+
+export interface RestNotice {
+  durationMs: number;
+  reason: string;
+  skippable: boolean;
 }
 
 export interface SessionProgressSnapshot {

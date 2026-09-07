@@ -70,6 +70,11 @@ attach it to the report.
 | E2 | Move mouse slowly then fast | Reticle tracks raw movement; targets clickable; hit ring feedback only | | |
 | E3 | Press Esc mid-trial | Session ends visibly ("Session ended"), completed trials saved, no silent continuation | HARD | |
 | E3a | Press Esc during a rest / between trials | Session ends visibly; it never continues with the mouse released | HARD | |
+| E8 | Reach the first break between candidate blocks | Overlay shows "Break" with a live countdown and a **Skip break** button; Space or Enter also ends it immediately | HARD | |
+| E9 | Turn automatic breaks OFF in setup, start a session | No break overlay ever appears between blocks | | |
+| E10 | Three-target switch drill | Exactly ONE orange target visible at a time; the next appears ~0.1 s after a hit; an ignored target fades out red after ~1.1 s and the next still appears; pips at the bottom fill as targets are hit | HARD | |
+| E11 | Hit any target | Flash + ring + shard burst at the target; a missed click shows a faint red ripple at the reticle | | |
+| E12 | Watch a full block | Drill families rotate (no drill twice in a row); the top bar shows Round/Block/Drill and the instruction | | |
 | E4 | Alt+Tab mid-session, return | Trial invalidated (POINTER_LOCK_LOST/focus), session aborts honestly — restart session afterwards | HARD | |
 | E5 | Resize/window-drag during a trial | Trial flagged RESIZE_DURING_TRIAL (or aborted); never silently kept | | |
 | E6 | Unplug/replug the mouse between trials | Next trials still capture; if not, preflight/diagnostics says so | | |

@@ -91,14 +91,14 @@ test.describe("setup workflow and validation", () => {
     await page.click(`#tabs button[data-tab="setup"]`);
     // Advanced parameters live behind a collapsed details element.
     await page.click("#view-setup details.details summary");
-    const reps = page.locator('#view-setup input[type="number"]').nth(5);
+    const reps = page.locator("#setup-reps");
     await reps.fill("999");
     await page.click(`#view-setup button[type=submit]`);
     // Reload so the form re-renders from PERSISTED settings (clamped on save).
     await page.reload();
     await page.click(`#tabs button[data-tab="setup"]`);
     await page.click("#view-setup details.details summary");
-    const reloaded = page.locator('#view-setup input[type="number"]').nth(5);
+    const reloaded = page.locator("#setup-reps");
     const value = Number(await reloaded.inputValue());
     expect(value).toBeLessThanOrEqual(20);
     expect(value).toBeGreaterThanOrEqual(3);

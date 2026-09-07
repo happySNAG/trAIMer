@@ -66,6 +66,8 @@ export interface PlannedScenarioInstance {
   kind: ScenarioDefinition["kind"];
   targets: PlannedTarget[];
   durationMs: number;
+  /** Sequential scenarios only: each target's own window before it expires. */
+  perTargetTimeoutMs?: number;
 }
 
 export function clampToViewport(v: number, max: number): number {
@@ -196,6 +198,9 @@ function planTargetSwitchInstance(
     kind: def.kind,
     targets,
     durationMs: def.timeoutMs,
+    ...(def.perTargetTimeoutMs !== undefined
+      ? { perTargetTimeoutMs: def.perTargetTimeoutMs }
+      : {}),
   };
 }
 

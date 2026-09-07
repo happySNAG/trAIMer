@@ -381,6 +381,8 @@ interface RunView {
   hideOverlay(): void;
   /** Caption for the capture path this session actually runs on. */
   setCaptureNote(caption: string, detail: string): void;
+  /** Where the current drill sits in the session (round · block · drill) and what to do. */
+  setDrill(structure: string, instruction: string): void;
   setState(state: SessionStateName, label: string, tone: Tone, detail: string): void;
   setProgress(measured: number, upperBound: number | null): void;
   /** Arena click handler (start / retry capture). Cleared once consumed. */
@@ -425,7 +427,9 @@ function buildRunView(): RunView {
   const brand = el("span", { class: "run-brand" });
   brand.append(icon("crosshair", 14), el("span", { text: "Aldo Aim Lab" }));
 
-  const topLeft = el("div", { class: "run-topbar-left" }, [brand]);
+  const drillEl = el("span", { class: "run-drill", text: "" });
+  const instructionEl = el("span", { class: "run-instruction", text: "" });
+  const topLeft = el("div", { class: "run-topbar-left" }, [brand, drillEl, instructionEl]);
   const topRight = el("div", { class: "run-topbar-right" }, [detailEl, stateChip]);
   const topbar = el("div", { class: "run-topbar" }, [topLeft, topRight]);
 
@@ -576,6 +580,10 @@ function buildRunView(): RunView {
       captureNoteLabel.textContent = caption;
       captureNote.title = detail;
     },
+    setDrill(structure, instruction) {
+      drillEl.textContent = structure;
+      instructionEl.textContent = instruction;
+    },
     setState(state, label, tone, detail) {
       screen.setAttribute("data-session-state", state);
       stateLabel.textContent = label;
@@ -638,6 +646,7 @@ function makeCallbacks(run: RunView): RunControllerCallbacks {
   // just on the transition that carried it.
   let stickyDetail = "";
   let previousState = "";
+  let restTicker: ReturnType<typeof setInterval> | null = null;
   return {
     onHud(state, detail) {
       const pres = STATE_PRESENTATION[state] ?? { label: state, tone: "neutral" as Tone };
@@ -661,11 +670,8 @@ function makeCallbacks(run: RunView): RunControllerCallbacks {
           "Windows is handing the mouse to the arena. Press Esc to stop — every completed trial is already saved.",
         );
       } else if (state === "rest") {
-        run.showOverlay(
-          "clock",
-          "Scheduled rest",
-          "Short breaks protect measurement quality. The next block starts automatically — hands off the mouse.",
-        );
+        // Body and countdown are driven by onRest below.
+        run.showOverlay("clock", "Break", "Starting…");
       } else if (state === "paused") {
         run.showOverlay("pause", "Paused", "Your progress is saved. Resume when you're ready.");
       } else if (state === "candidate-transition") {
@@ -679,6 +685,42 @@ function makeCallbacks(run: RunView): RunControllerCallbacks {
       } else {
         run.hideOverlay();
       }
+    },
+    onRest(rest) {
+      if (restTicker !== null) {
+        clearInterval(restTicker);
+        restTicker = null;
+      }
+      if (!rest) return;
+      const startedAt = performance.now();
+      const isFatigue = rest.reason !== "candidate-transition";
+      const title = isFatigue ? "Rest break" : "Break";
+      const render = (): void => {
+        const remaining = Math.max(0, rest.durationMs - (performance.now() - startedAt));
+        const seconds = Math.ceil(remaining / 1000);
+        run.showOverlay(
+          "clock",
+          title,
+          isFatigue
+            ? `${seconds}s — you have been testing continuously for a while. A short rest protects measurement quality, but it is yours to take. Press Space or Enter to resume now.`
+            : `${seconds}s — next blinded sensitivity coming up. Press Space or Enter to resume now.`,
+          [
+            {
+              label: "Skip break",
+              onClick: () => {
+                diagnosticLog.log("info", "rest-skipped", { via: "button", reason: rest.reason });
+                controller?.skipRest();
+              },
+            },
+          ],
+        );
+      };
+      render();
+      restTicker = setInterval(render, 250);
+    },
+    onDrill(info) {
+      const structure = `Round ${info.round}/${info.rounds} · Block ${info.block}/${info.blocks} · Drill ${info.drill}/${info.drillsPlanned}${info.phase === "warmup" ? " (warm-up)" : ""}`;
+      run.setDrill(structure, info.instruction);
     },
     onTrialPersisted(trial) {
       if (trial.phase === "measured") {
@@ -838,7 +880,9 @@ function startSession(settings: AppSettings): void {
     makeCallbacks(run),
     {
       virtualLock: e2e,
-      ...(e2e ? { restBetweenCandidatesMs: 250 } : {}),
+      // E2E: short rests so automated sessions finish quickly, unless a spec
+      // asks for a long one (?rest=<ms>) to exercise the break UI itself.
+      ...(e2e ? { restBetweenCandidatesMs: e2eRestMs() } : {}),
     },
   );
   if (e2e) {
@@ -866,6 +910,14 @@ function startSession(settings: AppSettings): void {
   // that into a fatal interruption). While a lock is merely PENDING the key
   // reaches us, and it must cancel rather than leave the request hanging.
   const onKeyDown = (event: KeyboardEvent): void => {
+    // Space / Enter end a break immediately. Only while a break is actually
+    // in progress — during a trial the keyboard must stay inert.
+    if ((event.key === " " || event.key === "Enter" || event.key === "Spacebar") && controller?.resting) {
+      event.preventDefault();
+      diagnosticLog.log("info", "rest-skipped", { via: event.key === "Enter" ? "enter" : "space" });
+      controller.skipRest();
+      return;
+    }
     if (event.key !== "Escape") return;
     if (!controller || controller.started) return;
     event.preventDefault();
@@ -925,6 +977,11 @@ function startSession(settings: AppSettings): void {
       exitSessionChrome();
       renderStorageFailure(views.run, err);
     });
+}
+
+function e2eRestMs(): number {
+  const raw = Number(new URLSearchParams(window.location.search).get("rest"));
+  return Number.isFinite(raw) && raw > 0 ? Math.min(60_000, raw) : 250;
 }
 
 renderSetupView(views.setup, {

@@ -6,8 +6,12 @@
  * these strings so any historical result can be traced to the exact code that
  * produced it.
  *
- * The V1 release candidate is identified as 1.0.0-rc.4 (Pass 10: the core
- * shooting test can actually be started on real Windows hardware — rc.3
+ * The V1 release candidate is identified as 1.0.0-rc.5 (Pass 11: gameplay
+ * fixes from the first playable hardware session — the three-target switch
+ * drill is genuinely sequential with per-target windows, breaks are
+ * skippable and configurable, drill draws are balanced and de-repeated, and
+ * the arena has real presentation). rc.4 (Pass 10) made the core shooting
+ * test startable on real Windows hardware at all — rc.3
  * installed and launched on Aldo's PC but no session could ever begin,
  * because the arena overlay swallowed the "click to lock in" click and
  * pointer-lock events were bound to the canvas instead of the document).
@@ -23,7 +27,7 @@
 export const APP_NAME = "aldo-aim-lab";
 
 /** Application release version for the V1 release candidate. */
-export const APP_VERSION = "1.0.0-rc.4";
+export const APP_VERSION = "1.0.0-rc.5";
 
 /**
  * Engine contract version: bump when a persisted engine-facing data contract

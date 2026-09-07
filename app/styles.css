@@ -1421,6 +1421,24 @@ pre.json {
   text-overflow: ellipsis;
 }
 
+.run-drill {
+  color: var(--text-2);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+  padding-left: 14px;
+  border-left: 1px solid var(--line-1);
+  white-space: nowrap;
+}
+
+.run-instruction {
+  color: var(--text-1);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .run-stage {
   flex: 1;
   display: grid;
