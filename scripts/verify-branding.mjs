@@ -406,4 +406,14 @@ function main() {
   console.log(`      ${ALLOWED.length} documented legacy survivals (user-data / upgrade identity)`);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) main();
+/**
+ * This module is only ever EXECUTED (`node scripts/verify-branding.mjs …`);
+ * nothing imports it. It therefore runs unconditionally.
+ *
+ * It used to be guarded by `import.meta.url === \`file://${process.argv[1]}\``,
+ * which is false on Windows — `import.meta.url` is `file:///D:/a/...` while
+ * `process.argv[1]` is `D:\a\...`. The gate silently did nothing and exited
+ * 0 on every Windows CI job: a release gate that passes by not running is
+ * worse than no gate at all.
+ */
+main();
