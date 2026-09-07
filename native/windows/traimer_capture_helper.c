@@ -248,10 +248,21 @@ static int shutting_down(void)
 static int ws_send_all(SOCKET sock, const char *data, int len)
 {
     int sent = 0;
+    int stalls = 0;
     while (sent < len) {
         int n = send(sock, data + sent, len - sent, 0);
-        if (n <= 0) return 0;
-        sent += n;
+        if (n > 0) { sent += n; stalls = 0; continue; }
+        /* The client socket is non-blocking once WSAEventSelect is armed on
+           it (that is how the streaming loop wakes on data instead of polling
+           a 200 ms timeout). A full send buffer is back-pressure, not a
+           disconnect: wait briefly and retry, and give up only if it stays
+           full for a second — at which point the client really is gone. */
+        if (WSAGetLastError() == WSAEWOULDBLOCK && stalls < 1000) {
+            stalls++;
+            Sleep(1);
+            continue;
+        }
+        return 0;
     }
     return 1;
 }
@@ -941,11 +952,42 @@ int main(int argc, char **argv)
             continue;
         }
 
-        /* ---- streaming epoch: pump windows messages until disconnect ---- */
+        /* ---- streaming epoch: pump windows messages until disconnect ----
+
+           The wait below MUST wake on inbound socket data as well as on
+           Windows messages. It used to wait only for messages, with a 200 ms
+           timeout, and check the socket afterwards — so on an idle mouse the
+           helper did not look at its socket for up to 200 ms. Frames were
+           unaffected (they are pushed from WM_INPUT), but anything that needs
+           a REPLY inherited that latency: the clock-synchronization exchange
+           measured a 164 ms minimum round trip on a CI runner, which bounds
+           the offset to ±82 ms and makes native capture unusable for
+           measurement. WSAEventSelect arms an event on FD_READ/FD_CLOSE so
+           the wait returns the moment bytes arrive.
+
+           WSAEventSelect also switches the socket to non-blocking mode; every
+           recv below is already guarded by FIONREAD, and ws_send_all now
+           treats WSAEWOULDBLOCK as back-pressure. */
+        WSAEVENT socketEvent = WSACreateEvent();
+        if (socketEvent == WSA_INVALID_EVENT ||
+            WSAEventSelect(client, socketEvent, FD_READ | FD_CLOSE) != 0) {
+            fprintf(stderr, "WSAEventSelect failed (%d)\n", WSAGetLastError());
+            if (socketEvent != WSA_INVALID_EVENT) WSACloseEvent(socketEvent);
+            closesocket(client);
+            g_clientSocket = INVALID_SOCKET;
+            InterlockedExchange(&g_clientAccepted, 0);
+            continue;
+        }
+
         MSG msg;
         while (!shutting_down()) {
             DWORD waitResult = MsgWaitForMultipleObjectsEx(
-                0, NULL, 200, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+                1, &socketEvent, 200, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+            if (waitResult == WAIT_OBJECT_0) {
+                /* Manual-reset event: clear it before draining, so data that
+                   arrives during the drain re-signals rather than being lost. */
+                WSAResetEvent(socketEvent);
+            }
 
             /* Check socket liveness cheaply. */
             u_long bytesAvailable = 0;
@@ -994,7 +1036,7 @@ int main(int argc, char **argv)
                 }
                 if (closing) break;
             }
-            if (waitResult == WAIT_OBJECT_0) {
+            if (waitResult == WAIT_OBJECT_0 + 1 || waitResult == WAIT_TIMEOUT) {
                 while (PeekMessageA(&msg, hwnd, 0, 0, PM_REMOVE)) {
                     if (msg.message == WM_INPUT) {
                         handle_wm_input((HRAWINPUT)msg.lParam, client);
@@ -1015,6 +1057,10 @@ int main(int argc, char **argv)
         }
 
         emit_lifecycle(client, "stopping", "client disconnected");
+        /* Restore blocking semantics before the socket is closed, and release
+           the wakeup event with it. */
+        WSAEventSelect(client, NULL, 0);
+        WSACloseEvent(socketEvent);
         closesocket(client);
         g_clientSocket = INVALID_SOCKET;
         InterlockedExchange(&g_clientAccepted, 0);
