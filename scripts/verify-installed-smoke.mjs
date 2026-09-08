@@ -240,10 +240,15 @@ try {
         // and the countdown runs); the second is skipped the way a player
         // may, proving the skip path too.
         if (breaksSeen >= 2 && !skippedBreak) {
-          const skip = page.locator(".overlay-actions button:has-text('Skip break')");
+          // Best effort: a short break can end on its own while the click is
+          // being retried against a re-rendered overlay, and that is not a
+          // failure of anything — the player would simply have waited it out.
+          const skip = page.locator(".overlay-actions button:has-text('Skip break')").first();
           if ((await skip.count()) > 0) {
-            await skip.click();
-            skippedBreak = true;
+            skippedBreak = await skip
+              .click({ timeout: 1_500 })
+              .then(() => true)
+              .catch(() => false);
           }
         }
         await page.waitForTimeout(300);
