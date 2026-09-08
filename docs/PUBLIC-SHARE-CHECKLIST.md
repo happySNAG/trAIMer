@@ -23,7 +23,7 @@ enforces the row.
 | 13 | CI: lint, typecheck, engine, browser, Electron, profile, golden, audit, gain, capture/timing, picker, full smoke, migration, branding, telemetry, release, docs | Done, all gates on every push | `.github/workflows/ci.yml` | — |
 | 14 | Checksums: SHA-256 published beside the installer | Done | `windows-installer` job writes `trAIMer-Setup-SHA256.txt` and the job summary | — |
 | 15 | Code signing | Not done, documented as post-V1 | `docs/CODE-SIGNING.md` | Purchase a certificate; sign in CI |
-| 16 | GitHub release with installer, checksum and notes | See PASS-19-REPORT.md for this build's status | Manual, per docs/RELEASE.md step 8 | Do not overwrite an existing release |
+| 16 | GitHub release with installer, checksum and notes | Done: `v1.0.0-rc.13` pre-release (installer, `trAIMer-Setup.exe`, checksum, release notes); `v1.0.0-rc.12` published too as the upgrade gate's source | Manual, per docs/RELEASE.md step 8 | Do not overwrite an existing release; advance `PRIOR_RC_*` in ci.yml next pass |
 | 17 | Known limitations stated in README and release notes | Done | — | — |
 | 18 | Repository visibility | Private | — | Maintainer decision; flip after rows 16 and 19 |
 | 19 | `main` reflects the release | Not done: release candidates are built from the working branch on pull request #1 | — | Merge the pull request |
