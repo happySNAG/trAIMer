@@ -24,7 +24,9 @@ import {
 } from "./canonical.ts";
 import {
   DEFAULT_ASPECT_RATIO,
+  hipfireFovFactor,
   resolveFovModel,
+  resolveScaledFov,
   verticalToHorizontal,
   type FovAxis,
   type ResolvedFov,
@@ -167,7 +169,10 @@ export function canonicalFromGameSettings(
     throw new ConversionError(`dpi must be positive and finite (got ${dpi})`);
   }
   const model = profile.sensitivityModel;
-  const degPerCountX = degreesPerCountForValue(model, input.hipfire, "x");
+  // A game whose hip-fire rotation scales with its FOV setting (PUBG) applies
+  // that factor to both axes; every other profile has a factor of exactly 1.
+  const fovFactor = hipfireFovFactor(profile.fov, input.fovDegrees);
+  const degPerCountX = degreesPerCountForValue(model, input.hipfire, "x") * fovFactor;
 
   let verticalInput: number;
   if (!profile.axes.independentAxes) {
@@ -179,7 +184,7 @@ export function canonicalFromGameSettings(
     verticalInput = input.vertical ?? input.hipfire;
   }
   const degPerCountY =
-    degreesPerCountForValue(model, verticalInput, "y") * builtInVerticalRatio(profile);
+    degreesPerCountForValue(model, verticalInput, "y") * builtInVerticalRatio(profile) * fovFactor;
 
   const countsPerCm = dpi / CM_PER_INCH;
   return canonicalAim(degPerCountX * countsPerCm, degPerCountY * countsPerCm);
@@ -322,6 +327,9 @@ function resolveZoomFov(
   hipFov: ResolvedFov | null,
   aspectRatio: number,
 ): ResolvedFov | null {
+  if (zoom.fov.kind === "scaled-from-hipfire") {
+    return hipFov ? resolveScaledFov(zoom.fov.factor, hipFov) : null;
+  }
   const explicit = resolveFovModel(zoom.fov, null, aspectRatio);
   if (explicit) return explicit;
   if (hipFov && zoom.magnification !== null) {
@@ -356,11 +364,14 @@ export function gameSettingsFromCanonical(
   const model = profile.sensitivityModel;
   const target = degreesPerCountAt(aim, dpi);
   const countsPerCm = dpi / CM_PER_INCH;
+  // The setting the game needs is the target divided by whatever its FOV
+  // setting multiplies hip-fire by (1 for every game but PUBG).
+  const hipFovFactor = hipfireFovFactor(profile.fov, options.fovDegrees);
 
   // ---- horizontal ----
-  const exactHip = valueForDegreesPerCount(model, target.x, "x");
+  const exactHip = valueForDegreesPerCount(model, target.x / hipFovFactor, "x");
   const hipQuant = quantize(profile.hipfireField.entry, exactHip);
-  const achievedDegPerCountX = degreesPerCountForValue(model, hipQuant.ui, "x");
+  const achievedDegPerCountX = degreesPerCountForValue(model, hipQuant.ui, "x") * hipFovFactor;
   notes.push(
     ...hipQuant.notes.map((n) =>
       profile.axes.independentAxes ? `${profile.hipfireField.label}: ${n}` : n,
@@ -373,7 +384,7 @@ export function gameSettingsFromCanonical(
   let achievedDegPerCountY: number;
 
   if (!profile.axes.independentAxes) {
-    achievedDegPerCountY = degreesPerCountForValue(model, hipQuant.ui, "y") * ratio;
+    achievedDegPerCountY = degreesPerCountForValue(model, hipQuant.ui, "y") * ratio * hipFovFactor;
     const impliedY = achievedDegPerCountY * countsPerCm;
     // Whether the AXIS MODEL can express the requested vertical is a separate
     // question from how much the slider grid rounded. Testing the rounded
@@ -382,7 +393,7 @@ export function gameSettingsFromCanonical(
     // exactly as their own slider allows — so the comparison runs against the
     // UNROUNDED horizontal. Rounding has its own note.
     const impliedExactY =
-      degreesPerCountForValue(model, exactHip, "y") * ratio * countsPerCm;
+      degreesPerCountForValue(model, exactHip, "y") * ratio * hipFovFactor * countsPerCm;
     if (Math.abs(impliedExactY - aim.degreesPerCmY) > 1e-6 * aim.degreesPerCmY) {
       warnings.push(
         `${profile.displayName} exposes a single sensitivity, so vertical cannot be set independently. Its vertical works out at ${(360 / impliedY).toFixed(1)} cm/360 rather than the requested ${cmPer360Y(aim).toFixed(1)} cm/360.`,
@@ -390,7 +401,7 @@ export function gameSettingsFromCanonical(
     }
   } else {
     const field = profile.axes.verticalField!;
-    const neededVerticalDegPerCount = target.y / ratio;
+    const neededVerticalDegPerCount = target.y / ratio / hipFovFactor;
     const effectiveValue = valueForDegreesPerCount(model, neededVerticalDegPerCount, "y");
     const exactVertical =
       profile.axes.verticalSemantics === "multiplier-of-horizontal"
@@ -408,7 +419,7 @@ export function gameSettingsFromCanonical(
       profile.axes.verticalSemantics === "multiplier-of-horizontal"
         ? hipQuant.ui * vertQuant.ui
         : vertQuant.ui;
-    achievedDegPerCountY = degreesPerCountForValue(model, appliedValue, "y") * ratio;
+    achievedDegPerCountY = degreesPerCountForValue(model, appliedValue, "y") * ratio * hipFovFactor;
   }
 
   const achieved = canonicalAim(
@@ -448,7 +459,9 @@ export function gameSettingsFromCanonical(
   }
   if (profile.fov.kind === "configurable" && profile.fov.affectsHipfireSensitivity) {
     warnings.push(
-      `${profile.displayName} changes hip-fire sensitivity with the field of view; re-check this conversion if you change your FOV.`,
+      profile.fov.hipfireScaling
+        ? `${profile.displayName} changes hip-fire sensitivity with the field of view; this conversion is for ${hipFov?.statedDeg ?? profile.fov.defaultDegrees}° and must be redone if you change your FOV.`
+        : `${profile.displayName} changes hip-fire sensitivity with the field of view; re-check this conversion if you change your FOV.`,
     );
   }
 
@@ -605,13 +618,20 @@ export function gameSettingsFromCanonical(
     const q = quantize(zoom.setting.entry, exactValue * valueScale);
     zoomNotes.push(...q.notes);
     const applied = q.ui / valueScale;
-    let achievedZoomDegPerCount: number;
+    let achievedZoomDegPerCount: number | null;
     switch (zoom.nativeBehavior) {
       case "multiplies-hipfire":
         achievedZoomDegPerCount = achievedDegPerCountX * applied;
         break;
       case "fov-relative-multiplier":
-        achievedZoomDegPerCount = achievedDegPerCountX * applied * (fovFactor ?? 1);
+        // Without the zoomed FOV the game's own scaling is unknown here, so
+        // the achieved value is unknown too — never "hip-fire times one".
+        achievedZoomDegPerCount = fovFactor === null ? null : achievedDegPerCountX * applied * fovFactor;
+        if (fovFactor === null) {
+          zoomNotes.push(
+            "The game applies its own focal-length scaling for this zoom on top of the value above; the zoomed field of view is not published, so the resulting rotation per count is not stated.",
+          );
+        }
         break;
       case "fov-ratio-multiplier":
         achievedZoomDegPerCount = achievedDegPerCountX * applied * (linearFovRatio ?? 1);
@@ -634,7 +654,8 @@ export function gameSettingsFromCanonical(
         display: `${q.ui.toFixed(zoom.setting.entry.uiDecimals)}${zoom.setting.entry.unitSuffix}`,
       },
       achievedDegreesPerCount: achievedZoomDegPerCount,
-      achievedCmPer360: 360 / (achievedZoomDegPerCount * countsPerCm),
+      achievedCmPer360:
+        achievedZoomDegPerCount === null ? null : 360 / (achievedZoomDegPerCount * countsPerCm),
       fovDegrees: zoomFov?.statedDeg ?? null,
       notes: zoomNotes,
     });

@@ -265,12 +265,34 @@ function checkSensitivityModel(
   }
 }
 
-function checkFov(model: FovModel | undefined, path: string, issues: ProfileIssue[]): void {
+function checkFov(
+  model: FovModel | undefined,
+  path: string,
+  issues: ProfileIssue[],
+  context: "hipfire" | "zoom" = "hipfire",
+): void {
   if (!model || typeof model !== "object") {
     issues.push({ severity: "error", path, message: "fov model is missing (use {kind:\"none\"})" });
     return;
   }
   const axes = ["horizontal", "horizontal-at-4-3", "horizontal-at-16-9", "vertical"];
+  if (model.kind === "scaled-from-hipfire") {
+    if (context !== "zoom") {
+      issues.push({
+        severity: "error",
+        path: `${path}.kind`,
+        message: "a hip-fire field of view cannot be scaled from itself",
+      });
+    }
+    if (!isFiniteNumber(model.factor) || model.factor <= 0 || model.factor > 1) {
+      issues.push({
+        severity: "error",
+        path: `${path}.factor`,
+        message: `invalid fov scale factor ${String(model.factor)}: expected a number in (0, 1]`,
+      });
+    }
+    return;
+  }
   if (model.kind === "fixed") {
     if (!axes.includes(model.axis)) {
       issues.push({ severity: "error", path: `${path}.axis`, message: `unknown fov axis "${model.axis}"` });
@@ -321,6 +343,27 @@ function checkFov(model: FovModel | undefined, path: string, issues: ProfileIssu
         path: `${path}.stepDegrees`,
         message: `invalid step size ${model.stepDegrees}`,
       });
+    }
+    if (model.hipfireScaling !== undefined) {
+      if (!model.affectsHipfireSensitivity) {
+        issues.push({
+          severity: "error",
+          path: `${path}.hipfireScaling`,
+          message: "hip-fire FOV scaling is declared but affectsHipfireSensitivity is false",
+        });
+      }
+      if (
+        model.hipfireScaling.kind !== "linear-degrees" ||
+        !isFiniteNumber(model.hipfireScaling.referenceDegrees) ||
+        model.hipfireScaling.referenceDegrees <= 0 ||
+        model.hipfireScaling.referenceDegrees >= 180
+      ) {
+        issues.push({
+          severity: "error",
+          path: `${path}.hipfireScaling`,
+          message: "hip-fire FOV scaling needs kind \"linear-degrees\" and a reference angle in (0, 180)",
+        });
+      }
     }
   } else if (model.kind !== "none") {
     issues.push({
@@ -641,7 +684,14 @@ export function validateGameProfile(profile: GameProfile): ProfileValidation {
           message: `impossible magnification ${zoom.magnification}`,
         });
       }
-      checkFov(zoom.fov, `${path}.fov`, issues);
+      checkFov(zoom.fov, `${path}.fov`, issues, "zoom");
+      if (zoom.fov?.kind === "scaled-from-hipfire" && profile.fov?.kind === "none") {
+        issues.push({
+          severity: "error",
+          path: `${path}.fov`,
+          message: "a zoom FOV scaled from hip-fire needs a hip-fire field of view on the profile",
+        });
+      }
       checkField(zoom.setting, `${path}.setting`, issues, false);
       const behaviors = [
         "hipfire",
@@ -672,14 +722,22 @@ export function validateGameProfile(profile: GameProfile): ProfileValidation {
           message: "no neutral value declared; game-native matching cannot be offered for this zoom",
         });
       }
+      // A game that scales its zoom by focal length itself but publishes no
+      // zoomed FOV can still be modelled — only the game's own default is
+      // expressible, and the profile must say exactly that (Pass 3).
+      const nativeOnly =
+        Array.isArray(profile.supportedMatching) &&
+        profile.supportedMatching.length === 1 &&
+        profile.supportedMatching[0] === "game-native";
       if (
         zoom.nativeBehavior === "fov-relative-multiplier" &&
-        zoom.fov.kind === "none"
+        zoom.fov.kind === "none" &&
+        !nativeOnly
       ) {
         issues.push({
           severity: "error",
           path: `${path}.fov`,
-          message: 'unsupported ADS model combination: "fov-relative-multiplier" requires a field of view for this zoom',
+          message: 'unsupported ADS model combination: "fov-relative-multiplier" requires a field of view for this zoom unless only game-native matching is offered',
         });
       }
       // Pass 2 behaviours: each needs exactly the data its arithmetic reads.

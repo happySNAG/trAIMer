@@ -143,8 +143,11 @@ export function quantize(spec: ValueEntrySpec, exact: number): QuantizedValue {
   let value = snapToStep(spec, exact);
   value = roundToDecimals(value, spec.uiDecimals);
 
-  let clampedToMin = false;
-  let clampedToMax = false;
+  // "Clamped" means the EXACT value lies outside the game's range — including
+  // an exact 0.54 on a whole-number grid whose floor is 1, which the grid
+  // would otherwise quietly snap onto the floor and call rounding.
+  let clampedToMin = exact < spec.min;
+  let clampedToMax = exact > spec.max;
   if (value < spec.min) {
     // Step back INTO range: the first grid point at or above min.
     value = spec.step
@@ -174,6 +177,19 @@ export function quantize(spec: ValueEntrySpec, exact: number): QuantizedValue {
     clampedToMax = true;
   }
 
+  if (clampedToMin && value > spec.min) {
+    // The grid snapped a below-floor value above the floor; the floor itself
+    // is the nearest the game can do.
+    value = spec.step
+      ? roundToDecimals(
+          (spec.stepOrigin ?? spec.min) +
+            Math.ceil(nudge((spec.min - (spec.stepOrigin ?? spec.min)) / spec.step) - NEGLIGIBLE_RELATIVE) *
+              spec.step,
+          spec.uiDecimals,
+        )
+      : roundToDecimals(spec.min, spec.uiDecimals);
+    if (value < spec.min) value = roundToDecimals(spec.min, spec.uiDecimals);
+  }
   const relativeError = exact === 0 ? 0 : (value - exact) / exact;
   const roundingLoss =
     Math.abs(value - exact) > NEGLIGIBLE_RELATIVE * Math.max(1, Math.abs(exact));

@@ -49,6 +49,24 @@ export type FovModel =
        * setting changes. Almost always false; never assumed.
        */
       readonly affectsHipfireSensitivity: boolean;
+      /**
+       * How hip-fire scales when `affectsHipfireSensitivity` is true (Pass 3):
+       * degrees per count are multiplied by `stated / referenceDegrees`. A
+       * profile that declares `affectsHipfireSensitivity` without this only
+       * warns; with it, the conversion applies the scaling.
+       */
+      readonly hipfireScaling?:
+        | { readonly kind: "linear-degrees"; readonly referenceDegrees: number }
+        | undefined;
+    }
+  /**
+   * A ZOOM level whose FOV is the hip-fire FOV scaled by a constant, in
+   * degrees on the hip-fire number's own axis (Pass 3). Rainbow Six Siege
+   * defines every optic this way. Meaningless on a profile's hip-fire FOV.
+   */
+  | {
+      readonly kind: "scaled-from-hipfire";
+      readonly factor: number;
     };
 
 const DEG = Math.PI / 180;
@@ -135,6 +153,10 @@ export function resolveFovModel(
   aspectRatio: number = DEFAULT_ASPECT_RATIO,
 ): ResolvedFov | null {
   if (model.kind === "none") return null;
+  // A scaled zoom FOV needs the hip-fire FOV it scales; see
+  // `resolveScaledFov`. On its own it resolves to nothing rather than to a
+  // guess.
+  if (model.kind === "scaled-from-hipfire") return null;
   if (model.kind === "fixed") {
     return resolveFov(model.degrees, model.axis, aspectRatio);
   }
@@ -147,4 +169,31 @@ export function resolveFovModel(
 export function fovWithinLimits(model: FovModel, degrees: number): boolean {
   if (model.kind !== "configurable") return false;
   return degrees >= model.minDegrees && degrees <= model.maxDegrees;
+}
+
+/** Resolves a `scaled-from-hipfire` zoom FOV against the hip-fire FOV. */
+export function resolveScaledFov(
+  factor: number,
+  hipFov: ResolvedFov,
+): ResolvedFov {
+  if (!Number.isFinite(factor) || factor <= 0) {
+    throw new RangeError(`fov scale factor must be positive (got ${factor})`);
+  }
+  return resolveFov(hipFov.statedDeg * factor, hipFov.statedAxis, hipFov.aspectRatio);
+}
+
+/**
+ * The factor a game applies to hip-fire degrees-per-count for its configured
+ * FOV, or 1 when the profile declares no such scaling.
+ */
+export function hipfireFovFactor(
+  model: FovModel,
+  chosenDegrees: number | null | undefined,
+): number {
+  if (model.kind !== "configurable" || !model.affectsHipfireSensitivity || !model.hipfireScaling) {
+    return 1;
+  }
+  const raw = chosenDegrees ?? model.defaultDegrees;
+  const clamped = Math.min(model.maxDegrees, Math.max(model.minDegrees, raw));
+  return clamped / model.hipfireScaling.referenceDegrees;
 }
