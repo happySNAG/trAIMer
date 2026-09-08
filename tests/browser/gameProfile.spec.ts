@@ -1,6 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import type { Recommendation } from "../../src/domain/recommendation.ts";
-import type { FinalResult } from "../../src/results/finalResult.ts";
+import { finalResult, recommendation } from "./gameProfileFixtures.ts";
 
 /**
  * The player-facing game-profile flow (Game Profile Pass 1, requirements 11,
@@ -27,13 +26,21 @@ test.describe("choosing a game profile", () => {
     await expect(panel).toContainText("physical sensitivity");
   });
 
-  test("only the generic profile is offered in this pass", async ({ page }) => {
+  test("offers the five public games and Generic / Raw, in that order, and no fixture", async ({
+    page,
+  }) => {
     await page.goto("/");
     await page.click(`#tabs button[data-tab="setup"]`);
     const options = page.locator("#game-profile-select option");
-    await expect(options).toHaveCount(2);
+    await expect(options).toHaveCount(7);
     await expect(options.nth(0)).toHaveText(/No game selected/);
-    await expect(options.nth(1)).toHaveText("Generic (raw sensitivity)");
+    await expect(options.nth(1)).toHaveText("Fortnite");
+    await expect(options.nth(2)).toHaveText("Valorant");
+    await expect(options.nth(3)).toHaveText("Counter-Strike 2");
+    await expect(options.nth(4)).toHaveText("Apex Legends");
+    await expect(options.nth(5)).toHaveText("Call of Duty / Warzone");
+    await expect(options.nth(6)).toHaveText("Generic / Raw");
+    await expect(page.locator("#game-profile-select")).not.toContainText("Fixture");
   });
 
   test("picking a game reveals its settings and nothing else", async ({ page }) => {
@@ -138,77 +145,6 @@ test.describe("results with a game profile", () => {
 // A converted recommendation, through the production results view
 // ---------------------------------------------------------------------------
 
-function recommendation(): Recommendation {
-  return {
-    experimentId: "experiment-game-e2e",
-    primarySensitivity: { sensX: 8.4, sensY: 8.4 },
-    recommendedEdpi: 6720,
-    sensXRange: { min: 7.6, max: 9.2 },
-    edpiRange: { min: 6080, max: 7360 },
-    confidence: 0.66,
-    confidenceLabel: "moderate",
-    dimensionEstimates: {},
-    utilityWeights: {},
-    evidence: {
-      trialsAnalyzed: 30,
-      trialsExcluded: 0,
-      exclusionReasonCounts: {},
-      candidatesEvaluated: 5,
-      validTrialsPerCandidate: {},
-      bestCandidateId: "cand-c",
-      runnerUpCandidateId: "cand-b",
-      utilityGapBestVsRunnerUp: 0.05,
-      utilityGapZScore: 2.1,
-      separation: "clear",
-      searchRoundsRun: 1,
-      notes: [],
-    },
-    warnings: [],
-    refusedHighConfidence: false,
-    rationaleLines: ["the faster candidate led on accuracy"],
-    unresolvedBoundary: false,
-    furtherTestingSuggested: false,
-  } as unknown as Recommendation;
-}
-
-function finalResult(rec: Recommendation): FinalResult {
-  return {
-    contractVersion: "final-result-v1",
-    appVersion: "test",
-    engineVersion: "engine-v4",
-    experimentId: rec.experimentId,
-    currentSensitivity: { sensXPercent: 7, sensYPercent: 7, edpi: 5600 },
-    immediateRecommended: { sensXPercent: 8.4, sensYPercent: 8.4, edpi: 6720 },
-    fullInferredSensitivity: null,
-    dpi: 800,
-    plausibleXRangePercent: { min: 7.6, max: 9.2 },
-    plausibleYRangePercent: { min: 7.6, max: 9.2 },
-    plausibleEdpiRange: { min: 6080, max: 7360 },
-    confidence: rec.confidence,
-    confidenceLabel: rec.confidenceLabel,
-    confidenceBasis: "heuristic (v1)",
-    refusedHighConfidence: false,
-    captureQualityGrade: "acceptable",
-    captureQualityScore: 0.72,
-    searchAdequacyClassification: "clear-optimum",
-    boundaryStatus: "resolved",
-    adaptationContamination: false,
-    rationaleLines: rec.rationaleLines,
-    whyThisX: [],
-    whyThisY: [],
-    contradictoryEvidence: [],
-    uncertaintyRemaining: [],
-    candidateComparisons: [],
-    scenarioContributions: [],
-    excludedTrials: { count: 0, reasonsByCode: {} },
-    calibrationState: null,
-    recommendedNextAction: "apply-recommended-change",
-    nextActionRationale: [],
-    retestProtocol: null,
-    warnings: [],
-  } as unknown as FinalResult;
-}
-
 /** Boots the E2E hooks with a game profile already chosen. */
 async function bootWithGame(page: Page, currentHipfire: string): Promise<void> {
   await page.goto("/?e2e=1&nostart=1");
@@ -236,7 +172,7 @@ test.describe("a converted recommendation on the results screen", () => {
   }) => {
     await bootWithGame(page, "2");
     const results = page.locator("#view-results");
-    await expect(results).toContainText("Recommended for Generic (raw sensitivity)");
+    await expect(results).toContainText("Recommended for Generic / Raw");
     await expect(results).toContainText("Current");
     await expect(results).toContainText("Recommended");
     await expect(results).toContainText("Physical equivalent");

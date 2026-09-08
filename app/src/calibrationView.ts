@@ -91,7 +91,7 @@ export function renderCalibrationView(container: HTMLElement): void {
 
   // ---- guided procedure ----
   const steps = el("div", { class: "calib-steps" }, [
-    el("div", { class: "calib-step", text: "In Fortnite, aim precisely at a fixed landmark (a door edge, a sign corner)." }),
+    el("div", { class: "calib-step", text: "In your game, aim precisely at a fixed landmark (a door edge, a sign corner)." }),
     el("div", { class: "calib-step", text: "Press Start rep here, switch to the game, and perform EXACTLY the chosen rotation — e.g. one full 360° spin ending back on the same landmark." }),
     el("div", { class: "calib-step", text: "Press Stop rep. Repeat until you have at least 4–6 clean repetitions; more reps tighten the estimate." }),
     el("div", { class: "calib-step", text: "Press Compute & save. The engine judges whether the measurements are adequate — inadequate sets are stored but never trusted." }),

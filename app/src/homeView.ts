@@ -62,7 +62,7 @@ export async function renderHomeView(container: HTMLElement, ctx: HomeContext): 
   // "Welcome back" only once there is history to come back to.
   const header = pageHeader(
     `Welcome, ${settings.playerName}`,
-    "Find the Fortnite sensitivity the evidence supports — measured, not guessed.",
+    "Find the sensitivity the evidence supports — measured, not guessed, in your game's own numbers.",
   );
   const headerTitle = header.querySelector<HTMLElement>(".page-title");
   container.append(header);
@@ -186,7 +186,7 @@ function buildFirstUseSteps(): HTMLElement {
   body.style.padding = "0";
   const wrap = el("div", { class: "cell-grid-3" });
   const steps: [string, string, string][] = [
-    ["1", "Confirm your setup", "Enter your mouse DPI and current Fortnite sensitivity — that's the starting point of the search."],
+    ["1", "Confirm your setup", "Enter your mouse DPI, your current sensitivity and your game — that's the starting point of the search."],
     ["2", "Play the blinded test", "Short aim drills across several hidden sensitivities, with rests enforced to protect the data."],
     ["3", "Get a measured answer", "The engine compares the evidence and recommends the sensitivity it actually supports."],
   ];

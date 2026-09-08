@@ -999,14 +999,14 @@ function renderGameRecommendation(input: ResultsInput): HTMLElement | null {
       3,
       statTile(
         "Current",
-        g.current ? g.current.hipfire.toFixed(2) : "\u2014",
+        g.current ? g.current.hipfireDisplay : "\u2014",
         {
           sub: g.current
             ? `${g.current.cmPer360X.toFixed(1)} cm/360`
             : "not entered",
         },
       ),
-      statTile("Recommended", g.recommended.hipfire.value.ui.toFixed(2), {
+      statTile("Recommended", g.recommended.hipfire.display, {
         tone: "accent",
         sub: `${g.recommended.achievedCmPer360.x.toFixed(1)} cm/360`,
       }),
@@ -1040,7 +1040,26 @@ function renderGameRecommendation(input: ResultsInput): HTMLElement | null {
     );
   }
 
-  // Rounding loss is never hidden (requirement 15).
+  // Rounding loss is never hidden (requirement 15): when the game's grid or
+  // range moved a value, the exact equivalent and the entry value sit side
+  // by side (Pass 2, requirement 11).
+  if (g.exactVsEntered.length > 0) {
+    const rows: [string, string][] = [];
+    for (const item of g.exactVsEntered) {
+      rows.push([`${item.label} — exact equivalent`, item.exact]);
+      rows.push([
+        `${item.label} — enter in game`,
+        item.clamped ? `${item.enter} (nearest the game accepts)` : item.enter,
+      ]);
+      if (item.config) rows.push([`${item.label} — configuration file`, item.config]);
+    }
+    body.push(
+      el("div", { id: "game-exact-vs-entered" }, [
+        sectionLabel("Exact versus what the game accepts"),
+        kvList(rows),
+      ]),
+    );
+  }
   for (const note of g.precisionNotes) {
     body.push(el("p", { class: "note", text: note }));
   }

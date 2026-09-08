@@ -6,7 +6,7 @@ import {
   type GameProfile,
   type GameProfileSelection,
 } from "../../src/games/index.ts";
-import { availableMatching } from "../../src/games/convert.ts";
+import { availableMatching, conversionUsesFov } from "../../src/games/convert.ts";
 import { describeMatching } from "../../src/games/matching.ts";
 import { el, clear } from "./dom.ts";
 import {
@@ -168,8 +168,11 @@ export function renderGameProfilePanel(
       );
     }
 
+    // A field of view is asked for only when a conversion path reads it. A
+    // game whose FOV changes nothing about its numbers (Apex Legends, or a
+    // coefficient the game applies itself) gets no decorative input.
     let fovInput: HTMLInputElement | null = null;
-    if (profile.fov.kind === "configurable") {
+    if (profile.fov.kind === "configurable" && conversionUsesFov(profile)) {
       fovInput = numberInput("game-fov", selection.fovDegrees, {
         min: profile.fov.minDegrees,
         max: profile.fov.maxDegrees,
@@ -178,12 +181,30 @@ export function renderGameProfilePanel(
       });
       inputs.push(
         field("Field of view", fovInput, {
-          hint: `${profile.fov.minDegrees}–${profile.fov.maxDegrees}. Only affects scoped values.`,
+          hint: `${profile.fov.minDegrees}–${profile.fov.maxDegrees}. Used for the scoped and aimed-down-sights values.`,
         }),
       );
     }
 
     body.push(el("div", { class: "form-grid" }, inputs));
+
+    const pickedBadge = profileStatusBadge(profile);
+    if (pickedBadge) {
+      body.push(
+        el("div", { id: "game-profile-status" }, [
+          pickedBadge,
+          el("span", {
+            class: "note",
+            text:
+              profile.status === "partially-verified"
+                ? " Hip-fire conversion is trusted; what is not covered is listed under the profile details below."
+                : profile.status === "experimental"
+                  ? " Its numbers have not been confirmed against the game."
+                  : "",
+          }),
+        ]),
+      );
+    }
 
     const matchingOptions = availableMatching(profile);
     if (matchingOptions.length > 1) {
@@ -259,9 +280,17 @@ export function renderGameProfilePanel(
     }
 
     // ---- layer three: the profile itself ----
+    const statusLabel: Record<string, string> = {
+      verified: "Verified",
+      "partially-verified": "Partly verified — see what it does not cover",
+      experimental: "Experimental — unconfirmed against the game",
+      deprecated: "Deprecated",
+    };
     const provenance: [string, string][] = [
+      ["Status", statusLabel[profile.status] ?? profile.status],
       ["What 1.00 means", profile.unitDefinition],
       ["Source", profile.source.title],
+      ["Source type", profile.source.type.replace(/-/g, " ")],
       ["Checked against", profile.source.gameVersion ?? "not tied to a game build"],
       ["Last verified", profile.source.verifiedAtIso],
       ["Last reviewed", profile.source.lastReviewedAtIso],
@@ -269,6 +298,17 @@ export function renderGameProfilePanel(
       ["Conversion definition", `v${profile.profileVersion}`],
     ];
     if (profile.source.url) provenance.push(["Reference", profile.source.url]);
+    if (profile.fov.kind === "fixed") {
+      provenance.push([
+        "Field of view",
+        `Fixed at ${profile.fov.degrees}° (${profile.fov.axis.replace(/-/g, " ")}); the game exposes no setting`,
+      ]);
+    } else if (profile.fov.kind === "configurable" && !conversionUsesFov(profile)) {
+      provenance.push([
+        "Field of view",
+        `${profile.fov.minDegrees}–${profile.fov.maxDegrees}° in the game; it does not change any converted value`,
+      ]);
+    }
     const details: (Node | string)[] = [kvList(provenance)];
     if (profile.dpi.notes.length > 0) {
       details.push(

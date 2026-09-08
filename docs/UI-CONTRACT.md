@@ -200,6 +200,20 @@ Additions to §4 (calculations that must stay out of presentation code):
   normalization. If a converted number in the UI is not read from a
   `GameConversion` or `GameRecommendationExport` field, that is a bug.
 
+### Game Profile Pass 2 additions (additive, non-breaking)
+
+- `GameRecommendationExport.exactVsEntered` — one entry per value the game's
+  grid or range moved: the exact equivalent, what to enter, a finer
+  configuration-file value when the profile has one, and whether it was
+  clamped. `current` gained `hipfireDisplay` / `verticalDisplay`, formatted
+  as the game shows them. The results view renders these verbatim.
+- `ConvertedZoom.achievedDegreesPerCount` / `achievedCmPer360` may now be
+  `null`: a game-applied coefficient gives every optic its own value.
+- `conversionUsesFov(profile)` (`src/games/convert.ts`) decides whether the
+  picker shows a field-of-view input at all.
+- `PUBLIC_GAME_PROFILES` is six profiles in picker order; the generic control
+  is now displayed as "Generic / Raw" (its id is unchanged).
+
 Additions to §5 (non-negotiable product behaviors):
 
 - Rounding loss is never hidden. When a game's own entry grid cannot express

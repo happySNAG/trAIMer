@@ -128,10 +128,10 @@ export function renderSetupView(
   ]);
 
   const sensGrid = el("div", { class: "form-grid" }, [
-    field("Fortnite X sensitivity (%)", sensXInput, {
-      hint: "Your current in-game horizontal sensitivity — the starting point of the search.",
+    field("Starting sensitivity — X (%)", sensXInput, {
+      hint: "The starting point of the search, on a percentage scale. The recommendation is reported relative to this number; choose your game below to see it in that game's own units.",
     }),
-    field("Fortnite Y sensitivity (%)", sensYInput, {
+    field("Starting sensitivity — Y (%)", sensYInput, {
       hint: "Leave equal to X unless you deliberately run an asymmetric setup.",
     }),
   ]);

@@ -95,13 +95,13 @@ attach it to the report.
 | # | Check | Expected | Gate | Evidence |
 |---|-------|----------|------|----------|
 | FP1 | Aim Test tab → **Game sensitivity** card | One select ("Game"), no other game fields, and a line explaining that results are physical without one | HARD | |
-| FP2 | Open the Game select | Exactly two entries: "No game selected" and "Generic (raw sensitivity)". **No named game** in this pass | HARD | |
-| FP3 | Pick **Generic (raw sensitivity)** | Current sensitivity and vertical fields appear; no field-of-view field; no scoped-matching select | | |
+| FP2 | Open the Game select | Seven entries in this order: "No game selected", Fortnite, Valorant, Counter-Strike 2, Apex Legends, Call of Duty / Warzone, Generic / Raw. No "Fixture" entry | HARD | |
+| FP3 | Pick **Generic / Raw** | Current sensitivity and vertical fields appear; no field-of-view field; no scoped-matching select | | |
 | FP4 | Enter current sensitivity `1`, leave DPI at 800 | "Physical equivalent" reads **57.1 cm/360**, and a sentence names the DPI | HARD | |
 | FP5 | Change Mouse DPI to 1600 (leave the game value at 1) | The equivalent halves to **28.6 cm/360** — the same setting is a different physical sensitivity | HARD | |
 | FP6 | Open "About the … profile" | What 1.00 means, source, last verified, last reviewed, conversion definition v1 | | |
 | FP7 | Restart the app, return to Aim Test | The game and the entered sensitivity are still there | HARD | |
-| FP8 | Run a session, then open Results | A "Recommended for Generic (raw sensitivity)" card shows **Current / Recommended / Physical equivalent** plus the value to type | HARD | |
+| FP8 | Run a session, then open Results | A "Recommended for Generic / Raw" card shows **Current / Recommended / Physical equivalent** plus the value to type | HARD | |
 | FP9 | Read the game card carefully | If the exact value is not enterable, it says the exact value, the entry value and the difference. Nothing is silently rounded | HARD | |
 | FP10 | Set the game back to "No game selected", reopen Results | No game card at all — the physical result stands on its own | | |
 | FP11 | History tab → expand the session | A "Game conversion" block with profile id, version, DPI, both values, cm/360, method, rounding applied | | |
