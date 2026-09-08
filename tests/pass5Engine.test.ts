@@ -206,7 +206,7 @@ function recommendationFixture(overrides: Record<string, unknown> = {}) {
 
 describe("V1 RC version metadata", () => {
   it("freezes the RC identifier and component versions", () => {
-    expect(APP_VERSION).toBe("1.0.0-rc.10");
+    expect(APP_VERSION).toBe("1.0.0-rc.11");
     expect(OPTIMIZER_VERSION).toBe("optimizer-v3");
     expect(NATIVE_PROTOCOL_VERSION).toBe(1);
     expect(EXPECTED_HELPER_VERSION).toMatch(/^helper-/);

@@ -6,7 +6,19 @@
  * these strings so any historical result can be traced to the exact code that
  * produced it.
  *
- * The V1 release candidate is identified as 1.0.0-rc.10 (Game Profile Campaign
+ * The V1 release candidate is identified as 1.0.0-rc.11 (Game Profile Campaign
+ * Pass 3 of 5: six more public game profiles — Overwatch 2, Rainbow Six
+ * Siege, Marvel Rivals, PUBG: Battlegrounds, The Finals and Battlefield 6 —
+ * a picker organised for twelve games (alphabetical, recently used, a
+ * filter), and the installed-Windows-app gate Pass 2 was missing: CI now
+ * drives the real picker inside the installed application and checks every
+ * public profile against the engine's own declarations. Three additive
+ * schema pieces carried the new games: a zoom FOV scaled from the hip-fire
+ * FOV (Siege), hip-fire FOV scaling (PUBG) and an engine-scaled zoom with an
+ * unpublished FOV (The Finals). PUBG and Battlefield 6 ship as
+ * experimental — one fitted constant each, no published formula — and say
+ * so on every conversion. See docs/GAME-PROFILES.md.)
+ * rc.10 (Game Profile Campaign
  * Pass 2 of 5: the first five public game profiles — Fortnite, Valorant,
  * Counter-Strike 2, Apex Legends and Call of Duty / Warzone — on the
  * architecture rc.9 introduced, each a versioned, sourced conversion
@@ -103,7 +115,7 @@ export const PRODUCT_NAME = "trAIMer";
 export const PRODUCT_TAGLINE = "Train. Measure. Tune.";
 
 /** Application release version for the V1 release candidate. */
-export const APP_VERSION = "1.0.0-rc.10";
+export const APP_VERSION = "1.0.0-rc.11";
 
 /**
  * Engine contract version: bump when a persisted engine-facing data contract

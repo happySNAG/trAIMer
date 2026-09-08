@@ -1,9 +1,12 @@
 # Game profiles and sensitivity conversion
 
-**Status: Game Profile Campaign, Pass 2 of 5 — first five public games.**
-Six public profiles ship: Fortnite, Valorant, Counter-Strike 2, Apex Legends,
-Call of Duty / Warzone, and the generic/raw control. §14 lists what each one
-models, what it verified against, and what it deliberately does not convert.
+**Status: Game Profile Campaign, Pass 3 of 5 — twelve public profiles.**
+Eleven named games ship — Apex Legends, Battlefield 6, Call of Duty /
+Warzone, Counter-Strike 2, Fortnite, Marvel Rivals, Overwatch 2, PUBG:
+Battlegrounds, Rainbow Six Siege, The Finals, Valorant — plus the generic/raw
+control. §14 lists what each one models, what it verified against, and what
+it deliberately does not convert; §15 describes the installed-app picker
+gate.
 
 trAIMer measures a player's physical aim. A *game profile* is the translation
 layer that turns that measurement into the number a specific FPS accepts. This
@@ -234,6 +237,24 @@ is what hor+ rendering actually does.
 needs one then **throws instead of inventing an equivalence**, and the
 conversion records the reason as a warning against that optic.
 
+Pass 3 added two shapes real games needed:
+
+- a ZOOM level's FOV may be `{ kind: "scaled-from-hipfire", factor }` — the
+  hip-fire number scaled by a constant in degrees on its own axis, which is
+  how Rainbow Six Siege defines every optic and what lets its optics follow
+  the FOV slider;
+- a configurable hip-fire FOV may declare `hipfireScaling:
+  { kind: "linear-degrees", referenceDegrees }` alongside
+  `affectsHipfireSensitivity: true`, and the conversion then multiplies
+  hip-fire degrees-per-count by `stated / reference` (PUBG). Declaring the
+  flag without the scaling still only warns.
+
+A `fov-relative-multiplier` zoom may carry `{ kind: "none" }` ONLY on a
+profile whose sole supported philosophy is `game-native` (The Finals): the
+game scales by focal length itself, the zoomed FOV is unpublished, and the
+profile can honestly say nothing but "leave it at the game's own value". Its
+achieved rotation is reported as unknown, never as hip-fire × 1.
+
 ---
 
 ## 8. The registry
@@ -379,9 +400,45 @@ open points written into `uncertaintyNotes`. Verification date: 2026-09-07.
 | Call of Duty / Warzone (`call-of-duty-warzone`) | 0.0066°/count at 1.00 | value + Vertical Sensitivity Multiplier | 60–120 horizontal, unused by the conversion | **Relative mode** as `monitor-distance-coefficient` on the vertical axis: 0.00 FOV-relative, 1.33 game default, 1.78 = 100% horizontal on 16:9; multipliers left at 1.00. Legacy mode and per-zoom multipliers not converted; same-physical-sensitivity refused | 0.01–100.00, 2 decimals; coefficient 0.00–2.00 | partially-verified |
 | Generic / Raw (`generic-raw`) | 0.02°/count at 1.00 (definition) | independent absolute | none | none | continuous, 4 decimals | verified |
 
+(The five above are the Pass 2 profiles; the Pass 3 additions follow below.)
+
 Every philosophy offered for a game is one the profile can express exactly;
 where a game could not (Call of Duty's coefficient cannot mean "same
 physical sensitivity"), the option is absent rather than approximated. The
 picker asks for a field of view only when a conversion path reads it
 (`conversionUsesFov`), so Apex and Call of Duty players are not shown a
 decorative input.
+
+### Pass 3 profiles (verified 2026-09-08)
+
+| Profile (`id`) | Hip-fire model | X/Y | Field of view | ADS / scope | Grid | Status |
+| --- | --- | --- | --- | --- | --- | --- |
+| Overwatch 2 (`overwatch-2`) | 0.0066°/count at 1.00 | one value | 80–103 in 0.5° steps, horizontal at 16:9; **read** because hero scoped FOVs are fixed | per hero, `multiplies-hipfire` with `valueScale: 100`: Widowmaker and Ana (50.94°), Ashe (65.81°). FOV-relative reproduces the published 37.89 / 51.47 at 103 | 1.00–100.00, 2 decimals | partially-verified |
+| Rainbow Six Siege (`rainbow-six-siege`) | 0.00572958°/count per unit at MultiplierUnit 0.02 | horizontal and vertical, whole numbers | 60–90 **vertical**, read | eight optics, each `scaled-from-hipfire` (0.90 … 0.092) as `fov-relative-multiplier` with `valueScale: 50`: 50 is the game's own focal-length neutral (Ubisoft's Y5S3 guide); same-360 at 1× on 60 vFOV is 57 | 1–100 and 1–200, whole numbers | partially-verified |
+| Marvel Rivals (`marvel-rivals`) | 0.017453°/count at 1.00 (π/180) | one value | fixed, no setting; not modelled | **not converted** (Black Widow / Punisher FOVs unpublished) | 0.01–20.00, 2 decimals | partially-verified (moderate: three community constants exist) |
+| PUBG (`pubg-battlegrounds`) | 0.00222°/count per unit at FOV 80, **hip-fire × FOV/80** | one value | 80–103, read (scales hip-fire) | **not converted** (Targeting, ADS, per-scope, vertical multiplier) | 1–100, whole numbers | **experimental** (low: linearity unverified) |
+| The Finals (`the-finals`) | 0.001°/count per unit | one value | slider exists, not modelled | one multiplier, `fov-relative-multiplier` with unpublished FOV: only the game's own 100% with focal-length scaling on | 1–100 whole; zoom 10–200% | partially-verified (moderate) |
+| Battlefield 6 (`battlefield-6`) | 0.0025079°/count per menu unit (from one published measurement) | one value | 85–122 horizontal, unused | `monitor-distance-coefficient` on the vertical axis in percent: 0% FOV-relative, 178% default, 177.8% = 100% horizontal on 16:9; per-zoom multipliers left at 1.00 | 0.1–100.0 in 0.1 steps; coefficient 0–400% in 0.1 | **experimental** (moderate) |
+
+Two of the six are experimental on purpose: neither Krafton nor DICE
+publishes a constant, each profile rests on one fitted number, and an
+experimental profile carries that warning on every conversion rather than
+reading as verified because its tests pass.
+
+---
+
+## 15. The installed-app picker gate (Pass 3)
+
+`scripts/verify-game-picker.mjs` drives the real picker inside the Electron
+shell — on the dev tree in every CI run, and inside the silently installed
+Windows application in the `windows-installer` job before the installer is
+published. It reads what the registry declares through a boot-time,
+read-only e2e hook (`window.__ALDO_GAME_PROFILES_FOR_TESTING__`, installed
+only under `?e2e=1`) and checks, for every public profile: it is offered; it
+renders exactly the vertical / FOV / matching controls its declaration calls
+for; a value inside its own range produces a physical equivalent; its
+definition version and provenance are reachable; a non-verified status is
+shown where it is chosen. Once per run it also checks the twelve required
+ids, alphabetical order, Generic / Raw on its own, the filter box, a
+selection surviving a reload, the Recently used group, the absence of any
+fixture, and the absence of any legacy product name on screen.

@@ -2,7 +2,7 @@
 
 ## Version strings (`src/version.ts`)
 
-- `APP_VERSION` — `1.0.0-rc.10` for the V1 release line (rc.1 was the Pass 5
+- `APP_VERSION` — `1.0.0-rc.11` for the V1 release line (rc.1 was the Pass 5
   candidate and shipped a non-executable helper; rc.2 was the Pass 8
   pre-hardware candidate and still launched via PowerShell; rc.3 was the Pass 9
   installed-desktop-application candidate, which installed and launched on
@@ -25,7 +25,10 @@
   sensitivities that felt identical. See docs/ARENA-SENSITIVITY.md; rc.10 is
   Game Profile Campaign Pass 2, which ships the first five public game
   profiles — Fortnite, Valorant, Counter-Strike 2, Apex Legends and Call of
-  Duty / Warzone — on that architecture).
+  Duty / Warzone — on that architecture; rc.11 is Pass 3, which adds
+  Overwatch 2, Rainbow Six Siege, Marvel Rivals, PUBG, The Finals and
+  Battlefield 6, reorganises the picker, and adds the installed-app
+  game-picker gate to CI).
 - `ENGINE_VERSION` — `engine-v4` (bumped per engineering pass with contract
   changes).
 - `OPTIMIZER_VERSION_V4` — `optimizer-v3` (paired-effects surrogate,
@@ -82,7 +85,7 @@
 
 | Component | Version |
 |---|---|
-| App | 1.0.0-rc.10 |
+| App | 1.0.0-rc.11 |
 | Engine | engine-v4 |
 | Optimizer | optimizer-v3 (paired fit + adequacy gating + change-point) |
 | Scoring model | scoring-v1 (weights: accuracy .28, speed .14, tracking .14, correction .12, overshoot .11, undershoot .11, consistency .10) |
@@ -93,7 +96,7 @@
 | Resume checkpoints | resume schemaVersion 2 |
 | Persistence envelopes | schemaVersion 1 |
 | Game profile schema | schemaVersion 1 (see docs/GAME-PROFILES.md) |
-| Public game profiles | `fortnite` v1, `valorant` v1, `counter-strike-2` v1, `apex-legends` v1, `call-of-duty-warzone` v1, `generic-raw` v1 |
+| Public game profiles | `apex-legends`, `battlefield-6`, `call-of-duty-warzone`, `counter-strike-2`, `fortnite`, `marvel-rivals`, `overwatch-2`, `pubg-battlegrounds`, `rainbow-six-siege`, `the-finals`, `valorant`, `generic-raw` — all v1 |
 
 The machine-readable copy of this matrix lives in `src/version.ts`
 (`fullReleaseMetadata()`, `ARTIFACT_COMPATIBILITY_MATRIX`) and is verified
