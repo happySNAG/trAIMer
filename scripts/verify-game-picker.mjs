@@ -179,9 +179,29 @@ try {
       `${d.displayName}: definition version and provenance are reachable`,
       `v${d.profileVersion}`,
     );
+    // Pass 4, requirement 23: a player must be able to reach WHERE a number
+    // came from and HOW far it is trusted, not just that it has a version.
+    const provenanceComplete =
+      /Source/.test(details ?? "") &&
+      /Confidence/.test(details ?? "") &&
+      /Checked against/.test(details ?? "") &&
+      /What this profile does not cover/.test(details ?? "");
+    check(
+      provenanceComplete,
+      `${d.displayName}: source, confidence, game version and limitations are all reachable`,
+    );
     if (d.status !== "verified") {
       const badge = await count(page, "#game-profile-status");
       check(badge === 1, `${d.displayName}: its ${d.status} status is shown where it is chosen`);
+      // Pass 4, requirement 22: the badge has to say what it means FOR THIS
+      // GAME. A bare "Partly verified" is a label, not an answer.
+      const statusText = await page.locator("#game-profile-status").textContent();
+      check(
+        /What it does not cover:/.test(statusText ?? "") &&
+          (statusText ?? "").replace(/\s+/g, " ").trim().length > 60,
+        `${d.displayName}: its status names its own limitation, not a generic one`,
+        (statusText ?? "").replace(/\s+/g, " ").trim().slice(0, 90),
+      );
     }
   }
 
