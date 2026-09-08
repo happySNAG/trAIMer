@@ -685,6 +685,27 @@ export function validateGameProfile(profile: GameProfile): ProfileValidation {
         });
       }
       checkFov(zoom.fov, `${path}.fov`, issues, "zoom");
+      // FOV-convention hardening (Pass 4, requirement 20). A zoom's field of
+      // view is only ever compared against the hip-fire one — as a tangent
+      // ratio, a linear angle ratio, or a scale factor — and every one of
+      // those comparisons is meaningless if the two numbers are quoted on
+      // different conventions. A "vertical 30" scope under a "horizontal at
+      // 4:3" hip-fire would resolve to a real angle and produce a plausible
+      // wrong answer, and would display a number the game never shows. The
+      // axis is therefore required to match, and `scaled-from-hipfire`
+      // (which inherits the hip-fire axis by construction) is the only way
+      // to express a zoom FOV without restating it.
+      if (
+        (zoom.fov?.kind === "fixed" || zoom.fov?.kind === "configurable") &&
+        (profile.fov?.kind === "fixed" || profile.fov?.kind === "configurable") &&
+        zoom.fov.axis !== profile.fov.axis
+      ) {
+        issues.push({
+          severity: "error",
+          path: `${path}.fov.axis`,
+          message: `this zoom states its field of view as "${zoom.fov.axis}" but the profile's hip-fire field of view is "${profile.fov.axis}"; a zoom FOV must use the same convention as the hip-fire FOV it is compared against`,
+        });
+      }
       if (zoom.fov?.kind === "scaled-from-hipfire" && profile.fov?.kind === "none") {
         issues.push({
           severity: "error",

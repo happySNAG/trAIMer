@@ -124,6 +124,7 @@ export const FORTNITE_PROFILE: GameProfile = {
     "Scope sensitivity is not converted: scoped weapons change the field of view and Fortnite rescales for that change on its own, and the scope field of view of each weapon in the current season is not verified.",
     "A scoped weapon that also uses targeting (some marksman rifles) is not covered by the targeting value above.",
     "Controller look sensitivity uses a different scale and is not modelled.",
+    "Fortnite does have field-of-view controls (a minimum and a maximum slider, not one angle). They do not change hip-fire rotation per count, so no converted value reads them and the profile models no FOV.",
   ],
   warnings: [],
   source: {
@@ -134,11 +135,11 @@ export const FORTNITE_PROFILE: GameProfile = {
     publisher: "mouse-sensitivity.com (DPI Wizard) and community converters",
     gameVersion:
       "Fortnite Chapter 6 (2026) mouse settings: X-axis / Y-axis / targeting / scope sensitivity percentages",
-    verifiedAtIso: "2026-09-07",
-    lastReviewedAtIso: "2026-09-07",
+    verifiedAtIso: "2026-09-08",
+    lastReviewedAtIso: "2026-09-08",
     confidence: "high",
     uncertaintyNotes: [
-      "Epic has not published the yaw constant; 0.005555° per count per 1% is community-measured and may carry rounding in its last digit.",
+      "Epic has not published the yaw constant; 0.005555° per count per 1% is community-measured and may carry rounding in its last digit. Pass 4 confirmed it against a second, independent source family, whose published 800 DPI recommendation of 2.6–10.3 for a 20–80 cm/360 band implies 0.005495–0.005549 — agreeing to about half a percent, which is the resolution of that test rather than of the constant.",
       "The settings screen is assumed to accept 0.1% steps between 1.0% and 100.0%; a finer value in the configuration file is not claimed.",
       "The Y-axis is assumed to use the same constant as the X-axis at the same percentage.",
       "Scope sensitivity and scope fields of view are not verified and are not converted.",

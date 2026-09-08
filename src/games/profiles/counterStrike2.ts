@@ -147,12 +147,13 @@ export const COUNTER_STRIKE_2_PROFILE: GameProfile = {
     publisher: "Steam Community (CS2 weapon stats guide); Valve console variables",
     gameVersion:
       "Counter-Strike 2, 2026 builds (sensitivity, zoom_sensitivity_ratio, fixed 90° FOV)",
-    verifiedAtIso: "2026-09-07",
-    lastReviewedAtIso: "2026-09-07",
+    verifiedAtIso: "2026-09-08",
+    lastReviewedAtIso: "2026-09-08",
     confidence: "high",
     uncertaintyNotes: [
       "The settings-menu slider bounds (0.10–8.00 here) vary between guides; the console accepts any positive value, so a clamped hip-fire value can always be entered there.",
       "Whether the zoom ratio still applies to the AUG and SG 553 first zoom has been disputed since a 2014 CS:GO update; the AWP and SSG 08 are unaffected.",
+      "Pass 4 re-derived the zoom model from an independently published formula — zoom_sensitivity_ratio = (hipFOV / zoomFOV) × tan(zoomFOV/2) × cot(hipFOV/2) — which is algebraically this profile's linear-ratio native scaling. The engine produces 0.818933027 for FOV-relative matching at the AWP's first zoom, matching the constant the community has published for a decade to nine significant figures; m_yaw 0.022 is unchanged from CS:GO.",
     ],
   },
   supersededByProfileId: null,

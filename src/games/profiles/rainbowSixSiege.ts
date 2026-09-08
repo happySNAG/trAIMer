@@ -5,10 +5,25 @@
  *
  * Horizontal and vertical mouse sensitivity are separate whole numbers from
  * 1 to 100. One unit turns the view 0.00572958° per mouse count at the stock
- * `MouseSensitivityMultiplierUnit` of 0.02 — the constant the current (2026)
- * references and the published professional settings agree on. Older
- * references quote 0.00223 per unit, which is inconsistent with today's
- * settings by a factor of 2.57 and is not used.
+ * `MouseSensitivityMultiplierUnit` of 0.02.
+ *
+ * That number is not arbitrary, and Pass 4 established where it comes from:
+ * 0.00572958° is 1e-4 RADIANS expressed in degrees (1e-4 × 180/π =
+ * 0.00572958). So the engine turns 0.005 radians per count per unit of
+ * `sensitivity × MouseSensitivityMultiplierUnit`, and at the stock 0.02 that
+ * is 1e-4 rad — a round engine constant, not a fitted one. A player who
+ * changes the multiplier unit scales every value here by the same ratio,
+ * which is exactly what the DPI assumptions below say.
+ *
+ * ## The 0.00223 "dispute" was a category error, and Pass 4 retires it
+ *
+ * Pass 3 recorded 0.00223 as a competing YAW constant from older references
+ * and rejected it for being 2.57× off. It was never a yaw constant.
+ * 0.00223 is a value players write into `MouseSensitivityMultiplierUnit`
+ * itself — the config knob above — to get finer control than the 1–100
+ * slider allows; at 0.00223 a sensitivity of 50 behaves like 0.1165 on the
+ * stock scale. The two numbers were never candidates for the same quantity,
+ * so there is no disagreement to resolve and none is claimed here.
  *
  * The field of view is a VERTICAL angle from 60 to 90 and does not change
  * hip-fire rotation per count.
@@ -155,9 +170,9 @@ export const RAINBOW_SIX_SIEGE_PROFILE: GameProfile = {
   unitDefinition:
     "1 turns the view 0.00573° for every mouse count — at 400 DPI, 12 is 33.2 cm for a full 360° turn.",
   knownEdgeCases: [
+    "The per-optic field-of-view factors are a community reconstruction of Ubisoft's conversion table, whose own version is published only as an image; the ADS values below inherit that uncertainty.",
     "Both sensitivities are whole numbers; finer control exists only by editing MouseSensitivityMultiplierUnit, which rescales every value and is not modelled.",
     "ADS values are the Advanced (per-magnification) sliders; the game's automatic conversion of pre-Y5S3 settings is not modelled.",
-    "The optic FOV factors are a community reconstruction of Ubisoft's conversion table.",
   ],
   warnings: [],
   source: {
@@ -172,9 +187,10 @@ export const RAINBOW_SIX_SIEGE_PROFILE: GameProfile = {
     lastReviewedAtIso: "2026-09-08",
     confidence: "high",
     uncertaintyNotes: [
-      "Ubisoft does not publish the hip-fire yaw; 0.00572958° per count per unit is the value current converters and published pro settings agree on. Older guides quote 0.00223, which does not fit today's settings and is not used.",
-      "That 50 is exactly the game's focal-length-scaled neutral follows from Ubisoft's description of the scale; it has not been re-measured here.",
-      "The per-optic FOV factors come from a community reconstruction of Ubisoft's table and carry two-decimal rounding.",
+      "Ubisoft does not publish the hip-fire yaw. 0.00572958° per count per unit is agreed by current converters and published professional settings, and Pass 4 confirmed it against a third, independent reference: that reference's own recommendation of 2–10 at 800 DPI for its stated 20–80 cm/360 band puts the fast end at 9.98 under this constant, which rounds to the 10 it prints.",
+      "0.00223 is NOT a competing yaw constant. It is a value players write into MouseSensitivityMultiplierUnit for finer control than the whole-number slider gives; Pass 3 recorded it as a rejected rival yaw, which was a category error and has been retired.",
+      "That 50 is exactly the game's focal-length-scaled neutral follows from Ubisoft's description of the scale — the guide states new players get 50 at every zoom level for \"a consistent transition between hipfire and ADS\", and that a given physical mouse distance \"will always match another physical monitor distance and scale linearly\", which is the focal-length limit. It has not been re-measured here.",
+      "The per-optic FOV factors come from a community reconstruction of Ubisoft's table and carry two-decimal rounding. Ubisoft's own guide publishes the magnification-to-vertical-FOV table only as an image, so it could not be read back for this pass.",
     ],
   },
   supersededByProfileId: null,

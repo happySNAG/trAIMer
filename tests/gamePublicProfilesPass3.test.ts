@@ -304,8 +304,12 @@ describe("Marvel Rivals", () => {
     expect(MARVEL_RIVALS_PROFILE.zoom.kind).toBe("none");
     expect(availableMatching(MARVEL_RIVALS_PROFILE)).toEqual([MATCHING.physical360]);
     expect(MARVEL_RIVALS_PROFILE.knownEdgeCases.join(" ")).toContain("Black Widow");
-    expect(MARVEL_RIVALS_PROFILE.source.uncertaintyNotes.join(" ")).toContain("0.022");
-    expect(MARVEL_RIVALS_PROFILE.source.confidence).toBe("moderate");
+    // Pass 4 raised this from "moderate": a third independent source family
+    // pins π/180 and excludes all three rivals arithmetically.
+    const notes = MARVEL_RIVALS_PROFILE.source.uncertaintyNotes.join(" ");
+    expect(notes).toContain("0.022");
+    expect(notes).toContain("0.07");
+    expect(MARVEL_RIVALS_PROFILE.source.confidence).toBe("high");
   });
 });
 
@@ -315,7 +319,10 @@ describe("Marvel Rivals", () => {
 
 describe("PUBG: Battlegrounds", () => {
   it("known sensitivity + DPI → canonical physical result at the reference FOV", () => {
-    const aim = canonicalFromGameSettings(PUBG_PROFILE, 800, { hipfire: 25 });
+    // The constant is stated at FOV 80, so the worked example must be too.
+    // Pass 4 corrected the profile's `defaultDegrees` to the game's actual
+    // default of 90, which is deliberately NOT the constant's reference.
+    const aim = canonicalFromGameSettings(PUBG_PROFILE, 800, { hipfire: 25, fovDegrees: 80 });
     expect(cmPer360X(aim)).toBeCloseTo(expectedCm(PUBG_DEGREES_PER_COUNT_AT_ONE, 25, 800), 9);
     // chocoTaco, 800 DPI, 25 → 20.6 cm.
     expect(cmPer360X(aim)).toBeCloseTo(20.6, 0);
@@ -323,7 +330,10 @@ describe("PUBG: Battlegrounds", () => {
 
   it("scales hip-fire with the FOV slider and says the conversion is for that FOV", () => {
     expect(hipfireFovFactor(PUBG_PROFILE.fov, 103)).toBeCloseTo(103 / 80, 12);
-    expect(hipfireFovFactor(PUBG_PROFILE.fov, null)).toBe(1);
+    // The game's default FOV is 90, not the constant's 80 reference, so an
+    // omitted FOV is NOT the identity — and that is exactly why the
+    // conversion now refuses to stay quiet about it (Pass 4).
+    expect(hipfireFovFactor(PUBG_PROFILE.fov, null)).toBeCloseTo(90 / 80, 12);
     expect(hipfireFovFactor(FORTNITE_PROFILE.fov, 90)).toBe(1);
     const at80 = canonicalFromGameSettings(PUBG_PROFILE, 800, { hipfire: 25, fovDegrees: 80 });
     const at103 = canonicalFromGameSettings(PUBG_PROFILE, 800, { hipfire: 25, fovDegrees: 103 });
@@ -344,7 +354,15 @@ describe("PUBG: Battlegrounds", () => {
     expect(PUBG_PROFILE.source.confidence).toBe("low");
     const conversion = gameSettingsFromCanonical(PUBG_PROFILE, canonicalFromCmPer360(30), { dpi: 800 });
     expect(conversion.warnings.join(" ")).toContain("experimental");
-    expect(conversion.hipfire.value.ui).toBe(17);
+    // Fail-closed (Pass 4): no FOV was given, so the conversion says which
+    // one it assumed instead of presenting the number as unconditional.
+    expect(conversion.warnings.join(" ")).toContain("No field of view was given");
+    expect(conversion.warnings.join(" ")).toContain("90°");
+    expect(conversion.hipfire.value.ui).toBe(15);
+    // With the FOV actually stated, no such warning is raised.
+    const stated = gameSettingsFromCanonical(PUBG_PROFILE, canonicalFromCmPer360(30), { dpi: 800, fovDegrees: 80 });
+    expect(stated.warnings.join(" ")).not.toContain("No field of view was given");
+    expect(stated.hipfire.value.ui).toBe(17);
   });
 
   it("does not collapse its other controls into the general value", () => {
@@ -431,7 +449,11 @@ describe("Battlefield 6", () => {
     const edge = run(MATCHING.monitorDistance100);
     expect(edge.setting!.value.exact).toBeCloseTo((16 / 9) * 100, 6);
     expect(edge.setting!.display).toBe("177.8%");
-    expect(run(MATCHING.gameNative).setting!.value.ui).toBe(BATTLEFIELD_6_DEFAULT_COEFFICIENT * 100);
+    // Pass 4: the game's own default is 133.3%, NOT the 177.8% full-width
+    // match on 16:9. The two philosophies must give two different answers.
+    expect(BATTLEFIELD_6_DEFAULT_COEFFICIENT).toBeCloseTo(4 / 3, 12);
+    expect(run(MATCHING.gameNative).setting!.display).toBe("133.3%");
+    expect(run(MATCHING.gameNative).setting!.value.ui).not.toBe(edge.setting!.value.ui);
     expect(edge.achievedCmPer360).toBeNull();
     expect(availableMatching(BATTLEFIELD_6_PROFILE).map((m) => m.kind)).not.toContain("physical-360-distance");
     expect(() =>
@@ -464,17 +486,21 @@ describe("metadata on every Pass 3 profile", () => {
   });
 
   it("the worked example in each unit definition is arithmetically true", () => {
-    const cases: [GameProfile, number, number, number][] = [
-      [OVERWATCH_2_PROFILE, 5, 800, 34.6],
-      [RAINBOW_SIX_SIEGE_PROFILE, 12, 400, 33.2],
-      [MARVEL_RIVALS_PROFILE, 3.5, 800, 18.7],
-      [PUBG_PROFILE, 25, 800, 20.6],
-      [THE_FINALS_PROFILE, 40, 800, 28.6],
-      [BATTLEFIELD_6_PROFILE, 6, 1600, 38.0],
+    // The last column is the FOV the worked example is stated at, for the
+    // one profile whose hip-fire depends on it.
+    const cases: [GameProfile, number, number, number, number | null][] = [
+      [OVERWATCH_2_PROFILE, 5, 800, 34.6, null],
+      [RAINBOW_SIX_SIEGE_PROFILE, 12, 400, 33.2, null],
+      [MARVEL_RIVALS_PROFILE, 3.5, 800, 18.7, null],
+      [PUBG_PROFILE, 25, 800, 20.6, 80],
+      [THE_FINALS_PROFILE, 40, 800, 28.6, null],
+      [BATTLEFIELD_6_PROFILE, 6, 1600, 38.0, null],
     ];
-    for (const [profile, value, dpi, cm] of cases) {
+    for (const [profile, value, dpi, cm, fovDegrees] of cases) {
       expect(profile.unitDefinition).toContain(`${cm.toFixed(1)} cm`);
-      expect(cmPer360X(canonicalFromGameSettings(profile, dpi, { hipfire: value }))).toBeCloseTo(cm, 1);
+      expect(
+        cmPer360X(canonicalFromGameSettings(profile, dpi, { hipfire: value, fovDegrees })),
+      ).toBeCloseTo(cm, 1);
     }
   });
 

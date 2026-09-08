@@ -9,15 +9,30 @@
  * any of them. What can be said with evidence:
  *
  * - Published professional settings and their cm/360 figures fit a LINEAR
- *   model of 0.00222° per count per unit of General sensitivity at the
- *   default first-person FOV of 80 (chocoTaco, 25 at 800 DPI, 20.6 cm/360).
- *   Converters quoting "0.022" are off by a factor of ten under that data.
+ *   model of 0.00222° per count per unit of General sensitivity at a
+ *   first-person FOV of 80 (chocoTaco, 25 at 800 DPI, 20.6 cm/360). A second,
+ *   independent family states 0.002222 outright, so the constant itself has
+ *   corroboration.
+ * - Converters quoting "0.022" are off by a factor of ten. One of them
+ *   publishes "sens 50 at 800 DPI ≈ 1.0 cm/360" as a worked example, which is
+ *   a three-centimetre turn of the whole world and is self-evidently wrong;
+ *   that family is treated as misinformation, not as a competing view.
  * - The community's own PUBG tools scale the hip-fire constant by
  *   `80 / FOV`, i.e. PUBG's hip-fire rotation per count grows with the FOV
  *   slider. This profile applies that scaling and asks for the FOV.
  * - Whether the 1–100 scale is exactly linear is NOT verified; guides warn
- *   it may not be. The game also rounds configuration-file values to whole
- *   numbers on apply.
+ *   it may not be, and explicitly tell players to measure a 360° turn rather
+ *   than trust a converted number. The game also rounds configuration-file
+ *   values to whole numbers on apply.
+ * - Pass 4 could not close this. The cm/360-band cross-check that pinned six
+ *   other constants in this registry does not apply here: the reference
+ *   prints 23–53 at 800 DPI, a span of 2.3×, where a 20–80 cm/360 band on a
+ *   linear scale must span exactly 4×. Either that reference models a curve,
+ *   or it quotes a PUBG-specific band — its numbers do bracket the published
+ *   professional settings, which is the innocent reading — and the two cannot
+ *   be told apart from outside the game. The linear model is therefore
+ *   corroborated but still unconfirmed, and the profile stays experimental
+ *   rather than being promoted on evidence that does not decide.
  *
  * So this profile converts General sensitivity only, carries the
  * experimental warning on every conversion, and leaves Targeting, ADS, the
@@ -86,7 +101,13 @@ export const PUBG_PROFILE: GameProfile = {
   fov: {
     kind: "configurable",
     axis: "horizontal",
-    defaultDegrees: PUBG_REFERENCE_FOV_DEGREES,
+    // The GAME's default, which is not the FOV the constant is stated at.
+    // Pass 3 recorded 80 for both; 80 is the slider's floor, and the default
+    // is reported as 90. A player who never touched the slider and never
+    // enters one would have been converted at a FOV they do not play — so
+    // the fact is corrected here and `gameSettingsFromCanonical` now warns
+    // whenever no field of view is supplied at all.
+    defaultDegrees: 90,
     minDegrees: 80,
     maxDegrees: 103,
     stepDegrees: 1,
@@ -103,7 +124,7 @@ export const PUBG_PROFILE: GameProfile = {
   knownEdgeCases: [
     "Only General sensitivity is converted. Targeting, ADS and the per-scope sliders (2×–15×) each have their own scale and their own zoom, and none is published; they are left alone.",
     "The vertical sensitivity multiplier is not modelled; the conversion assumes it stays at its default.",
-    "Hip-fire rotation per count scales with the first-person FOV slider (80–103); the conversion is made for the FOV you enter and is not valid at another.",
+    "Hip-fire rotation per count scales with the first-person FOV slider (80–103, default 90); the conversion is made for the FOV you enter and is not valid at another. Enter your actual FOV — leaving it out assumes the game's default and is wrong in proportion if you play at another.",
     "The game rounds configuration-file sensitivities to whole numbers when settings are applied, so no finer value is offered.",
   ],
   warnings: [],
@@ -119,7 +140,8 @@ export const PUBG_PROFILE: GameProfile = {
     lastReviewedAtIso: "2026-09-08",
     confidence: "low",
     uncertaintyNotes: [
-      "Krafton publishes no formula. The linear 0.00222° per unit model fits published professional settings at their stated DPI but the 1–100 scale is not verified to be linear; guides warn it may not be. Measure a 360° turn before trusting a converted value.",
+      "Krafton publishes no formula. The linear 0.00222° per unit model fits published professional settings at their stated DPI, and a second independent family states 0.002222 outright, but the 1–100 scale is still not verified to be LINEAR — Pass 4 tried and failed to settle it. Measure a 360° turn before trusting a converted value.",
+      "The reference FOV of 80 that the constant is stated at is itself unconfirmed: the professional settings it was fitted to do not publish the FOV each player used. If the true reference is the game's default of 90, every value here is 12.5% out. This is the second reason the profile is experimental.",
       "The hip-fire scaling with FOV (80/FOV) is taken from a community converter, not measured.",
       "The FOV slider is assumed to be a horizontal angle; the axis is not verified and does not change the scaling ratio.",
       "Targeting, ADS, per-scope and vertical settings are not converted.",

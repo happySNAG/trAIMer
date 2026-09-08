@@ -168,11 +168,11 @@ export const CALL_OF_DUTY_WARZONE_PROFILE: GameProfile = {
     publisher: "mouse-sensitivity.com (DPI Wizard) and community converters",
     gameVersion:
       "Call of Duty: Warzone with Black Ops 7 (2025–2026) shared settings: Mouse Sensitivity, Vertical Sensitivity Multiplier, ADS Sensitivity Type (Relative), Monitor Distance Coefficient 0.00–2.00, FOV 60–120",
-    verifiedAtIso: "2026-09-07",
-    lastReviewedAtIso: "2026-09-07",
+    verifiedAtIso: "2026-09-08",
+    lastReviewedAtIso: "2026-09-08",
     confidence: "high",
     uncertaintyNotes: [
-      "Activision has not published the yaw constant; 0.0066° per count is the community-measured value used by every Call of Duty converter, and it is assumed unchanged in Black Ops 7.",
+      "Activision has not published the yaw constant; 0.0066° per count is the community-measured value used by every Call of Duty converter. Pass 4 confirmed it for the Black Ops 6/7 settings family specifically: that reference's published 800 DPI recommendation of 2.16–8.66 for a 20–80 cm/360 band implies 0.0065993, and it is the same recommendation that reference prints for Overwatch 2, which shares the constant.",
       "The Mouse Sensitivity bounds (0.01–100.00 here) and the Vertical Sensitivity Multiplier bounds (0.10–5.00 here) are taken from the settings screens of recent titles, not from documentation.",
       "The coefficient conversion assumes a 16:9 display when translating a horizontal monitor-distance match onto the vertical axis the game matches on.",
       "Legacy ADS mode is not modelled.",

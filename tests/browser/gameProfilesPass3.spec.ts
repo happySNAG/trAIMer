@@ -97,6 +97,10 @@ test.describe("each new game shows only the settings it has", () => {
     await expect(page.locator("#game-fov")).toHaveValue("103");
     await expect(page.locator("#game-matching-select option")).toHaveCount(4);
     await expect(page.locator("#game-profile-status")).toContainText("Partly verified");
+    // Pass 4, requirement 22: the badge names THIS game's own limitation.
+    await expect(page.locator("#game-profile-status")).toContainText(
+      "What it does not cover:",
+    );
   });
 
   test("Rainbow Six Siege: horizontal and vertical whole numbers, a vertical FOV, per-optic philosophies", async ({ page }) => {
@@ -126,7 +130,9 @@ test.describe("each new game shows only the settings it has", () => {
     await page.selectOption("#game-profile-select", "pubg-battlegrounds");
     await expect(page.locator("#game-current-hipfire")).toBeVisible();
     await expect(page.locator("#game-current-vertical")).toHaveCount(0);
-    await expect(page.locator("#game-fov")).toHaveValue("80");
+    // Pass 4 corrected this to the game's own default; 80 is the slider's
+    // floor, and separately the FOV the constant is stated at.
+    await expect(page.locator("#game-fov")).toHaveValue("90");
     await expect(page.locator("#game-matching-select")).toHaveCount(0);
     await expect(page.locator("#game-profile-status")).toContainText("Experimental");
   });
@@ -156,18 +162,24 @@ test.describe("each new game shows only the settings it has", () => {
 });
 
 test.describe("current settings become a physical equivalent, before any calibration", () => {
-  const cases: [string, string, string][] = [
+  const cases: [string, string, string, string?][] = [
     ["overwatch-2", "5", "34.6"],
     ["rainbow-six-siege", "24", "8.3"],
     ["marvel-rivals", "3.5", "18.7"],
-    ["pubg-battlegrounds", "25", "20.6"],
+    // PUBG's hip-fire scales with the FOV, so its case sets one; see the
+    // dedicated FOV test below for the default.
+    ["pubg-battlegrounds", "25", "20.6", "80"],
     ["the-finals", "40", "28.6"],
     ["battlefield-6", "12", "38.0"],
   ];
-  for (const [id, value, cm] of cases) {
-    test(`${id}: ${value} at 800 DPI is ${cm} cm/360`, async ({ page }) => {
+  for (const [id, value, cm, fov] of cases) {
+    test(`${id}: ${value} at 800 DPI is ${cm} cm/360${fov ? ` at FOV ${fov}` : ""}`, async ({ page }) => {
       await openSetup(page);
       await enterCurrent(page, id, value);
+      if (fov) {
+        await page.fill("#game-fov", fov);
+        await page.locator("#game-fov").blur();
+      }
       const equivalent = page.locator("#game-physical-equivalent");
       await expect(equivalent).toBeVisible();
       await expect(equivalent).toContainText(cm);
@@ -177,6 +189,10 @@ test.describe("current settings become a physical equivalent, before any calibra
   test("PUBG's physical equivalent follows its FOV slider", async ({ page }) => {
     await openSetup(page);
     await enterCurrent(page, "pubg-battlegrounds", "25");
+    // At the game's default FOV of 90 — not the 80 the constant is stated at.
+    await expect(page.locator("#game-physical-equivalent")).toContainText("18.3");
+    await page.fill("#game-fov", "80");
+    await page.locator("#game-fov").blur();
     await expect(page.locator("#game-physical-equivalent")).toContainText("20.6");
     await page.fill("#game-fov", "103");
     await page.locator("#game-fov").blur();
@@ -237,7 +253,7 @@ test.describe("a converted recommendation, per new game", () => {
     await expect(card).toContainText("30");
     await expect(card).toContainText("Experimental profile");
     await expect(card).toContainText("experimental");
-    await expect(card).toContainText("80°");
+    await expect(card).toContainText("90°");
     const keys = card.locator("dl.kv").first().locator("dt");
     await expect(keys).toHaveCount(1);
   });
@@ -256,7 +272,9 @@ test.describe("a converted recommendation, per new game", () => {
     const card = gameCard(page, "Battlefield 6");
     await expect(card).toContainText("14.4");
     await expect(card).toContainText("Uniform Soldier Aiming coefficient");
-    await expect(card).toContainText("178.0%");
+    // Pass 4: the game's own default is 133.3%. 177.8% is the full-width
+    // match on 16:9, which is a different philosophy and a different answer.
+    await expect(card).toContainText("133.3%");
     await expect(card).toContainText("Experimental profile");
   });
 

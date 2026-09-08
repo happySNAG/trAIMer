@@ -564,8 +564,10 @@ describe("version and source metadata on every named profile", () => {
     expect(profile.schemaVersion).toBe(1);
     expect(profile.visibility).toBe("public");
     expect(profile.platforms).toContain("pc");
-    expect(profile.source.verifiedAtIso).toBe("2026-09-07");
-    expect(profile.source.lastReviewedAtIso).toBe("2026-09-07");
+    // Pass 4 re-verified every one of these from scratch, so they carry the
+    // Pass 4 date rather than the Pass 2 one they were first written on.
+    expect(profile.source.verifiedAtIso).toBe("2026-09-08");
+    expect(profile.source.lastReviewedAtIso).toBe("2026-09-08");
     expect(profile.source.gameVersion).toMatch(/2026|2025/);
     expect(profile.source.url).toMatch(/^https:\/\//);
     expect(profile.source.type).toBe("community-reference");

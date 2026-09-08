@@ -105,13 +105,13 @@ export const APEX_LEGENDS_PROFILE: GameProfile = {
     publisher: "Steam Community (Apex Legends discussions) and community converters",
     gameVersion:
       "Apex Legends 2026 seasons: Mouse Sensitivity slider, FOV 70–110, ADS Mouse Sensitivity Multiplier and Per Optic ADS Settings",
-    verifiedAtIso: "2026-09-07",
-    lastReviewedAtIso: "2026-09-07",
+    verifiedAtIso: "2026-09-08",
+    lastReviewedAtIso: "2026-09-08",
     confidence: "high",
     uncertaintyNotes: [
-      "Respawn has not published the yaw constant; 0.022° per count is the Source-engine value every community converter uses for Apex.",
+      "Respawn has not published the yaw constant; 0.022° per count is the Source-engine value every community converter uses for Apex. Pass 4 confirmed it against an independent source family, whose published 800 DPI recommendation of 0.65–2.60 for a 20–80 cm/360 band implies 0.021981 at both ends.",
       "The hip-fire slider bounds (0.1–20.0 here) and its 0.1 step are taken from player reports, not from documentation.",
-      "Per-optic ADS scaling factors conflict between references and are not converted.",
+      "Per-optic ADS scaling factors conflict between references and are not converted. Pass 4 found a third reference quoting the lower family (4× at 0.36, 6× at 0.30) and none quoting a measurement, so the conflict is corroborated rather than resolved and the refusal stands.",
     ],
   },
   supersededByProfileId: null,

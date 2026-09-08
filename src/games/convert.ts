@@ -463,6 +463,17 @@ export function gameSettingsFromCanonical(
         ? `${profile.displayName} changes hip-fire sensitivity with the field of view; this conversion is for ${hipFov?.statedDeg ?? profile.fov.defaultDegrees}° and must be redone if you change your FOV.`
         : `${profile.displayName} changes hip-fire sensitivity with the field of view; re-check this conversion if you change your FOV.`,
     );
+    // Fail-closed (Pass 4, requirement 24). For these games the FOV is not a
+    // decoration on the answer, it is a MULTIPLIER on it — so a conversion
+    // run without one is a conversion at a field of view the player never
+    // stated. Saying which value was assumed, and that a wrong assumption is
+    // proportionally wrong, is the difference between a qualified answer and
+    // an invented one.
+    if (options.fovDegrees == null) {
+      warnings.push(
+        `No field of view was given, so this conversion assumes ${profile.fov.defaultDegrees}°. Because ${profile.displayName} scales hip-fire with the field of view, playing at a different one makes every value here wrong in the same proportion — enter your actual FOV.`,
+      );
+    }
   }
 
   const zooms: ConvertedZoom[] = [];

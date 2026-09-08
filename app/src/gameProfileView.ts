@@ -267,15 +267,7 @@ export function renderGameProfilePanel(
       body.push(
         el("div", { id: "game-profile-status" }, [
           pickedBadge,
-          el("span", {
-            class: "note",
-            text:
-              profile.status === "partially-verified"
-                ? " Hip-fire conversion is trusted; what is not covered is listed under the profile details below."
-                : profile.status === "experimental"
-                  ? " Its numbers have not been confirmed against the game; every converted value carries that warning, and what is uncertain is listed under the profile details below."
-                  : "",
-          }),
+          el("span", { class: "note", text: ` ${profileStatusExplanation(profile)}` }),
         ]),
       );
     }
@@ -434,6 +426,37 @@ export function renderGameProfilePanel(
       ...body,
     ),
   );
+}
+
+/**
+ * The one sentence that says what a profile's status MEANS for this game
+ * (Game Profile Pass 4, requirement 22).
+ *
+ * A status word on its own is a label, not information: "partly verified"
+ * tells a player nothing about whether the number they are about to type is
+ * one of the trusted ones. So the badge is followed by the profile's own
+ * first stated limitation, verbatim — those sentences are already written
+ * for players, and quoting one here is what turns the badge into an answer.
+ * The full list stays in the details block; this is the headline.
+ */
+export function profileStatusExplanation(profile: {
+  status: string;
+  knownEdgeCases: readonly string[];
+  source: { uncertaintyNotes: readonly string[] };
+}): string {
+  const first =
+    profile.knownEdgeCases[0] ?? profile.source.uncertaintyNotes[0] ?? null;
+  const tail = first ? ` What it does not cover: ${first}` : "";
+  switch (profile.status) {
+    case "partially-verified":
+      return `Hip-fire conversion is well supported; some scoped behaviour is not.${tail}`;
+    case "experimental":
+      return `Its numbers have not been confirmed against the game, so every converted value carries that warning.${tail}`;
+    case "deprecated":
+      return `This profile is no longer recommended.${tail}`;
+    default:
+      return "";
+  }
 }
 
 /** The badge a profile's status earns on the results screen. */

@@ -17,8 +17,15 @@
  *
  * ## Why it is the control
  *
- * - Its entry grid is continuous to four decimal places, so a round trip
- *   `canonical → generic → canonical` is limited only by float precision.
+ * - Its arithmetic is exact: reading its settings back reproduces what the
+ *   conversion said it achieved, to float precision, at every value. That is
+ *   the property that makes it a control.
+ * - Its entry grid is four decimal places, which is finer than any real
+ *   game's here but is NOT infinite — 0.1786 is the closest this scale gets
+ *   to an 80 cm/360 turn at 3200 DPI. Pass 4 corrected this line, which used
+ *   to claim a round trip through the control was limited only by float
+ *   precision; the grid's own error is reported by the rounding model like
+ *   any other profile's.
  * - Its axes are independent and absolute, so an asymmetric physical aim can
  *   be expressed exactly rather than approximated.
  * - It models no FOV and no optics, so nothing about a zoom philosophy can
@@ -112,8 +119,8 @@ export const GENERIC_RAW_PROFILE: GameProfile = {
     url: null,
     publisher: "trAIMer",
     gameVersion: null,
-    verifiedAtIso: "2026-09-07",
-    lastReviewedAtIso: "2026-09-07",
+    verifiedAtIso: "2026-09-08",
+    lastReviewedAtIso: "2026-09-08",
     confidence: "exact",
     uncertaintyNotes: [],
   },

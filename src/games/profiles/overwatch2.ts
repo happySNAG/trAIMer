@@ -150,7 +150,8 @@ export const OVERWATCH_2_PROFILE: GameProfile = {
     lastReviewedAtIso: "2026-09-08",
     confidence: "high",
     uncertaintyNotes: [
-      "Blizzard has not published the yaw constant or the scoped fields of view; both are community-measured.",
+      "Blizzard has not published the yaw constant or the scoped fields of view; both are community-measured. Pass 4 confirmed the constant against an independent source family (published 800 DPI recommendation 2.16–8.66 for a 20–80 cm/360 band, implying 0.0065993) and the 50.94° scoped FOV against discussion on Blizzard's own forums.",
+      "Two different \"1:1 scoped\" values circulate for Widowmaker and Ana: 37.89% and 49.46%. They are not rival measurements — from the same 50.94° scoped FOV, 37.89% is the ratio of the TANGENTS of the half-angles (FOV-relative, what a flick to a target visible in both views needs) and 49.46% is the ratio of the ANGLES, which no matching philosophy corresponds to. This profile derives 37.89% and labels it; it never produces 49.46%.",
       "The sensitivity field is assumed to accept 1.00–100.00 in two decimals, and the relative zoom values 1.00–100.00%.",
       "The stock relative zoom value is taken as 30.00%; a hero whose stock value differs lands on a different game-default number.",
     ],

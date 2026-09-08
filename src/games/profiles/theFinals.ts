@@ -115,7 +115,7 @@ export const THE_FINALS_PROFILE: GameProfile = {
     "1 turns the view 0.001° for every mouse count — at 800 DPI, 40 is 28.6 cm for a full 360° turn.",
   knownEdgeCases: [
     "Only the game's own zoom relationship is offered: the zoomed fields of view are not published, so same-physical-sensitivity and monitor-distance values cannot be computed.",
-    "The field-of-view slider (a horizontal angle, roughly 71–100) is not modelled; it does not change hip-fire rotation per count.",
+    "The field-of-view slider is a VERTICAL angle from 45 to 100, default 71; the game keeps the vertical angle across aspect ratios. It is not modelled, and it does not change hip-fire rotation per count.",
     "Sensitivity is a whole number; there is no finer value.",
   ],
   warnings: [],
@@ -131,9 +131,9 @@ export const THE_FINALS_PROFILE: GameProfile = {
     lastReviewedAtIso: "2026-09-08",
     confidence: "moderate",
     uncertaintyNotes: [
-      "Embark publishes no yaw constant; 0.001° per count per unit fits published settings to within rounding but has not been measured here.",
+      "Embark publishes no yaw constant. Pass 4 re-derived 0.001° per count per unit from a second, independent source family: that reference's published recommendation of 14–57 at 800 DPI for its stated 20–80 cm/360 band implies 0.001003 and 0.001021 at the two ends, which brackets 0.001 to within its printed precision. The value is corroborated, not measured.",
       "The zoom multiplier bounds (10–200%) are assumed; the controller equivalent is documented as 10–100%.",
-      "The FOV slider bounds are not verified and are not modelled.",
+      "The FOV slider is a vertical angle of 45–100 with a default of 71 (Pass 4, two independent references). It is not modelled because no converted value reads it; Pass 3 recorded it as a horizontal 71–100, which was wrong on both the axis and the lower bound.",
     ],
   },
   supersededByProfileId: null,

@@ -27,6 +27,19 @@
  * per-zoom sensitivities then multiply on top, so leaving them at 1.00
  * lets one number cover every optic — the same structure as Call of Duty's
  * Relative mode, which this profile models the same way.
+ *
+ * ## Pass 4 correction: the stock coefficient is 133.3%, not 177.7%
+ *
+ * Pass 3 recorded 177.7% as the game's own default. It is not: 177.7% is the
+ * value that matches 100% of the screen WIDTH on a 16:9 display, and the
+ * coefficient Battlefield ships is 1.333333 — the Battlefield-series default
+ * since Uniform Soldier Aiming was introduced, which matches the width of a
+ * 4:3 screen and therefore about 75% of a 16:9 one. Both the community guide
+ * this profile cites and the technical author who corrects the common
+ * confusion agree the shipped value is 133 and that 178 is what a 16:9
+ * player must set for a full-width match. So "the game's own default" now
+ * produces 133.3% and "100% monitor distance" produces 177.8%, and they are
+ * no longer the same answer under two names.
  */
 
 import { MATCHING } from "../matching.ts";
@@ -38,8 +51,13 @@ import {
 /** Degrees of view rotation per mouse count per menu unit of soldier sensitivity. */
 export const BATTLEFIELD_6_DEGREES_PER_COUNT_AT_ONE = 0.0025079;
 
-/** Stock Uniform Soldier Aiming coefficient, as a fraction (178% in the menu). */
-export const BATTLEFIELD_6_DEFAULT_COEFFICIENT = 1.78;
+/**
+ * Stock Uniform Soldier Aiming coefficient, as a fraction (133.3% in the
+ * menu). This is the value the game ships with, NOT the 16:9 full-width
+ * match — that is 16/9 = 177.8%, which the monitor-distance philosophy
+ * computes on its own from the player's aspect ratio.
+ */
+export const BATTLEFIELD_6_DEFAULT_COEFFICIENT = 4 / 3;
 
 export const BATTLEFIELD_6_PROFILE_ID = "battlefield-6";
 
@@ -136,6 +154,7 @@ export const BATTLEFIELD_6_PROFILE: GameProfile = {
     "1.0 turns the view 0.0025° for every mouse count — at 1600 DPI, 6.0 is 38.0 cm for a full 360° turn.",
   knownEdgeCases: [
     "Battlefield 6 only. Battlefield 2042 and earlier use a different menu scale and are not covered.",
+    "The game's own default Uniform Soldier Aiming coefficient is 133.3%, which matches the full width of a 4:3 screen — about 75% of the width of a 16:9 one. Choosing 100% monitor distance instead gives 177.8% on 16:9.",
     "The configuration file stores the menu value × 0.000750 (0.000000–0.075000); it is the same setting on another scale, not extra precision, and is not offered.",
     "Per-zoom sensitivities (1.00×–10.00×) and Zoom Sensitivity Smoothing are not converted; the profile relies on Uniform Soldier Aiming with them at their defaults.",
     "Same-physical-sensitivity matching cannot be expressed as a coefficient and is not offered.",
@@ -155,8 +174,10 @@ export const BATTLEFIELD_6_PROFILE: GameProfile = {
     confidence: "moderate",
     uncertaintyNotes: [
       "DICE publishes no rotation constant. 0.0025079° per count per menu unit is derived from ONE published measurement (1600 DPI, 6.0 = 37.98 cm/360); it has not been re-measured here. A player who measures a different 360° distance should trust the measurement.",
-      "The stock coefficient is reported as both 178% and 133% by different guides; 178% is used.",
-      "The coefficient's upper bound (400% here) and the FOV slider bounds are assumed, not documented.",
+      "The stock coefficient is 133.3% (the Battlefield-series default, a full-width match on 4:3 and about 75% of the width on 16:9). Guides that call 178% \"the default\" mean it is what a 16:9 player should set for a full-width match; that value is offered here as 100% monitor distance, not as the game's default.",
+      "DICE does not document the coefficient's meaning; that it names the fraction of the vertical half-screen matched is inferred from the published per-aspect-ratio values (4:3 133.3%, 16:9 177.7%, 21:9 233.3%, 32:9 355.5%), which are exactly the aspect ratios themselves.",
+      "A second community family quotes 0.0022° per count for \"the Battlefield series\"; that is 14% away from the value derived here and appears to predate Battlefield 6's menu-scale change. Neither value has been measured for this pass, which is why the profile stays experimental.",
+      "The coefficient's upper bound (400% here) is assumed, not documented. The FOV slider bounds conflict between references (85–120 in one converter, up to 122 in the community guide) and the guide's author describes the same setting as both a horizontal and a vertical angle; no converted value reads it.",
       "The horizontal-to-vertical coefficient translation assumes a 16:9 display.",
     ],
   },

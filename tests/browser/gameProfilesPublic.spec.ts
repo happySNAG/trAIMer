@@ -155,7 +155,8 @@ test.describe("current settings become a physical equivalent, before any calibra
     await expect(details).toContainText("Conversion definition");
     await expect(details).toContainText("v1");
     await expect(details).toContainText("Last verified");
-    await expect(details).toContainText("2026-09-07");
+    // Pass 4 re-verified the Pass 2 profiles from scratch.
+    await expect(details).toContainText("2026-09-08");
     await expect(details).toContainText("Reference");
     await expect(details).toContainText("https://");
     await expect(details).toContainText("What this profile does not cover");

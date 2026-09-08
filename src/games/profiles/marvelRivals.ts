@@ -4,13 +4,26 @@
  * ## The model
  *
  * "Mouse Sensitivity" turns the view 0.017453° per mouse count at 1.00 —
- * one degree per 57.3 counts at sensitivity 1, i.e. π/180 in degrees. That
- * is NOT the 0.022 some converters assume from the Unreal Engine default:
- * the two references that state a constant explicitly (game-sens.jor.dev and
- * aimbench.com's cm/360 tables) both use π/180, and published professional
- * settings (0.64–6.00 at 400–1600 DPI) land in the 10–50 cm/360 band under
- * it. A third reference quotes 0.0066, under which those same settings
- * would be 30–135 cm/360; it is not used.
+ * one degree per 57.3 counts at sensitivity 1, i.e. π/180 in degrees.
+ *
+ * ## Four community constants exist, and Pass 4 settled it arithmetically
+ *
+ * Published converters quote 0.017453, 0.022 (the Unreal default), 0.0066
+ * (Overwatch's) and even 0.07 (Valorant's) for this one game. Pass 4 broke
+ * the tie without trusting any of them: the oldest technical reference in
+ * the field publishes, for every game it supports, the sensitivity range
+ * that lands a player in its stated 20–80 cm/360 band at 800 DPI. That band
+ * is a fact about centimetres, not about Marvel Rivals, and it pins the
+ * constant directly — `yaw = 360 × 2.54 / (20 × 800 × sens_fast)`.
+ *
+ * For Marvel Rivals it prints 0.82 to 3.27, which gives 0.017424 and
+ * 0.017477 at the two ends: π/180 to within the three digits it prints.
+ * 0.022 would have required it to print 0.65 to 2.60, 0.0066 would have
+ * required 2.16 to 8.66, and 0.07 would have required 0.204 to 0.816. The
+ * same method reproduces the KNOWN constants of five other games in this
+ * registry exactly, which is what makes it evidence rather than a
+ * coincidence. The three rival constants are excluded, not merely
+ * out-voted.
  *
  * The field of view is fixed with no setting. The game writes a finer
  * sensitivity to its configuration file but does not read it back, so there
@@ -95,17 +108,21 @@ export const MARVEL_RIVALS_PROFILE: GameProfile = {
   warnings: [],
   source: {
     title:
-      "Community-established Marvel Rivals model: 0.017453° per count at 1.00 (π/180), as used by game-sens.jor.dev and by aimbench.com's cm/360 tables for published professional settings; converters assuming 0.022 or 0.0066 disagree and are not used",
+      "Community-established Marvel Rivals model: 0.017453° per count at 1.00 (π/180), agreed by game-sens.jor.dev, aimbench.com's cm/360 tables, and — Pass 4 — mouse-sensitivity.com's published 800 DPI recommendation of 0.82–3.27 for its 20–80 cm/360 band, which excludes the rival 0.022, 0.0066 and 0.07 constants arithmetically",
     type: "community-reference",
     url: "https://game-sens.jor.dev/",
-    publisher: "game-sens.jor.dev and aimbench.com (community)",
+    publisher: "game-sens.jor.dev, aimbench.com and mouse-sensitivity.com (three independent community families)",
     gameVersion:
       "Marvel Rivals 2026 seasons (build 20260903): Mouse Sensitivity, fixed FOV, per-hero aim sensitivity for Black Widow and The Punisher",
     verifiedAtIso: "2026-09-08",
     lastReviewedAtIso: "2026-09-08",
-    confidence: "moderate",
+    // Raised from "moderate" in Pass 4: a third, independent source family
+ // now pins the constant, and the rival values are excluded rather than
+ // merely less popular. What keeps this profile short of "verified" is the
+ // unconverted per-hero zoom, not the hip-fire constant.
+    confidence: "high",
     uncertaintyNotes: [
-      "NetEase has not published the yaw constant. Three community values exist (0.017453, 0.022, 0.0066); the two references that state their constant and publish consistent cm/360 tables use 0.017453, which this profile adopts. A player who measures a different 360° distance should trust the measurement.",
+      "NetEase has not published the yaw constant. Four community values are in circulation (0.017453, 0.022, 0.0066, 0.07); three independent source families support 0.017453, and Pass 4 excluded the other three arithmetically against a published cm/360 band. A player who measures a different 360° distance should still trust the measurement over any of them.",
       "The sensitivity field bounds (0.01–20.00) are assumed from published settings, not from documentation.",
       "The fixed field of view is reported as about 90° horizontal on 16:9 but is not verified and is not needed for hip-fire.",
     ],

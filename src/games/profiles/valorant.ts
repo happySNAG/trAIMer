@@ -154,8 +154,8 @@ export const VALORANT_PROFILE: GameProfile = {
   unitDefinition:
     "1.000 turns the view 0.07° for every mouse count — at 800 DPI, 0.400 is 40.8 cm for a full 360° turn.",
   knownEdgeCases: [
-    "The field of view is locked at 103° horizontal (16:9). Players on a stretched 4:3 resolution see the same image stretched, and the conversion does not change.",
     "Each multiplier serves a whole tier of weapons; it is converted for the most common weapon in its tier and the others differ by a few percent.",
+    "The field of view is locked at 103° horizontal (16:9). Players on a stretched 4:3 resolution see the same image stretched, and the conversion does not change.",
   ],
   warnings: [],
   source: {
@@ -166,11 +166,12 @@ export const VALORANT_PROFILE: GameProfile = {
     publisher: "game-sens.jor.dev (community), cross-checked against mouse-sensitivity.com-derived values",
     gameVersion:
       "Valorant 2026 (Patch 13.x) settings: Sensitivity: Aim, ADS Sensitivity Multiplier, Scoped Sensitivity Multiplier",
-    verifiedAtIso: "2026-09-07",
-    lastReviewedAtIso: "2026-09-07",
+    verifiedAtIso: "2026-09-08",
+    lastReviewedAtIso: "2026-09-08",
     confidence: "high",
     uncertaintyNotes: [
-      "Riot has not published the yaw constant or the zoomed fields of view; both are community-measured. The zoom model reproduces independently published multipliers to within 0.005%.",
+      "Riot has not published the yaw constant or the zoomed fields of view; both are community-measured.",
+      "Pass 4 checked both halves against an independent source family. The constant: that reference's published 800 DPI recommendation of 0.204–0.816 for a 20–80 cm/360 band implies 0.07000 at both ends. The zoom model: an independently published formula, multiplier = magnification × tan(zoomFOV/2) ÷ tan(51.5°), is algebraically the same as this profile's linear-ratio native scaling, and the engine reproduces the published 0.870439 and 0.747462 to eight significant figures rather than approximating them.",
       "The multiplier fields are assumed to accept 0.001–10.000 in three decimals like the aim sensitivity; Riot does not document the bounds.",
       "A 'same physical sensitivity' scoped value for the Operator needs a 2.500 multiplier; if the game's field rejects it, the profile's assumed bound is wrong and the nearest accepted value is reported.",
     ],

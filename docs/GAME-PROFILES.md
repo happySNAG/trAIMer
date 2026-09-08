@@ -415,10 +415,10 @@ decorative input.
 | --- | --- | --- | --- | --- | --- | --- |
 | Overwatch 2 (`overwatch-2`) | 0.0066°/count at 1.00 | one value | 80–103 in 0.5° steps, horizontal at 16:9; **read** because hero scoped FOVs are fixed | per hero, `multiplies-hipfire` with `valueScale: 100`: Widowmaker and Ana (50.94°), Ashe (65.81°). FOV-relative reproduces the published 37.89 / 51.47 at 103 | 1.00–100.00, 2 decimals | partially-verified |
 | Rainbow Six Siege (`rainbow-six-siege`) | 0.00572958°/count per unit at MultiplierUnit 0.02 | horizontal and vertical, whole numbers | 60–90 **vertical**, read | eight optics, each `scaled-from-hipfire` (0.90 … 0.092) as `fov-relative-multiplier` with `valueScale: 50`: 50 is the game's own focal-length neutral (Ubisoft's Y5S3 guide); same-360 at 1× on 60 vFOV is 57 | 1–100 and 1–200, whole numbers | partially-verified |
-| Marvel Rivals (`marvel-rivals`) | 0.017453°/count at 1.00 (π/180) | one value | fixed, no setting; not modelled | **not converted** (Black Widow / Punisher FOVs unpublished) | 0.01–20.00, 2 decimals | partially-verified (moderate: three community constants exist) |
-| PUBG (`pubg-battlegrounds`) | 0.00222°/count per unit at FOV 80, **hip-fire × FOV/80** | one value | 80–103, read (scales hip-fire) | **not converted** (Targeting, ADS, per-scope, vertical multiplier) | 1–100, whole numbers | **experimental** (low: linearity unverified) |
-| The Finals (`the-finals`) | 0.001°/count per unit | one value | slider exists, not modelled | one multiplier, `fov-relative-multiplier` with unpublished FOV: only the game's own 100% with focal-length scaling on | 1–100 whole; zoom 10–200% | partially-verified (moderate) |
-| Battlefield 6 (`battlefield-6`) | 0.0025079°/count per menu unit (from one published measurement) | one value | 85–122 horizontal, unused | `monitor-distance-coefficient` on the vertical axis in percent: 0% FOV-relative, 178% default, 177.8% = 100% horizontal on 16:9; per-zoom multipliers left at 1.00 | 0.1–100.0 in 0.1 steps; coefficient 0–400% in 0.1 | **experimental** (moderate) |
+| Marvel Rivals (`marvel-rivals`) | 0.017453°/count at 1.00 (π/180) | one value | fixed, no setting; not modelled | **not converted** (Black Widow / Punisher FOVs unpublished) | 0.01–20.00, 2 decimals | partially-verified (**high** after Pass 4: four rival constants excluded arithmetically) |
+| PUBG (`pubg-battlegrounds`) | 0.00222°/count per unit at FOV 80, **hip-fire × FOV/80** | one value | 80–103, default **90**, read (scales hip-fire) | **not converted** (Targeting, ADS, per-scope, vertical multiplier) | 1–100, whole numbers | **experimental** (low: Pass 4 tried and failed to confirm linearity) |
+| The Finals (`the-finals`) | 0.001°/count per unit | one value | 45–100 **vertical**, default 71 (Pass 4 correction); not modelled | one multiplier, `fov-relative-multiplier` with unpublished FOV: only the game's own 100% with focal-length scaling on | 1–100 whole; zoom 10–200% | partially-verified (moderate) |
+| Battlefield 6 (`battlefield-6`) | 0.0025079°/count per menu unit (from one published measurement) | one value | 85–122 horizontal, unused | `monitor-distance-coefficient` on the vertical axis in percent: 0% FOV-relative, **133.3% default** (Pass 4 correction), 177.8% = 100% horizontal on 16:9; per-zoom multipliers left at 1.00 | 0.1–100.0 in 0.1 steps; coefficient 0–400% in 0.1 | **experimental** (moderate) |
 
 Two of the six are experimental on purpose: neither Krafton nor DICE
 publishes a constant, each profile rests on one fitted number, and an
@@ -427,7 +427,64 @@ reading as verified because its tests pass.
 
 ---
 
-## 15. The installed-app picker gate (Pass 3)
+## 15. Pass 4 — independent validation of every profile
+
+Pass 4 added no games. It re-researched all twelve, treating every constant
+already in the tree as untrusted until something outside this repository
+agreed with it.
+
+### The method that did most of the work
+
+A long-standing technical reference publishes, per game, the in-game
+sensitivity range that puts a player at 800 DPI inside a stated band of
+20–80 cm/360. That is a claim about centimetres, not about any game's
+internals, so it inverts directly into a base constant:
+
+    yaw = 360 x 2.54 / (20 x 800 x sens_at_20cm)
+
+Applied to eight games it reproduced every constant already in the tree, and
+it settled Marvel Rivals, where four different values (0.017453, 0.022,
+0.0066, 0.07) were in circulation: the published 0.82–3.27 implies 0.017424
+to 0.017477, and each rival would have forced a visibly different pair of
+printed numbers. `tests/gameSourceGolden.test.ts` runs this as eight golden
+cases whose expected values name no constant of ours.
+
+### What changed
+
+| | |
+| --- | --- |
+| **Defect corrected** | Battlefield 6's stock Uniform Soldier Aiming coefficient is **133.3%**, not the 177.8% Pass 3 recorded. 177.8% is the full-width match on 16:9 — which the monitor-distance philosophy already computes — so recording it as the default made "the game's own default" and "100% monitor distance" produce one answer under two names. |
+| **Dispute dissolved** | Siege's "rival" yaw of 0.00223 is not a yaw. It is a value players write into `MouseSensitivityMultiplierUnit`, the configuration knob, for finer control than the whole-number slider allows. The two numbers were never candidates for the same quantity. Pass 3 rejected it for being 2.57x off; Pass 4 retires the comparison. |
+| **Dispute dissolved** | Overwatch's 37.89% and 49.46% "1:1 scoped" values are the tangent ratio and the angle ratio of the same 50.94° scoped FOV. Only the first is a matching philosophy. The engine derives 37.89% and never produces 49.46%. |
+| **Confirmed exactly** | Counter-Strike 2's and Valorant's zoom models are algebraically identical to independently published formulas, and reproduce the published 0.818933027, 0.870439 and 0.747462 to eight or nine significant figures rather than approximating them. |
+| **Refusals preserved** | Apex's per-optic ADS factors still conflict between references (4x quoted as both 0.55 and 0.36); Fortnite's scope FOVs are still unpublished; Marvel Rivals' hero scopes are still unpublished. All three keep producing no number. |
+| **Data corrected** | PUBG's FOV default is 90, not 80 (80 is the slider floor, and is separately the FOV the constant is stated at). The Finals' FOV slider is a **vertical** 45–100 defaulting to 71, not a horizontal 71–100. |
+| **Overstatement corrected** | The generic/raw control's documentation claimed a round trip through it was limited only by float precision. Its four-decimal grid is finer than any real game's here but is not infinite, and its own rounding model reports the difference. |
+| **Not resolved** | PUBG's scale is still not known to be linear, and Battlefield 6 still rests on one published measurement with a competing 0.0022 in circulation. Both stay experimental and warn on every conversion. |
+
+### Fail-closed addition
+
+A profile whose hip-fire rotation scales with the FOV setting (only PUBG)
+now warns explicitly when a conversion is run without a FOV, naming the
+value it assumed. For these games the FOV is a multiplier on the answer, not
+a decoration, so a silent default is a silently wrong number.
+
+### Tests added
+
+- `tests/gameSourceGolden.test.ts` — golden cases whose expected values were
+  published elsewhere: the eight-game cm/360 band, the CS2 and Valorant zoom
+  constants, Overwatch's 37.89/51.47 (and the explicit absence of 49.46),
+  Ubisoft's neutral 50, the Battlefield per-aspect-ratio coefficient table,
+  and a full cross-profile equivalence audit (every ordered pair of the
+  twelve profiles, six cm/360 values, four DPIs).
+- `tests/gameRoundingHardening.test.ts` — every numeric field of every public
+  profile swept through its boundaries, half-steps and out-of-range values,
+  asserting above all that whatever is printed is a value the game will
+  actually accept. The Pass 3 rounding defect produced values that were not.
+
+---
+
+## 16. The installed-app picker gate (Pass 3)
 
 `scripts/verify-game-picker.mjs` drives the real picker inside the Electron
 shell — on the dev tree in every CI run, and inside the silently installed
