@@ -1,4 +1,4 @@
-# Human validation protocol (for Aldo)
+# Human validation protocol (for a real player)
 
 A practical, realistic protocol for producing trustworthy sensitivity
 recommendations with repeated sessions. No lab equipment needed — just the

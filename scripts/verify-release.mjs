@@ -91,6 +91,18 @@ for (const doc of [
   "docs/RELEASE.md",
   "docs/PACKAGING-WINDOWS.md",
   "docs/SECURITY-REVIEW.md",
+  // Public-release documents (Pass 5). A release without these is not
+  // shareable; scripts/verify-docs.mjs checks their CONTENT.
+  "README.md",
+  "LICENSE",
+  "CONTRIBUTING.md",
+  "SECURITY.md",
+  "PRIVACY.md",
+  "CHANGELOG.md",
+  "docs/RELEASE-NOTES.md",
+  "docs/SUPPORT-MATRIX.md",
+  "docs/INSTALL-WINDOWS.md",
+  "docs/CODE-SIGNING.md",
 ]) {
   check(`release doc ${doc} exists`, existsSync(doc));
 }

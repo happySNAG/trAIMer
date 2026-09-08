@@ -499,3 +499,30 @@ shown where it is chosen. Once per run it also checks the twelve required
 ids, alphabetical order, Generic / Raw on its own, the filter box, a
 selection surviving a reload, the Recently used group, the absence of any
 fixture, and the absence of any legacy product name on screen.
+
+---
+
+## 17. Pass 5 — what the public sees
+
+No formula, constant, range or status changed in Pass 5. What changed is how
+a player meets a profile's status:
+
+- an **experimental** profile is listed as "<Game> (experimental)" in the
+  picker itself (`profileOptionLabel` in `app/src/gameProfileView.ts`), so
+  the qualification is visible at the same moment as the name;
+- once chosen, the status block renders **above** the inputs, tone-coded by
+  status (`.profile-status-experimental` and friends), and for an
+  experimental profile adds what to do about it: use the number as a
+  starting point and check it in the game;
+- the reference URL in the profile details and on the results screen is a
+  link. In the desktop shell the click is handed to the system browser by
+  the window-open handler; the app makes no request;
+- the public support table is `docs/SUPPORT-MATRIX.md`, and
+  `scripts/verify-docs.mjs` fails the build if a row's status or
+  last-verified date disagrees with the profile that ships.
+
+PUBG: Battlegrounds and Battlefield 6 remain shipped, selectable and
+labelled rather than hidden behind an opt-in. The decision: a label that is
+in the list, above the inputs and on every converted value is prominent
+enough, and an opt-in would hide the two games whose players are most likely
+to bring back the one measurement that would settle them.

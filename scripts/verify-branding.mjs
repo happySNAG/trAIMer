@@ -126,6 +126,12 @@ export const ALLOWED = [
     text: "migrated from `%APPDATA%\\AldoAimLab` on first launch",
     reason: "Architecture table documenting the user-data migration.",
   },
+  {
+    file: ".github/ISSUE_TEMPLATE/config.yml",
+    text: "github.com/happySNAG/Aldo-Aim-Lab",
+    reason:
+      "GitHub contact links must be absolute URLs, and the repository's slug still carries the working title. Renaming the repository (docs/GITHUB-LANDING-PAGE.md recommends it) retires this entry; GitHub redirects the old slug.",
+  },
 ];
 
 /** Files whose every line must be free of the legacy names. */
@@ -133,16 +139,36 @@ const HARD_FILES = [
   "package.json",
   "app/index.html",
   "README.md",
+  "LICENSE",
+  "CONTRIBUTING.md",
+  "SECURITY.md",
+  "PRIVACY.md",
   "docs/INSTALL-WINDOWS.md",
   "docs/RELEASE.md",
+  "docs/RELEASE-NOTES.md",
+  "docs/SUPPORT-MATRIX.md",
+  "docs/CODE-SIGNING.md",
+  "docs/PROFILE-PROPOSAL-TEMPLATE.md",
+  "docs/SCREENSHOTS.md",
+  "docs/PUBLIC-SHARE-CHECKLIST.md",
+  "docs/GITHUB-LANDING-PAGE.md",
   "docs/DESKTOP-SHELL.md",
   "docs/PACKAGING-WINDOWS.md",
   "docs/MANUAL-TEST.md",
   ".github/workflows/ci.yml",
+  ".github/ISSUE_TEMPLATE/config.yml",
+  ".github/ISSUE_TEMPLATE/bug_report.yml",
+  ".github/ISSUE_TEMPLATE/profile_correction.yml",
+  ".github/ISSUE_TEMPLATE/profile_request.yml",
+  ".github/ISSUE_TEMPLATE/installation_problem.yml",
+  ".github/ISSUE_TEMPLATE/measurement_problem.yml",
   "scripts/release/windows/FIRST-RUN.md",
   "scripts/release/windows/start-traimer.ps1",
   "scripts/release/windows/stop-traimer.ps1",
 ];
+// CHANGELOG.md is deliberately NOT a hard file: its rc.7 entry records the
+// rename by name, which is history, not branding drift. The pass reports are
+// excluded for the same reason (see EXCLUDED).
 
 /**
  * Directories scanned with the comment-tolerant rule.

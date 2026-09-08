@@ -1,0 +1,44 @@
+name: New game-profile request
+description: Ask for a game that is not supported yet, or propose a profile for it
+title: "[New profile] "
+labels: ["game-profile", "enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A request without evidence is still welcome — it tells us what people want. A request **with** the proposal template filled in (docs/PROFILE-PROPOSAL-TEMPLATE.md) can become a profile.
+  - type: input
+    id: game
+    attributes:
+      label: Game title and publisher
+    validations:
+      required: true
+  - type: input
+    id: build
+    attributes:
+      label: Current version / season
+  - type: dropdown
+    id: evidence
+    attributes:
+      label: What can you provide?
+      options:
+        - Just the request
+        - Sources (URLs) for the sensitivity formula or constant
+        - A measured 360° turn at one sensitivity
+        - Measured 360° turns at two or more sensitivities (linearity)
+        - A filled-in proposal template
+    validations:
+      required: true
+  - type: textarea
+    id: details
+    attributes:
+      label: What you know about the game's sensitivity settings
+      description: Setting names, ranges, whether there is an ADS or per-scope setting, FOV slider, config-file keys, and any sources. Paste the proposal template here if you have filled it in.
+  - type: checkboxes
+    id: status
+    attributes:
+      label: Expected status
+      description: Be honest about what the evidence supports.
+      options:
+        - label: I think this could be "partially verified" or better with the sources above
+        - label: I expect this to start as "experimental"

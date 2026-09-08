@@ -1,6 +1,6 @@
-# Manual test harness — Aldo's Windows PC validation
+# Manual test harness — first real session on a Windows PC
 
-This is THE checklist for the first real session on Aldo's machine.
+This is THE checklist for the first real session on a player's Windows machine.
 Work top-to-bottom; do not skip ahead. Record PASS/FAIL plus evidence
 (screenshot, file, or note) for every row. If a HARD-GATE row fails,
 stop and fix before continuing.

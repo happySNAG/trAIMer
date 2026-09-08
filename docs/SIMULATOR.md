@@ -93,7 +93,7 @@ Consequences:
 
 ## Presets
 
-`consistent-medium` (default Aldo-like), `jittery-fast` (fast reactions, high
+`consistent-medium` (default), `jittery-fast` (fast reactions, high
 motor noise, weak correction), `deliberate-slow` (slow, precise, strong
 correction), `noisy-beginner` (high variance everywhere). All parameters are
-overridable; nothing is special-cased around "Aldo".
+overridable; nothing is special-cased around any one player.

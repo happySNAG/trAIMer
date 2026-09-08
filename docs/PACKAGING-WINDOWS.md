@@ -100,7 +100,7 @@ into the desktop shell.
 4. Repack determinism: identical inputs produce byte-identical manifests and
    SHA256SUMS (the MSVC exe itself embeds timestamps and is pinned by hash).
 
-## First run on Aldo's PC
+## First run on a player's PC
 
 Covered by the preflight system (`src/preflight/preflight.ts`, Diagnostics
 tab): token match, protocol/helper-version parity (fail-closed at the

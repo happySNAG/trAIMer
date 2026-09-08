@@ -1,6 +1,6 @@
 # Native high-frequency capture
 
-Windows is the primary platform (Aldo's Fortnite machine). The helper is an
+Windows is the primary platform. The helper is an
 independent, local-only mouse telemetry reader — it never injects into,
 reads, or communicates with any game or anti-cheat system.
 

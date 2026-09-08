@@ -1,0 +1,17 @@
+{
+  "capturedAtIso": "2026-09-08T11:50:54.799Z",
+  "how": "Chromium 1440x900, Vite dev server, scripted player under ?e2e=1 (see scripts/capture-screenshots.mjs)",
+  "files": [
+    "docs/screenshots/01-home.png",
+    "docs/screenshots/02-setup-game-picker.png",
+    "docs/screenshots/02c-setup-experimental-profile.png",
+    "docs/screenshots/03-arena-shooting-drill.png",
+    "docs/screenshots/04-arena-tracking-drill.png",
+    "docs/screenshots/05-break.png",
+    "docs/screenshots/06-results-summary.png",
+    "docs/screenshots/07-results-game-conversion.png",
+    "docs/screenshots/08-results-advanced.png",
+    "docs/screenshots/09-history.png"
+  ],
+  "sessionEndState": "complete"
+}
