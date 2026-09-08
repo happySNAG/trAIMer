@@ -314,13 +314,28 @@ try {
   // ---- history ---------------------------------------------------------------
   await openTab(page, "history");
   await page.waitForSelector("#view-history", { timeout: 30_000 });
-  await page.waitForFunction(
-    () => !/Loading/i.test(document.querySelector("#view-history")?.textContent ?? "Loading"),
-    null,
-    { timeout: 60_000 },
-  ).catch(() => undefined);
+  // History reads every stored envelope before it draws a row; on a runner
+  // that has just run several sessions that takes a moment. Wait for the
+  // list to actually render — rows, or the explicit empty state — rather
+  // than counting whatever is there a few milliseconds after the click.
+  await page
+    .waitForFunction(
+      () => {
+        const view = document.querySelector("#view-history");
+        if (!view) return false;
+        if (view.querySelector(".session-row")) return true;
+        return /No sessions|Start an aim test|unavailable/i.test(view.textContent ?? "");
+      },
+      null,
+      { timeout: 90_000 },
+    )
+    .catch(() => undefined);
   const rows = page.locator("#view-history .session-row");
   const rowCount = await rows.count();
+  if (rowCount === 0) {
+    const text = ((await page.locator("#view-history").textContent()) ?? "").replace(/\s+/g, " ").trim();
+    notes.push(`history view text: ${text.slice(0, 300)}`);
+  }
   const wanted = historyOnly ? expectHistory : Math.max(1, expectHistory);
   check(
     rowCount >= wanted,
