@@ -6,18 +6,25 @@
  * these strings so any historical result can be traced to the exact code that
  * produced it.
  *
- * The V1 release candidate is identified as 1.0.0-rc.11 (Game Profile Campaign
- * Pass 3 of 5: six more public game profiles — Overwatch 2, Rainbow Six
- * Siege, Marvel Rivals, PUBG: Battlegrounds, The Finals and Battlefield 6 —
- * a picker organised for twelve games (alphabetical, recently used, a
- * filter), and the installed-Windows-app gate Pass 2 was missing: CI now
- * drives the real picker inside the installed application and checks every
- * public profile against the engine's own declarations. Three additive
- * schema pieces carried the new games: a zoom FOV scaled from the hip-fire
- * FOV (Siege), hip-fire FOV scaling (PUBG) and an engine-scaled zoom with an
- * unpublished FOV (The Finals). PUBG and Battlefield 6 ship as
- * experimental — one fitted constant each, no published formula — and say
- * so on every conversion. See docs/GAME-PROFILES.md.)
+ * The V1 release candidate is identified as 1.0.0-rc.12 (Game Profile
+ * Campaign Pass 4 of 5: no new games, but every one of the twelve public
+ * profiles re-researched from scratch and treated as untrusted until
+ * re-confirmed from outside this repository. Eight base constants were
+ * independently re-derived from a published cm/360 band that names no game
+ * internals; Counter-Strike 2's and Valorant's zoom models were shown to be
+ * algebraically identical to independently published formulas and to
+ * reproduce their published constants to eight or nine significant figures.
+ * One real defect was corrected: Battlefield 6's stock Uniform Soldier
+ * Aiming coefficient is 133.3%, not the 177.8% Pass 3 recorded, which had
+ * made two distinct matching philosophies produce one answer. Two disputes
+ * were dissolved rather than decided — Siege's "rival" 0.00223 yaw is a
+ * configuration multiplier, not a yaw, and Overwatch's 37.89 / 49.46 are the
+ * tangent and angle ratios of the same scoped FOV. PUBG stays experimental
+ * because Pass 4 tried and failed to confirm its scale is linear. Adds
+ * source-derived golden tests, a rounding sweep over every field of every
+ * profile, a full cross-profile equivalence audit, and a fail-closed warning
+ * when a FOV-scaled profile is converted without a FOV.
+ * See docs/GAME-PROFILES.md.)
  * rc.10 (Game Profile Campaign
  * Pass 2 of 5: the first five public game profiles — Fortnite, Valorant,
  * Counter-Strike 2, Apex Legends and Call of Duty / Warzone — on the
@@ -115,7 +122,7 @@ export const PRODUCT_NAME = "trAIMer";
 export const PRODUCT_TAGLINE = "Train. Measure. Tune.";
 
 /** Application release version for the V1 release candidate. */
-export const APP_VERSION = "1.0.0-rc.11";
+export const APP_VERSION = "1.0.0-rc.12";
 
 /**
  * Engine contract version: bump when a persisted engine-facing data contract

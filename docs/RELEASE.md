@@ -2,7 +2,7 @@
 
 ## Version strings (`src/version.ts`)
 
-- `APP_VERSION` — `1.0.0-rc.11` for the V1 release line (rc.1 was the Pass 5
+- `APP_VERSION` — `1.0.0-rc.12` for the V1 release line (rc.1 was the Pass 5
   candidate and shipped a non-executable helper; rc.2 was the Pass 8
   pre-hardware candidate and still launched via PowerShell; rc.3 was the Pass 9
   installed-desktop-application candidate, which installed and launched on
@@ -28,7 +28,11 @@
   Duty / Warzone — on that architecture; rc.11 is Pass 3, which adds
   Overwatch 2, Rainbow Six Siege, Marvel Rivals, PUBG, The Finals and
   Battlefield 6, reorganises the picker, and adds the installed-app
-  game-picker gate to CI).
+  game-picker gate to CI; rc.12 is Pass 4, the validation and hardening
+  pass — every public profile independently re-verified, Battlefield 6's
+  stock ADS coefficient corrected from 177.8% to 133.3%, and golden tests
+  added whose expected values come from published sources rather than from
+  this repository's own constants).
 - `ENGINE_VERSION` — `engine-v4` (bumped per engineering pass with contract
   changes).
 - `OPTIMIZER_VERSION_V4` — `optimizer-v3` (paired-effects surrogate,
@@ -85,7 +89,7 @@
 
 | Component | Version |
 |---|---|
-| App | 1.0.0-rc.11 |
+| App | 1.0.0-rc.12 |
 | Engine | engine-v4 |
 | Optimizer | optimizer-v3 (paired fit + adequacy gating + change-point) |
 | Scoring model | scoring-v1 (weights: accuracy .28, speed .14, tracking .14, correction .12, overshoot .11, undershoot .11, consistency .10) |

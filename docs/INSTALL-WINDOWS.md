@@ -11,7 +11,7 @@ One file. Double-click it. That is the whole procedure.
 
 ## What you need
 
-- `trAIMer-Setup-1.0.0-rc.11.exe` (also copied as `trAIMer-Setup.exe`)
+- `trAIMer-Setup-1.0.0-rc.12.exe` (also copied as `trAIMer-Setup.exe`)
 - Windows 10 or 11, 64-bit (`PROCESSOR_ARCHITECTURE = AMD64`)
 
 You do **not** need PowerShell, a terminal, a browser, a compiler, admin
