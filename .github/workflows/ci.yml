@@ -36,6 +36,12 @@ jobs:
         run: node scripts/audit-no-telemetry.mjs
       - name: RELEASE GATE - branding (sources + player docs)
         run: node scripts/verify-branding.mjs
+      - name: RELEASE GATE - public docs are current and consistent
+        # Every relative link in the public docs resolves, every version
+        # string in a player-facing document is this build's, and the
+        # public support matrix says exactly what the profile registry says
+        # (status and last-verified date, per game). See docs/SUPPORT-MATRIX.md.
+        run: node scripts/verify-docs.mjs
 
   browser:
     runs-on: ubuntu-latest
@@ -312,7 +318,49 @@ jobs:
           "INSTALLER_PATH=$installer" | Out-File -FilePath $env:GITHUB_ENV -Append
           "APP_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
 
-      - name: RELEASE GATE - silent install produces a complete application
+      - name: RELEASE GATE - upgrade path, part 1 - install the previous release candidate and use it
+        shell: pwsh
+        # Pass 5, requirement 24. The new installer must be an in-place
+        # UPGRADE of the last RC a player could hold, and everything that
+        # player recorded must still be there afterwards. So the previous RC
+        # is installed first, a full calibration is completed on it (a real
+        # stored session with a game conversion), and the new installer then
+        # goes on top. The prior installer comes from the GitHub release that
+        # published it, or failing that from the CI artifact of the run that
+        # built it; its digest is checked against the one recorded in the
+        # pass report before it is run.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRIOR_RC_VERSION: 1.0.0-rc.12
+          PRIOR_RC_RUN_ID: "34197845506"
+          PRIOR_RC_SHA256: dcc93df94fc52bbad49d82f2045d89388670b47e7a361b262a73d78cfae079a1
+        run: |
+          $dir = "$env:RUNNER_TEMP\prior-rc"
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $prior = Join-Path $dir "trAIMer-Setup-$env:PRIOR_RC_VERSION.exe"
+          gh release download "v$env:PRIOR_RC_VERSION" --pattern "trAIMer-Setup-$env:PRIOR_RC_VERSION.exe" --dir $dir 2>$null
+          if (-not (Test-Path $prior)) {
+            Write-Host "no GitHub release for v$env:PRIOR_RC_VERSION; using the CI artifact of run $env:PRIOR_RC_RUN_ID"
+            gh run download $env:PRIOR_RC_RUN_ID --name traimer-windows-installer --dir $dir
+          }
+          if (-not (Test-Path $prior)) { throw "previous RC installer not available: $prior" }
+          $hash = (Get-FileHash -Algorithm SHA256 $prior).Hash.ToLower()
+          if ($hash -ne $env:PRIOR_RC_SHA256) { throw "previous RC installer digest mismatch: $hash" }
+          Write-Host "previous RC installer verified: $prior ($hash)"
+          $target = "C:\traimer-install-test"
+          $proc = Start-Process -FilePath $prior -ArgumentList "/S", "/D=$target" -Wait -PassThru
+          if ($proc.ExitCode -ne 0) { throw "previous RC silent install exited $($proc.ExitCode)" }
+          Get-Process -Name "trAIMer", "traimer_capture_helper" -ErrorAction SilentlyContinue | Stop-Process -Force
+          Start-Sleep -Seconds 3
+          node scripts/verify-installed-smoke.mjs --exe "$target\trAIMer.exe" --prior-build --player PriorRcPlayer --out "$env:RUNNER_TEMP\smoke-prior-rc.json"
+          if ($LASTEXITCODE -ne 0) { throw "full smoke on the previous RC failed" }
+          Get-Process -Name "trAIMer", "traimer_capture_helper" -ErrorAction SilentlyContinue | Stop-Process -Force
+          if (-not (Test-Path "$env:APPDATA\trAIMer")) { throw "the previous RC left no user-data directory to carry forward" }
+          $entries = @(Get-ChildItem "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall" | Where-Object { $_.GetValue("DisplayName") -like "trAIMer*" })
+          if ($entries.Count -ne 1) { throw "expected one Apps & Features entry after installing the previous RC, found $($entries.Count)" }
+          Write-Host "previous RC installed and used: $($entries[0].GetValue('DisplayName'))"
+
+      - name: RELEASE GATE - upgrade path, part 2 - silent install produces a complete application over the previous one
         shell: pwsh
         run: |
           $target = "C:\traimer-install-test"
@@ -320,6 +368,14 @@ jobs:
           $proc = Start-Process -FilePath $env:INSTALLER_PATH -ArgumentList "/S", "/D=$target" -Wait -PassThru
           if ($proc.ExitCode -ne 0) { throw "silent install exited $($proc.ExitCode)" }
           if (-not (Test-Path $target)) { throw "installer did not create $target" }
+          # One entry in Apps & Features, carrying the new version: an upgrade,
+          # not a second install beside the old one.
+          $entries = @(Get-ChildItem "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall" | Where-Object { ($_.GetValue("DisplayName") -like "trAIMer*") -or ($_.GetValue("DisplayName") -like "Aldo*") })
+          if ($entries.Count -ne 1) { throw "expected exactly one Apps & Features entry after the upgrade, found $($entries.Count): $(($entries | ForEach-Object { $_.GetValue('DisplayName') }) -join ', ')" }
+          $display = $entries[0].GetValue("DisplayName")
+          if ($display -ne "trAIMer $env:APP_VERSION") { throw "Apps & Features entry is '$display', expected 'trAIMer $env:APP_VERSION'" }
+          if (-not (Test-Path "$env:APPDATA\trAIMer")) { throw "the upgrade removed the player's user-data directory" }
+          Write-Host "upgraded in place: $display; user data preserved"
           Get-ChildItem -Recurse $target | Select-Object -First 40 | ForEach-Object { Write-Host $_.FullName }
           node scripts/verify-windows-artifacts.mjs --installed-app $target
           if ($LASTEXITCODE -ne 0) { throw "installed application verification failed" }
@@ -402,6 +458,68 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw "game-picker gate failed on the installed app" }
           Get-Process -Name "trAIMer" -ErrorAction SilentlyContinue | Stop-Process -Force
           Get-Process -Name "traimer_capture_helper" -ErrorAction SilentlyContinue | Stop-Process -Force
+
+      - name: RELEASE GATE - the INSTALLED app completes a calibration end to end
+        shell: pwsh
+        # Pass 5, requirement 25: launch, pick a real game profile, enter DPI
+        # and the sensitivity played there, choose Quick, hit shooting
+        # targets, complete tracking drills, pass through a break, reach
+        # Results with the game conversion, open History, close cleanly. The
+        # session recorded by the previous RC (part 1 above) must still be
+        # listed: that is the upgrade's data-preservation proof.
+        run: |
+          $exe = "C:\traimer-install-test\trAIMer.exe"
+          Get-Process -Name "trAIMer" -ErrorAction SilentlyContinue | Stop-Process -Force
+          Get-Process -Name "traimer_capture_helper" -ErrorAction SilentlyContinue | Stop-Process -Force
+          Start-Sleep -Seconds 2
+          node scripts/verify-installed-smoke.mjs --exe $exe --player UpgradedPlayer --expect-history 2 --expect-player PriorRcPlayer --out "$env:RUNNER_TEMP\smoke-installed.json"
+          if ($LASTEXITCODE -ne 0) { throw "full smoke failed on the installed app" }
+          Get-Process -Name "trAIMer" -ErrorAction SilentlyContinue | Stop-Process -Force
+          Get-Process -Name "traimer_capture_helper" -ErrorAction SilentlyContinue | Stop-Process -Force
+          Start-Sleep -Seconds 2
+          $stragglers = Get-Process -Name "trAIMer", "traimer_capture_helper" -ErrorAction SilentlyContinue
+          if ($stragglers) { throw "processes survived the full smoke: $($stragglers.Name -join ', ')" }
+
+      - name: RELEASE GATE - uninstall keeps the player's data by default, and a reinstall finds it
+        shell: pwsh
+        # Pass 5, requirement 24. A silent or automated uninstall must never
+        # delete a player's sessions (the uninstaller's "also delete my data?"
+        # question defaults to No and cannot be answered Yes silently), the
+        # Apps & Features entry must go, and a clean reinstall must open with
+        # every earlier session still in History.
+        run: |
+          $target = "C:\traimer-install-test"
+          $uninstaller = Join-Path $target "Uninstall trAIMer.exe"
+          if (-not (Test-Path $uninstaller)) { Get-ChildItem $target | ForEach-Object { Write-Host $_.Name }; throw "uninstaller not found: $uninstaller" }
+          # _?= runs the uninstaller in place (so -Wait really waits) and must be last.
+          $proc = Start-Process -FilePath $uninstaller -ArgumentList "/S", "_?=$target" -Wait -PassThru
+          if ($proc.ExitCode -ne 0) { throw "silent uninstall exited $($proc.ExitCode)" }
+          if (Test-Path (Join-Path $target "trAIMer.exe")) { throw "uninstall left trAIMer.exe behind" }
+          if (Test-Path (Join-Path $target "resources\traimer_capture_helper.exe")) { throw "uninstall left the capture helper behind" }
+          if (-not (Test-Path "$env:APPDATA\trAIMer")) { throw "silent uninstall DELETED the player's data" }
+          $entries = @(Get-ChildItem "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall" | Where-Object { ($_.GetValue("DisplayName") -like "trAIMer*") -or ($_.GetValue("DisplayName") -like "Aldo*") })
+          if ($entries.Count -ne 0) { throw "Apps & Features entry survived the uninstall: $(($entries | ForEach-Object { $_.GetValue('DisplayName') }) -join ', ')" }
+          Write-Host "uninstalled; user data kept at $env:APPDATA\trAIMer"
+          Remove-Item -Recurse -Force $target -ErrorAction SilentlyContinue
+
+          $proc = Start-Process -FilePath $env:INSTALLER_PATH -ArgumentList "/S", "/D=$target" -Wait -PassThru
+          if ($proc.ExitCode -ne 0) { throw "reinstall exited $($proc.ExitCode)" }
+          node scripts/verify-windows-artifacts.mjs --installed-app $target
+          if ($LASTEXITCODE -ne 0) { throw "reinstalled application verification failed" }
+          Get-Process -Name "trAIMer", "traimer_capture_helper" -ErrorAction SilentlyContinue | Stop-Process -Force
+          Start-Sleep -Seconds 3
+          node scripts/verify-installed-smoke.mjs --exe "$target\trAIMer.exe" --history-only --expect-history 2 --expect-player PriorRcPlayer --out "$env:RUNNER_TEMP\smoke-reinstalled.json"
+          if ($LASTEXITCODE -ne 0) { throw "history was not preserved across uninstall + reinstall" }
+          Get-Process -Name "trAIMer", "traimer_capture_helper" -ErrorAction SilentlyContinue | Stop-Process -Force
+          Write-Host "reinstalled; every earlier session is still in History"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: installed-app-smoke-results
+          path: |
+            ${{ runner.temp }}/smoke-*.json
+          retention-days: 90
 
       - name: publish installer with checksum
         shell: pwsh
