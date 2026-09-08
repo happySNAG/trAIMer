@@ -1,8 +1,9 @@
 # Game profiles and sensitivity conversion
 
-**Status: Game Profile Campaign, Pass 1 of 5 — architecture.**
-One public profile ships (the generic/raw control). The named-game set arrives
-in later passes.
+**Status: Game Profile Campaign, Pass 2 of 5 — first five public games.**
+Six public profiles ship: Fortnite, Valorant, Counter-Strike 2, Apex Legends,
+Call of Duty / Warzone, and the generic/raw control. §14 lists what each one
+models, what it verified against, and what it deliberately does not convert.
 
 trAIMer measures a player's physical aim. A *game profile* is the translation
 layer that turns that measurement into the number a specific FPS accepts. This
@@ -191,6 +192,12 @@ produces the game's stock behaviour, and how the game applies that setting:
 | `multiplies-hipfire` | `deg/count(zoom) = deg/count(hip) × value` |
 | `fov-relative-multiplier` | the game already applies FOV scaling, so its neutral value means "matched to what you see" |
 | `independent-scalar` | the optic carries its own absolute sensitivity |
+| `fov-ratio-multiplier` (Pass 2) | `deg/count(zoom) = deg/count(hip) × value × (fov_zoom / fov_hip)` — the LINEAR angle ratio on the game's own stated FOV numbers. Counter-Strike's `zoom_sensitivity_ratio` and Valorant's multipliers work this way; it is close to, but not, FOV-relative matching, which is why 0.818933 is the CS value for a 40° scope |
+| `monitor-distance-coefficient` (Pass 2) | the setting IS a monitor-distance coefficient the game applies itself, on `coefficientAxis`. Call of Duty's Relative mode. The layer translates the philosophy into the coefficient (0 = FOV-relative; `c × aspect` for a horizontal match on the vertical axis) and never needs an ADS FOV |
+
+A zoom level may also declare `valueScale` — setting units per unit
+multiplier — so a game that shows a multiplier as a percentage (Fortnite's
+targeting sensitivity) is entered as `100%` for a ratio of 1.0.
 
 **There is no single correct scoped sensitivity.** The profile layer represents
 the choice explicitly (`src/games/matching.ts`):
@@ -317,8 +324,11 @@ that no public profile ships a game file path to edit.
    were verified against.
 4. Set `status` honestly. `partially-verified` and `experimental` are shown to
    players with the gap stated; `verified` is a claim the validator enforces.
-5. Add a round-trip case to `tests/gameRoundTrip.test.ts` and any game-specific
-   edge cases to `tests/gameConversion.test.ts`.
+5. Add the profile to `tests/gamePublicProfiles.test.ts`: a known
+   sensitivity + DPI → cm/360 case, the inverse, the round-trip matrix,
+   bounds, rounding and step, the X/Y model, every zoom the profile converts
+   under every philosophy it supports, FOV, metadata, and a malformed
+   variant that must be refused.
 6. If the profile cites a URL, expect it in the no-telemetry audit's printed
    allowlist and check that it is the one you meant.
 
@@ -349,3 +359,29 @@ power-law scale, and a deprecated profile with a successor.
 
 They carry `visibility: "fixture"`, are never in `PUBLIC_GAME_PROFILES`, and a
 test asserts no shipped view imports them.
+
+---
+
+## 14. The public profiles (Pass 2)
+
+All five named games were researched against current (2025–2026) settings
+menus and the technical references the sensitivity community treats as
+authoritative; none of the publishers documents its constant, so every
+`source.type` is `community-reference` with `confidence: "high"` and the
+open points written into `uncertaintyNotes`. Verification date: 2026-09-07.
+
+| Profile (`id`) | Hip-fire model | X/Y | Field of view | ADS / scope | Grid | Status |
+| --- | --- | --- | --- | --- | --- | --- |
+| Fortnite (`fortnite`) | 0.005555°/count per 1% | independent absolute percentages | none exposed (not modelled) | **Targeting** converted as a plain multiplier (100% = hip-fire; the FOV does not change). **Scope** not converted: scope FOVs unverified | 1.0–100.0% in 0.1% steps | partially-verified |
+| Valorant (`valorant`) | 0.07°/count at 1.000 | one value | fixed 103° horizontal (16:9) | two multipliers, each `fov-ratio-multiplier` with zoom FOV = 103°/zoom: **ADS** (1.25× rifles; 1.15×/1.5× share it) and **Scoped** (Operator 2.5×; 3.5×/5× share it). FOV-relative values come out at 0.870439 / 0.747462, matching independent references | 0.001–10.000, 3 decimals; multiplier bounds assumed | partially-verified |
+| Counter-Strike 2 (`counter-strike-2`) | 0.022°/count (m_yaw) | one value | fixed 90° horizontal at 4:3 | `zoom_sensitivity_ratio` as `fov-ratio-multiplier` for the AWP first zoom (40°); FOV-relative derives 0.818933 | 0.10–8.00 on screen, 6 decimals in console; zoom 0.10–3.00 | verified |
+| Apex Legends (`apex-legends`) | 0.022°/count at 1.0 | one value | 70–110, horizontal at 4:3, unused by any conversion | **Not converted.** References disagree on the per-optic factors and on the kind of scaling | 0.1–20.0 in 0.1 steps, 6 decimals in the settings file | partially-verified |
+| Call of Duty / Warzone (`call-of-duty-warzone`) | 0.0066°/count at 1.00 | value + Vertical Sensitivity Multiplier | 60–120 horizontal, unused by the conversion | **Relative mode** as `monitor-distance-coefficient` on the vertical axis: 0.00 FOV-relative, 1.33 game default, 1.78 = 100% horizontal on 16:9; multipliers left at 1.00. Legacy mode and per-zoom multipliers not converted; same-physical-sensitivity refused | 0.01–100.00, 2 decimals; coefficient 0.00–2.00 | partially-verified |
+| Generic / Raw (`generic-raw`) | 0.02°/count at 1.00 (definition) | independent absolute | none | none | continuous, 4 decimals | verified |
+
+Every philosophy offered for a game is one the profile can express exactly;
+where a game could not (Call of Duty's coefficient cannot mean "same
+physical sensitivity"), the option is absent rather than approximated. The
+picker asks for a field of view only when a conversion path reads it
+(`conversionUsesFov`), so Apex and Call of Duty players are not shown a
+decorative input.

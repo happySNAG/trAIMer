@@ -6,7 +6,19 @@
  * these strings so any historical result can be traced to the exact code that
  * produced it.
  *
- * The V1 release candidate is identified as 1.0.0-rc.9 (Game Profile Campaign
+ * The V1 release candidate is identified as 1.0.0-rc.10 (Game Profile Campaign
+ * Pass 2 of 5: the first five public game profiles — Fortnite, Valorant,
+ * Counter-Strike 2, Apex Legends and Call of Duty / Warzone — on the
+ * architecture rc.9 introduced, each a versioned, sourced conversion
+ * definition with its hip-fire model, X/Y model, slider grid, field of view
+ * and, where a defensible model exists, its aim-down-sights / scope
+ * relationship. Two zoom behaviours the real games needed were added to the
+ * profile schema without changing its version: a linear field-of-view ratio
+ * (Counter-Strike, Valorant) and a game-applied monitor-distance coefficient
+ * (Call of Duty). Where a game's scaling could not be verified — Fortnite
+ * scopes, every Apex optic — the profile says so instead of guessing. See
+ * docs/GAME-PROFILES.md.)
+ * rc.9 (Game Profile Campaign
  * Pass 1 of 5: the game-profile and sensitivity-conversion architecture. The
  * measurement core stays game-agnostic; a new translation layer
  * (`src/games/**`) turns a measured physical aim into the number a specific
@@ -91,7 +103,7 @@ export const PRODUCT_NAME = "trAIMer";
 export const PRODUCT_TAGLINE = "Train. Measure. Tune.";
 
 /** Application release version for the V1 release candidate. */
-export const APP_VERSION = "1.0.0-rc.9";
+export const APP_VERSION = "1.0.0-rc.10";
 
 /**
  * Engine contract version: bump when a persisted engine-facing data contract
