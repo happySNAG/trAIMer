@@ -25,6 +25,12 @@ import {
   plannedTargetPositionAt,
   type PlannedScenarioInstance,
 } from "../scenarios/planner.ts";
+import {
+  arenaGainRatio,
+  baselineReferenceAnchor,
+  type ArenaSensitivityAnchor,
+} from "../sensmath/arenaGain.ts";
+import type { SensitivityConfiguration } from "../domain/settings.ts";
 
 export interface SimulatorOptions {
   viewport?: Viewport;
@@ -52,6 +58,17 @@ export class SyntheticExperimentRunner {
   readonly #sampleDtMs: number;
   #virtualClockMs = 0;
   readonly #repCounterByCandidate = new Map<string, number>();
+  /**
+   * The physical anchor the simulator's candidate arithmetic runs against.
+   *
+   * The declared-reference anchor, because a synthetic player has no
+   * calibration and no game. Which anchor is chosen does not matter here and
+   * cannot: `arenaGainRatio` divides two gains, so the anchor's reference
+   * sensitivity and reference deg/cm cancel exactly. The anchor is present so
+   * the simulator goes through the same function as the arena, not because
+   * its value influences anything.
+   */
+  readonly #gainAnchor: ArenaSensitivityAnchor;
 
   constructor(
     definition: ExperimentDefinition,
@@ -62,6 +79,10 @@ export class SyntheticExperimentRunner {
     this.#player = player;
     this.#viewport = options.viewport ?? { widthPx: 1280, heightPx: 720 };
     this.#sampleDtMs = 1000 / (options.sampleHz ?? 240);
+    this.#gainAnchor = baselineReferenceAnchor(
+      definition.baselineSensitivity,
+      definition.dpi,
+    );
   }
 
   runRound(
@@ -80,10 +101,15 @@ export class SyntheticExperimentRunner {
       }
       lastCandidateId = spec.candidateId;
       const scenario = scenarioById(spec.scenarioId);
+      // The PAIRING index (src/experiments/protocol.ts): the simulator must
+      // give two candidates the same target layout for the same paired cell,
+      // exactly as the live runner does, or the campaigns would validate a
+      // statistical model the product does not run.
       let repIndex: number;
       if (spec.phase === "measured") {
-        repIndex = this.#repCounterByCandidate.get(spec.candidateId) ?? 0;
-        this.#repCounterByCandidate.set(spec.candidateId, repIndex + 1);
+        const counter = this.#repCounterByCandidate.get(spec.candidateId) ?? 0;
+        this.#repCounterByCandidate.set(spec.candidateId, counter + 1);
+        repIndex = spec.pairIndex ?? counter;
       } else {
         repIndex = spec.sequenceNumber;
       }
@@ -124,14 +150,39 @@ export class SyntheticExperimentRunner {
     return trials;
   }
 
+  /**
+   * How far this candidate sits from the synthetic player's true optimum.
+   *
+   * Computed from THE arena gain function (src/sensmath/arenaGain.ts), the
+   * same one `VirtualReticle` applies to a real player's hand, rather than
+   * from a private copy of the eDPI arithmetic.
+   *
+   * That is the point of the indirection. Before Pass 15 this method did its
+   * own eDPI division while the real arena did nothing at all, so the
+   * simulator could stay correct — and every campaign built on it stay
+   * green — while the product shipped an arena that ignored the candidate
+   * entirely. Sharing the function makes that divergence impossible: a
+   * candidate that moves the simulator's ratio moves the real reticle by the
+   * identical factor, and tests/arenaCandidateGain.test.ts pins the two
+   * together numerically.
+   *
+   * The player's optimum is expressed as an eDPI, so it is converted into a
+   * sensitivity in the definition's own units at the definition's DPI before
+   * the comparison — a change of units, not of model. Both sides then pass
+   * through `arenaGainRatio`, where the anchor and the DPI cancel exactly.
+   */
   #effectFor(candidateId: CandidateId): SensitivityEffect {
     const candidate = this.#definition.candidates.find((c) => c.id === candidateId)!;
-    const candEdpiX = this.#definition.dpi * candidate.sensitivity.sensX;
-    const candEdpiY = this.#definition.dpi * candidate.sensitivity.sensY;
+    const dpi = this.#definition.dpi;
+    const optimum: SensitivityConfiguration = {
+      sensX: this.#player.trueOptimalEdpi / dpi,
+      sensY: this.#player.trueOptimalEdpiY / dpi,
+    };
+    const ratio = arenaGainRatio(this.#gainAnchor, candidate.sensitivity, optimum);
     return {
-      ratioX: candEdpiX / this.#player.trueOptimalEdpi,
-      log2RatioX: Math.log2(candEdpiX / this.#player.trueOptimalEdpi),
-      ratioY: candEdpiY / this.#player.trueOptimalEdpiY,
+      ratioX: ratio.x,
+      log2RatioX: Math.log2(ratio.x),
+      ratioY: ratio.y,
     };
   }
 

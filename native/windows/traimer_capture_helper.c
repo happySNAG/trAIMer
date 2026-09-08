@@ -1,5 +1,5 @@
 /*
- * Aldo Aim Lab — Windows native mouse capture helper.
+ * trAIMer — Windows native mouse capture helper.
  *
  * Reads PHYSICAL raw mouse deltas via the documented Win32 Raw Input API
  * (RegisterRawInputDevices / WM_INPUT / GetRawInputData) and streams them as
@@ -27,13 +27,25 @@
  *                      "events":[{"kind":"pointer-sample"|"button", ...}]}
  *                   | {"type":"lifecycle","phase":"started"|"stopping"|"reconnecting","detail":"..."}
  *                   | {"type":"ping"}          (client answers "pong")
+ *   client → helper : {"type":"time-sync","id":"N"}
+ *   helper → client : {"type":"time-sync-reply","id":"N","helperMonotonicMs":T}
  *
  * Frames preserve RAW mouse counts (no interpolation, no smoothing, no
  * fabricated samples). Timestamps are high-resolution monotonic milliseconds
  * from helper start via QueryPerformanceCounter.
  *
- * Build (see native/windows/BUILD.md): cl /O2 /W4 aldo_capture_helper.c
- *   or: gcc -O2 -o aldo_capture_helper.exe aldo_capture_helper.c -lws2_32
+ * CLOCK DOMAIN. Those milliseconds are counted from THIS PROCESS's start, not
+ * from the renderer's `performance.timeOrigin`. The two origins are unrelated,
+ * so a frame timestamp is meaningless to the client until it is translated.
+ * `time-sync` exists for exactly that: the client stamps its own clock before
+ * sending and after receiving, the helper reads QPC once in between and
+ * replies immediately, and the client derives the offset with a bound of half
+ * the round trip (Cristian's algorithm — see src/capture/timebase.ts). The
+ * reply is written and sent with nothing between the QPC read and the send,
+ * so the helper contributes as little as possible to that bound.
+ *
+ * Build (see native/windows/BUILD.md): cl /O2 /W4 traimer_capture_helper.c
+ *   or: gcc -O2 -o traimer_capture_helper.exe traimer_capture_helper.c -lws2_32
  */
 
 #define WIN32_LEAN_AND_MEAN
@@ -46,12 +58,43 @@
 #include <string.h>
 #include <stdint.h>
 
-#define HELPER_VERSION            "helper-1.0.0"
+#define HELPER_VERSION            "helper-1.1.0"
+
+/* Reported by --version so the release pipeline can assert the shipped
+   binary really is the 64-bit build (constant folded, not a runtime test:
+   MSVC /W4 /WX rejects constant conditional expressions). */
+#if defined(_WIN64) || defined(_M_X64) || defined(__x86_64__)
+#define HELPER_ARCH               "x64"
+#else
+#define HELPER_ARCH               "x86"
+#endif
 #define PROTOCOL_VERSION          1
 #define DEFAULT_PORT              48765
 #define MAX_TOKEN_LEN             128
 #define WS_RX_BUF_SIZE            8192
 #define WS_TX_BUF_SIZE            4096
+
+/* ------------------------------------------------------------------ */
+/* Small bounded string copy                                           */
+/* ------------------------------------------------------------------ */
+
+/*
+ * Always-NUL-terminating bounded copy.
+ *
+ * Used instead of strncpy, which MSVC reports as C4996 ("may be unsafe") and
+ * which /WX turns into an error. Silencing the warning with
+ * _CRT_SECURE_NO_WARNINGS would hide the whole deprecation class, so the
+ * copy is written out instead.
+ */
+static void copy_bounded(char *dst, size_t dstSize, const char *src)
+{
+    size_t i = 0;
+    if (dst == NULL || dstSize == 0) return;
+    if (src != NULL) {
+        for (; i + 1 < dstSize && src[i] != '\0'; i++) dst[i] = src[i];
+    }
+    dst[i] = '\0';
+}
 
 /* ------------------------------------------------------------------ */
 /* Monotonic high-resolution clock                                     */
@@ -184,13 +227,42 @@ static SOCKET g_clientSocket = INVALID_SOCKET;
 static char   g_expectedToken[MAX_TOKEN_LEN] = { 0 };
 static volatile LONG g_clientAccepted = 0;
 
+/*
+ * Shutdown flag and parent-process watchdog.
+ *
+ * The desktop shell that spawns this helper stops it explicitly when the app
+ * quits. The watchdog covers the case the shell CANNOT cover: if the shell is
+ * killed hard (Task Manager "End task", a crash, a power-management kill), a
+ * helper left running would hold the loopback port and shadow the next
+ * launch. Waiting on the parent's process handle makes an orphaned helper
+ * impossible, and gives the accept loop a real exit — without one, the
+ * WSACleanup() at the end of main() was literally unreachable (MSVC C4702).
+ */
+static volatile LONG g_shuttingDown = 0;
+
+static int shutting_down(void)
+{
+    return InterlockedCompareExchange(&g_shuttingDown, 0, 0) != 0;
+}
+
 static int ws_send_all(SOCKET sock, const char *data, int len)
 {
     int sent = 0;
+    int stalls = 0;
     while (sent < len) {
         int n = send(sock, data + sent, len - sent, 0);
-        if (n <= 0) return 0;
-        sent += n;
+        if (n > 0) { sent += n; stalls = 0; continue; }
+        /* The client socket is non-blocking once WSAEventSelect is armed on
+           it (that is how the streaming loop wakes on data instead of polling
+           a 200 ms timeout). A full send buffer is back-pressure, not a
+           disconnect: wait briefly and retry, and give up only if it stays
+           full for a second — at which point the client really is gone. */
+        if (WSAGetLastError() == WSAEWOULDBLOCK && stalls < 1000) {
+            stalls++;
+            Sleep(1);
+            continue;
+        }
+        return 0;
     }
     return 1;
 }
@@ -558,6 +630,27 @@ static void handle_wm_input(HRAWINPUT hRawInput, SOCKET sock)
 /* Hello / welcome                                                     */
 /* ------------------------------------------------------------------ */
 
+/* Answers a client clock-synchronization probe.
+ *
+ * The QPC read happens as late as possible and the frame is sent immediately
+ * afterwards: everything between the client's two clock readings widens the
+ * uncertainty bound the client can prove, so this function deliberately does
+ * no formatting work before taking the reading. */
+static void send_time_sync_reply(SOCKET sock, const char *id)
+{
+    LARGE_INTEGER now;
+    QueryPerformanceCounter(&now);
+    double ms = qpc_to_ms(now);
+    JsonBuf b;
+    jb_reset(&b);
+    jb_raw(&b, "{\"type\":\"time-sync-reply\",\"id\":");
+    jb_string(&b, id);
+    jb_raw(&b, ",\"helperMonotonicMs\":");
+    jb_double(&b, ms);
+    jb_raw(&b, "}");
+    jb_send(&b, sock);
+}
+
 static void send_welcome(SOCKET sock)
 {
     JsonBuf b;
@@ -571,7 +664,7 @@ static void send_welcome(SOCKET sock)
     const wchar_t *wname = primary_device_name();
     WideCharToMultiByte(CP_UTF8, 0, wname, -1, desc, (int)sizeof(desc), NULL, NULL);
     jb_string(&b, desc);
-    jb_raw(&b, ",\"nominalRateHz\":1000,\"timeOriginNote\":\"monotonic ms from helper process start (QueryPerformanceCounter)\",\"helperVersion\":");
+    jb_raw(&b, ",\"nominalRateHz\":1000,\"timeOriginNote\":\"monotonic ms from helper process start (QueryPerformanceCounter); translate to the client clock with time-sync\",\"supportsTimeSync\":true,\"helperVersion\":");
     jb_string(&b, HELPER_VERSION);
     jb_raw(&b, "}");
     jb_send(&b, sock);
@@ -612,22 +705,56 @@ static int json_find_string(const char *json, const char *field,
 
 static void print_usage(void)
 {
-    printf("aldo_capture_helper [--port N] [--token TOKEN]\n");
-    printf("  Local-only Raw Input mouse telemetry for Aldo Aim Lab.\n");
+    printf("traimer_capture_helper [--port N] [--token TOKEN]\n");
+    printf("                    [--parent-pid PID] [--version]\n");
+    printf("  Local-only Raw Input mouse telemetry for trAIMer.\n");
     printf("  Binds 127.0.0.1 exclusively; serves one authenticated client.\n");
+}
+
+/*
+ * --version: prove-it-runs probe.
+ *
+ * The Windows release pipeline executes the freshly compiled binary with this
+ * flag and requires exit code 0 plus this exact machine-readable line. That is
+ * how CI proves the shipped file is a real, runnable Windows x64 PE and not,
+ * say, a source file that was copied over the .exe name (the rc.1 defect).
+ * It registers no devices, opens no sockets, and creates no windows.
+ */
+static void print_version(void)
+{
+    printf("traimer_capture_helper version=%s protocol=%d arch=%s\n",
+           HELPER_VERSION, PROTOCOL_VERSION, HELPER_ARCH);
+}
+
+/* Waits for the launching process to exit, then unblocks accept(). */
+static DWORD WINAPI parent_watch_thread(LPVOID param)
+{
+    HANDLE parent = (HANDLE)param;
+    WaitForSingleObject(parent, INFINITE);
+    InterlockedExchange(&g_shuttingDown, 1);
+    /* Closing the listener makes the blocking accept() return immediately. */
+    SOCKET listener = g_listenSocket;
+    if (listener != INVALID_SOCKET) closesocket(listener);
+    return 0;
 }
 
 int main(int argc, char **argv)
 {
     int port = DEFAULT_PORT;
     int haveToken = 0;
+    DWORD parentPid = 0;
 
     for (int i = 1; i < argc; i++) {
-        if (!strcmp(argv[i], "--port") && i + 1 < argc) {
+        if (!strcmp(argv[i], "--version")) {
+            print_version();
+            return 0;
+        } else if (!strcmp(argv[i], "--port") && i + 1 < argc) {
             port = atoi(argv[++i]);
         } else if (!strcmp(argv[i], "--token") && i + 1 < argc) {
-            strncpy(g_expectedToken, argv[++i], MAX_TOKEN_LEN - 1);
+            copy_bounded(g_expectedToken, sizeof(g_expectedToken), argv[++i]);
             haveToken = 1;
+        } else if (!strcmp(argv[i], "--parent-pid") && i + 1 < argc) {
+            parentPid = (DWORD)strtoul(argv[++i], NULL, 10);
         } else {
             print_usage();
             return 0;
@@ -679,15 +806,15 @@ int main(int argc, char **argv)
     }
     /* Enumerate currently attached mice so metadata is available immediately. */
     UINT devCount = 0;
-    if (GetRawInputDeviceList(NULL, &devCount, sizeof(RAWINPUTDEVICE_LIST)) ==
+    if (GetRawInputDeviceList(NULL, &devCount, sizeof(RAWINPUTDEVICELIST)) ==
             (UINT)-1) {
         devCount = 0;
     }
     if (devCount > 0) {
-        RAWINPUTDEVICE_LIST *list =
-            (RAWINPUTDEVICE_LIST *)malloc(sizeof(RAWINPUTDEVICE_LIST) * devCount);
+        RAWINPUTDEVICELIST *list =
+            (RAWINPUTDEVICELIST *)malloc(sizeof(RAWINPUTDEVICELIST) * devCount);
         if (list && GetRawInputDeviceList(list, &devCount,
-                                          sizeof(RAWINPUTDEVICE_LIST)) !=
+                                          sizeof(RAWINPUTDEVICELIST)) !=
                         (UINT)-1) {
             for (UINT i = 0; i < devCount; i++) {
                 if (list[i].dwType == RIM_TYPEMOUSE) {
@@ -724,8 +851,25 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    for (;;) {
+    if (parentPid != 0) {
+        HANDLE parent = OpenProcess(SYNCHRONIZE, FALSE, parentPid);
+        if (parent != NULL) {
+            HANDLE watcher = CreateThread(NULL, 0, parent_watch_thread, parent,
+                                          0, NULL);
+            if (watcher != NULL) {
+                CloseHandle(watcher);
+            } else {
+                CloseHandle(parent);
+            }
+        }
+    }
+
+    while (!shutting_down()) {
         SOCKET client = accept(g_listenSocket, NULL, NULL);
+        if (shutting_down()) {
+            if (client != INVALID_SOCKET) closesocket(client);
+            break;
+        }
         if (client == INVALID_SOCKET) continue;
 
         /* One client at a time. */
@@ -783,6 +927,16 @@ int main(int argc, char **argv)
                 send_welcome(client);
                 emit_lifecycle(client, "started", "raw input stream opened");
                 handshakedOk = 1;
+                /* Consume the hello frame before leaving this loop. Breaking
+                   with it still in `rx` left the streaming loop below to
+                   re-parse it as if it were the client's next message, so the
+                   client's FIRST post-handshake frame was never seen — it sat
+                   in the buffer waiting for another read that a
+                   request/response client will not make until it is answered.
+                   That deadlocked the clock-synchronization handshake. */
+                memmove(rx, rx + offset, (size_t)(rxLen - (int)offset));
+                rxLen -= (int)offset;
+                rx[rxLen] = '\0';
                 break;
             }
             /* Compact remaining bytes. */
@@ -798,11 +952,42 @@ int main(int argc, char **argv)
             continue;
         }
 
-        /* ---- streaming epoch: pump windows messages until disconnect ---- */
+        /* ---- streaming epoch: pump windows messages until disconnect ----
+
+           The wait below MUST wake on inbound socket data as well as on
+           Windows messages. It used to wait only for messages, with a 200 ms
+           timeout, and check the socket afterwards — so on an idle mouse the
+           helper did not look at its socket for up to 200 ms. Frames were
+           unaffected (they are pushed from WM_INPUT), but anything that needs
+           a REPLY inherited that latency: the clock-synchronization exchange
+           measured a 164 ms minimum round trip on a CI runner, which bounds
+           the offset to ±82 ms and makes native capture unusable for
+           measurement. WSAEventSelect arms an event on FD_READ/FD_CLOSE so
+           the wait returns the moment bytes arrive.
+
+           WSAEventSelect also switches the socket to non-blocking mode; every
+           recv below is already guarded by FIONREAD, and ws_send_all now
+           treats WSAEWOULDBLOCK as back-pressure. */
+        WSAEVENT socketEvent = WSACreateEvent();
+        if (socketEvent == WSA_INVALID_EVENT ||
+            WSAEventSelect(client, socketEvent, FD_READ | FD_CLOSE) != 0) {
+            fprintf(stderr, "WSAEventSelect failed (%d)\n", WSAGetLastError());
+            if (socketEvent != WSA_INVALID_EVENT) WSACloseEvent(socketEvent);
+            closesocket(client);
+            g_clientSocket = INVALID_SOCKET;
+            InterlockedExchange(&g_clientAccepted, 0);
+            continue;
+        }
+
         MSG msg;
-        for (;;) {
+        while (!shutting_down()) {
             DWORD waitResult = MsgWaitForMultipleObjectsEx(
-                0, NULL, 200, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+                1, &socketEvent, 200, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+            if (waitResult == WAIT_OBJECT_0) {
+                /* Manual-reset event: clear it before draining, so data that
+                   arrives during the drain re-signals rather than being lost. */
+                WSAResetEvent(socketEvent);
+            }
 
             /* Check socket liveness cheaply. */
             u_long bytesAvailable = 0;
@@ -814,23 +999,44 @@ int main(int argc, char **argv)
                 if (n <= 0) break;
                 rxLen += n;
                 rx[rxLen] = '\0';
-                unsigned char opcode = 0;
-                size_t offset = 0;
-                char payload[2048];
-                int plen = ws_parse_client_frame(
-                    (const unsigned char *)rx, (size_t)rxLen, &offset, payload,
-                    sizeof(payload), &opcode);
-                if (plen >= 0) {
-                    if (opcode == 0x8) break; /* close frame */
+                /* Drain EVERY complete frame this read delivered. Handling
+                   one per read meant a second frame already in the buffer
+                   waited for the next read — which a client that waits for a
+                   reply before sending again will never make. */
+                int closing = 0;
+                for (;;) {
+                    unsigned char opcode = 0;
+                    size_t offset = 0;
+                    char payload[2048];
+                    int plen = ws_parse_client_frame(
+                        (const unsigned char *)rx, (size_t)rxLen, &offset,
+                        payload, sizeof(payload), &opcode);
+                    if (plen < 0) {
+                        if (rxLen >= (int)sizeof(rx) - 1) {
+                            rxLen = 0; /* overflow guard; drop garbage */
+                        }
+                        break; /* need more bytes */
+                    }
+                    if (opcode == 0x8) { closing = 1; }
                     if (opcode == 0x9) send_text(client, "\x8A\x00"); /* pong */
+                    if (opcode == 0x1) {
+                        char mtype[32] = { 0 };
+                        json_find_string(payload, "type", mtype, sizeof(mtype));
+                        if (!strcmp(mtype, "time-sync")) {
+                            char syncId[32] = { 0 };
+                            json_find_string(payload, "id", syncId,
+                                             sizeof(syncId));
+                            send_time_sync_reply(client, syncId);
+                        }
+                    }
                     memmove(rx, rx + offset, (size_t)(rxLen - (int)offset));
                     rxLen -= (int)offset;
                     rx[rxLen] = '\0';
-                } else if (rxLen >= (int)sizeof(rx) - 1) {
-                    rxLen = 0; /* overflow guard; drop garbage */
+                    if (closing) break;
                 }
+                if (closing) break;
             }
-            if (waitResult == WAIT_OBJECT_0) {
+            if (waitResult == WAIT_OBJECT_0 + 1 || waitResult == WAIT_TIMEOUT) {
                 while (PeekMessageA(&msg, hwnd, 0, 0, PM_REMOVE)) {
                     if (msg.message == WM_INPUT) {
                         handle_wm_input((HRAWINPUT)msg.lParam, client);
@@ -851,6 +1057,10 @@ int main(int argc, char **argv)
         }
 
         emit_lifecycle(client, "stopping", "client disconnected");
+        /* Restore blocking semantics before the socket is closed, and release
+           the wakeup event with it. */
+        WSAEventSelect(client, NULL, 0);
+        WSACloseEvent(socketEvent);
         closesocket(client);
         g_clientSocket = INVALID_SOCKET;
         InterlockedExchange(&g_clientAccepted, 0);
@@ -859,6 +1069,10 @@ int main(int argc, char **argv)
         fflush(stdout);
     }
 
+    if (g_listenSocket != INVALID_SOCKET) {
+        closesocket(g_listenSocket);
+        g_listenSocket = INVALID_SOCKET;
+    }
     WSACleanup();
     return 0;
 }

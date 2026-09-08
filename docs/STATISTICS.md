@@ -11,8 +11,66 @@ u_ire = μ_i + s_c + b_(c,r) + ε_ire
 - `μ_i` candidate effect (ranked),
 - `s_c` scenario difficulty,
 - `b_(c,r)` shared-instance effect per cell — identical across candidates by
-  construction of the paired planner,
+  construction of the paired planner. **This was the documented model from
+  Pass 4 onward, but the planner did not actually deliver it until Pass 14**;
+  see below.
 - `ε` within-cell noise.
+
+## Pairing is a property of the plan (Pass 14)
+
+The paired model cancels scenario and instance effects by comparing two
+candidates on the same cell, `scenarioId#pairIndex`. Until Pass 14 that index
+was a per-candidate running counter, so two candidates shared a cell only when
+their independently shuffled block orders happened to agree.
+
+Measured over 200 seeds with the standard five-candidate ladder: **20–25 % of
+cells paired**, and in a 5-rep block the average candidate PAIR shared **one**
+cell — some shared none. The paired comparison was running at roughly a
+quarter of its design power, and the shorter the session, the worse it got.
+
+`TrialPlanSpec.pairIndex` is now the occurrence number of a scenario within a
+candidate's block, offset by the round. Every candidate in a round draws the
+identical multiset, so every occurrence has a partner **by construction**
+(100 % in every mode). A reduced adaptive allocation takes a *nested* prefix of
+the shared draw rather than a random subset, so a candidate playing fewer reps
+still pairs on every cell it does play. Only the **order** varies per
+candidate, so order effects remain unconfounded, and the instance seed
+`{experimentSeed, round, scenarioId, pairIndex}` now gives both candidates in a
+cell the identical target layout.
+
+### The small-sample correction that came with it
+
+With pairing working, the paired path became the normal case at 5, 8 or 16
+cells. `mean / SE` over *n* paired cells is a **t statistic on n − 1 degrees of
+freedom**, not a normal z: at five cells the two-sided 95 % point is 2.78, not
+1.96. `equivalentNormalZ(t, df)` (`src/optimizer/confidence.ts`) converts it
+before it reaches the confidence model, via an exact Student-t CDF
+(regularized incomplete beta, Lentz continued fraction). Without it a Quick
+session's five cells would be read with the authority of an asymptotic sample.
+
+### An unresolved boundary caps confidence
+
+When the winning candidate sits at the edge of the tested ladder, the true
+optimum may lie outside everything measured, and no amount of separation
+*inside* the tested range is evidence about what is outside it. Pass 14
+replaces the flat −0.1 deduction with a hard cap at
+`BOUNDARY_CONFIDENCE_CAP` = 0.45 — the same cap already applied when the best
+candidate is under-powered, for the same reason.
+
+### Measured effect
+
+Over 200 seeds of the hardest honesty case (a noisy beginner whose optimum sits
+at the ladder edge):
+
+| | overclaims | refusals | range covers truth | mean confidence | mean point error |
+| --- | --- | --- | --- | --- | --- |
+| coincidental pairing (rc.7) | 53/200 (26.5 %) | 125/200 | 62/200 | 0.415 | 0.221 oct |
+| by construction + t + cap (rc.8) | **49/200 (24.5 %)** | **132/200** | **68/200** | **0.396** | **0.212 oct** |
+
+Every honesty indicator improved, with a slightly wider range and a more
+accurate point estimate. Blind recovery held at 29–30/30 per case over seeds
+101–130, never worse than the baseline it replaced.
+
 
 ## Estimator
 

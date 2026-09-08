@@ -1,0 +1,70 @@
+name: Bug report
+description: Something in the app behaves wrongly (not an install problem, not a wrong game number — those have their own templates)
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks. Please do not paste personal data: no Windows user name, no machine name, no session exports unless you have looked inside them first.
+  - type: input
+    id: version
+    attributes:
+      label: trAIMer version
+      description: Shown at the bottom of the sidebar (for example `1.0.0 · engine-v4`) and in the installer filename.
+      placeholder: 1.0.0
+    validations:
+      required: true
+  - type: dropdown
+    id: where
+    attributes:
+      label: Where did it happen?
+      options:
+        - Home
+        - Test (setup screen)
+        - The arena (during a drill)
+        - A break or pause
+        - Results
+        - History
+        - Calibration tab
+        - Diagnostics
+        - Data (backup / export / import)
+        - Somewhere else
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+      description: One or two sentences for each.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open Test
+        2. Pick Valorant, enter 0.4 at 800 DPI
+        3. ...
+    validations:
+      required: true
+  - type: dropdown
+    id: capture
+    attributes:
+      label: Capture path (Diagnostics tab)
+      options:
+        - Native helper running (tier 1)
+        - Browser capture (helper not running or not validated)
+        - Don't know
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version and display scaling
+      placeholder: Windows 11 24H2, 125%
+  - type: textarea
+    id: log
+    attributes:
+      label: Relevant lines from %APPDATA%\trAIMer\logs\desktop.log (optional)
+      description: The last 30 lines are usually enough. Remove anything you do not want public.
+      render: text

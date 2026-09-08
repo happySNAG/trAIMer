@@ -14,7 +14,7 @@ import {
  * C source directly — no Windows toolchain required.
  */
 
-const C_SOURCE_PATH = "native/windows/aldo_capture_helper.c";
+const C_SOURCE_PATH = "native/windows/traimer_capture_helper.c";
 
 function readCHelper(): string {
   return readFileSync(new URL(`../${C_SOURCE_PATH}`, import.meta.url), "utf8");
@@ -33,6 +33,42 @@ describe("native protocol constant parity (C ↔ TS)", () => {
     const match = /#define\s+HELPER_VERSION\s+"([^"]+)"/.exec(source);
     expect(match, `HELPER_VERSION not found in ${C_SOURCE_PATH}`).not.toBeNull();
     expect(match![1]).toBe(EXPECTED_HELPER_VERSION);
+  });
+
+  /**
+   * Every OTHER place that pins the helper version.
+   *
+   * rc.8 bumped the helper to `helper-1.1.0` for the time-sync protocol, and
+   * `scripts/build-native-windows.sh` still asserted `helper-1.0.0` in a
+   * hardcoded grep. The Windows CI job failed on that literal — a release
+   * gate failing for a bookkeeping reason unrelated to the thing it guards.
+   * There is exactly one source of truth; this test holds every copy to it.
+   */
+  it("no shipped script pins a stale helper version", () => {
+    const files = [
+      "../scripts/build-native-windows.sh",
+      "../scripts/build-native-windows.bat",
+      "../.github/workflows/ci.yml",
+    ] as const;
+    for (const relative of files) {
+      const text = readFileSync(new URL(relative, import.meta.url), "utf8");
+      // Line by line, so a comment narrating the history cannot buy cover for
+      // an assertion that pins the wrong value somewhere else in the file.
+      const offenders: string[] = [];
+      text.split("\n").forEach((line, index) => {
+        const isComment = /^\s*(#|rem\b|\/\/|\*)/.test(line);
+        if (isComment) return;
+        for (const found of line.matchAll(/helper-\d+\.\d+\.\d+/g)) {
+          if (found[0] !== EXPECTED_HELPER_VERSION) {
+            offenders.push(`${relative}:${index + 1}: ${found[0]} in ${line.trim()}`);
+          }
+        }
+      });
+      expect(
+        offenders,
+        `expected ${EXPECTED_HELPER_VERSION}; stale pins:\n${offenders.join("\n")}`,
+      ).toEqual([]);
+    }
   });
 
   it("helper binds loopback only and refuses missing tokens", () => {

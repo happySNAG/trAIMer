@@ -1,0 +1,78 @@
+# Windows installer definition for trAIMer.
+#
+# Produces ONE double-clickable file — trAIMer-Setup-<version>.exe — that
+# installs the desktop shell, the built frontend, and the compiled Raw Input
+# helper, then creates Start Menu and Desktop shortcuts. The player never sees
+# PowerShell, a terminal, a compiler, or a browser address bar.
+#
+# Build:  npm run dist:win   (Windows host or the windows-installer CI job)
+
+# appId is DELIBERATELY unchanged across the rename. electron-builder derives
+# the NSIS uninstall registry key from it, so keeping it makes rc.7 an in-place
+# UPGRADE of an rc.6 install: the old "Aldo Aim Lab" entry is replaced rather
+# than left behind next to a new one, which is the worst possible branding
+# outcome in Windows' Apps list. It is never displayed to a player.
+appId: com.aldoaimlab.desktop
+productName: trAIMer
+copyright: trAIMer — local-only aim measurement
+
+directories:
+  output: release/installer
+  buildResources: build
+
+# Everything the shell needs at runtime, and nothing else: no sources, no
+# tests, no node_modules dev tree, no launcher scripts.
+files:
+  - dist-desktop/**/*
+  - dist-app/**/*
+  - package.json
+  - "!**/*.map"
+
+# The helper must live OUTSIDE the asar archive: a packed archive member
+# cannot be spawned as a child process.
+#
+# electron-builder SKIPS a missing extraResource with a log line and builds a
+# perfectly valid-looking installer without it ("file source doesn't exist").
+# `npm run dist:win` therefore runs verify-windows-artifacts --helper first
+# and fails closed, the same way the portable packager refuses to package a
+# helper it cannot verify. Never invoke electron-builder directly for a
+# release build.
+extraResources:
+  - from: native/windows/traimer_capture_helper.exe
+    to: traimer_capture_helper.exe
+
+asar: true
+compression: maximum
+# Unsigned for V1: a code signing certificate is not yet purchased.
+# SmartScreen shows a "More info -> Run anyway" prompt; docs/INSTALL-WINDOWS.md
+# and docs/CODE-SIGNING.md say so plainly.
+forceCodeSigning: false
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  # icon, installerIcon, uninstallerIcon and nsis.include are deliberately NOT
+  # set: electron-builder resolves those relative to directories.buildResources
+  # ("build"), and our files already sit at the exact default locations
+  # (build/icon.ico, build/installer.nsh). Naming them explicitly risks
+  # resolving to build/build/... and silently dropping the customisation.
+  artifactName: trAIMer-Setup-${version}.${ext}
+  # No elevation: a per-user install keeps the anti-cheat-safe posture (no
+  # admin rights, no services, no drivers, no system mutation).
+  requestedExecutionLevel: asInvoker
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowElevation: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: always
+  createStartMenuShortcut: true
+  shortcutName: trAIMer
+  menuCategory: false
+  runAfterFinish: true
+  deleteAppDataOnUninstall: false
+  uninstallDisplayName: trAIMer ${version}
+  differentialPackage: false

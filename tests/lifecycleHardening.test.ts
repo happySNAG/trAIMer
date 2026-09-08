@@ -6,6 +6,7 @@ import { summarizeCaptureQuality } from "../src/diagnostics/captureQuality.ts";
 import { NativeTransportCaptureSource } from "../src/capture/nativeClient.ts";
 import type { TrialRecord } from "../src/domain/trial.ts";
 import { makeTrial, straightFlickTrial } from "./helpers.ts";
+import { EXPECTED_HELPER_VERSION } from "../src/version.ts";
 
 /**
  * Pass 6 lifecycle hardening (requirement 2).
@@ -104,7 +105,7 @@ describe("device identity change / USB disconnect-reconnect", () => {
         deviceDescription: "A",
         nominalRateHz: 1000,
         timeOriginNote: "qpc",
-        helperVersion: "helper-1.0.0",
+        helperVersion: EXPECTED_HELPER_VERSION,
       }),
     );
     for (const seq of [1, 2]) {
@@ -229,7 +230,7 @@ describe("duplicate application instances", () => {
     const sent: string[] = [];
     const a = new InstanceGuard("storm-a");
     const b = new InstanceGuard("storm-b");
-    const observer = new BroadcastChannel("aldo-aim-lab-instances");
+    const observer = new BroadcastChannel("traimer-instances");
     observer.addEventListener("message", (ev: MessageEvent) => {
       const data = ev.data as { from?: string } | null;
       if (data && typeof data.from === "string") sent.push(data.from);

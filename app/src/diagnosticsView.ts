@@ -10,8 +10,14 @@ import { gatherRuntimeFacts } from "./preflightClient.ts";
 import type { LocalDiagnosticLog } from "../../src/diagnostics/localLog.ts";
 import type { CaptureSink } from "../../src/capture/events.ts";
 import type { NativeFrame } from "../../src/capture/native.ts";
+import type { ClockSyncStatus } from "../../src/capture/timebase.ts";
 import type { LocalJsonStore } from "../../src/persistence/store.ts";
 import { el, clear, downloadJson } from "./dom.ts";
+import {
+  defaultHelperUrl,
+  desktopBridge,
+  type DesktopHelperStatus,
+} from "./desktopBridge.ts";
 import {
   button,
   card,
@@ -79,7 +85,7 @@ export function renderDiagnosticsView(
   container.append(
     pageHeader(
       "Diagnostics",
-      "Everything here runs on this machine only. The capture check talks to the local Aldo helper — nothing ever leaves your PC.",
+      "Everything here runs on this machine only. The capture check talks to the local trAIMer capture helper — nothing ever leaves your PC.",
     ),
   );
 
@@ -139,12 +145,63 @@ export function renderDiagnosticsView(
       ),
     );
   });
+  const bridge = desktopBridge();
+  if (bridge) {
+    // The shell owns the helper process; show what it is actually doing and
+    // offer a one-click retry instead of asking anyone to run a script.
+    const helperTile = diagTile(
+      "Capture helper",
+      "pulse",
+      "neutral",
+      "Checking…",
+      "Started and stopped automatically by trAIMer",
+    );
+    statusGrid.append(helperTile);
+    let currentTile = helperTile;
+    const applyStatus = (status: DesktopHelperStatus): void => {
+      const tone: Tone =
+        status.state === "ready"
+          ? "ok"
+          : status.state === "starting"
+            ? "neutral"
+            : status.platformSupported
+              ? "warn"
+              : "neutral";
+      const value =
+        status.state === "ready"
+          ? `Running on port ${status.port ?? "?"}`
+          : status.state === "starting"
+            ? "Starting…"
+            : "Not running";
+      const fresh = diagTile("Capture helper", "pulse", tone, value, status.detail);
+      if (status.state !== "ready" && status.platformSupported) {
+        const retry = button("Restart capture helper", { variant: "secondary", icon: "pulse" });
+        retry.addEventListener("click", () => {
+          retry.disabled = true;
+          void bridge.restartHelper().finally(() => {
+            retry.disabled = false;
+          });
+        });
+        fresh.append(retry);
+      }
+      currentTile.replaceWith(fresh);
+      currentTile = fresh;
+      if (status.url) urlInput.value = status.url;
+    };
+    void bridge.helperStatus().then(applyStatus).catch(() => {
+      /* the neutral tile stays; never claim a state we could not read */
+    });
+    bridge.onHelperStatus(applyStatus);
+  }
+
   container.append(statusGrid);
 
   // ---- guided native capture check ----
   container.append(sectionLabel("Capture check"));
 
-  const urlInput = el("input", { type: "text", value: "ws://127.0.0.1:48765" }) as HTMLInputElement;
+  // In the desktop shell the URL and token are supplied by the process that
+  // started the helper, so there is nothing for the player to configure.
+  const urlInput = el("input", { type: "text", value: defaultHelperUrl() }) as HTMLInputElement;
   const tokenInput = el("input", { type: "text", value: sessionToken }) as HTMLInputElement;
   const durationInput = el("input", { type: "number", value: 3, min: "1", max: "30" }) as HTMLInputElement;
 
@@ -168,7 +225,24 @@ export function renderDiagnosticsView(
       onError: (err) => {
         log.error("NATIVE_PROBE_FAILED", err.message);
       },
+      onClockSync: (status) => {
+        clockSyncStatus = status;
+        log.log("info", "clock-sync", {
+          state: status.state,
+          offsetMs:
+            status.estimate !== null ? Number(status.estimate.offsetMs.toFixed(3)) : "",
+          uncertaintyMs:
+            status.estimate !== null
+              ? Number(status.estimate.uncertaintyHalfWidthMs.toFixed(3))
+              : "",
+        });
+      },
     });
+    // Where helper↔renderer clock synchronization stood during this check.
+    // Recorded into the persisted self-test: a native stream whose timestamps
+    // were never translated into this window's clock cannot carry a
+    // measurement, so the tier decision reads this back later.
+    let clockSyncStatus: ClockSyncStatus | null = null;
     const frames: NativeFrame[] = [];
     let seq = 0;
     const startedAt = performance.now();
@@ -250,6 +324,7 @@ export function renderDiagnosticsView(
           deviceId: source.header.deviceId,
           deviceDescription: source.header.deviceDescription,
           nominalRateHz: source.header.nominalRateHz,
+          clockSync: clockSyncStatus ?? source.clockSync,
           transportCounters: {
             framesReceived: source.counters.framesReceived,
             duplicateSequences: source.counters.duplicateSequences,
@@ -320,6 +395,32 @@ export function renderDiagnosticsView(
           `~${report.observedRateHz.toFixed(0)} Hz observed`,
           report.requestedRateHz ? `device claims ${report.requestedRateHz} Hz` : undefined,
         ),
+        (() => {
+          // The helper counts milliseconds from its own process start. Until
+          // that origin is measured against this window's clock, its
+          // timestamps cannot be placed on the same timeline as the drills —
+          // so this tile is the difference between a usable native stream and
+          // an unusable one, and it says which.
+          const sync = clockSyncStatus ?? source.clockSync;
+          const est = sync.estimate;
+          const tone: Tone =
+            sync.state === "established"
+              ? "ok"
+              : sync.state === "syncing"
+                ? "warn"
+                : "danger";
+          return diagTile(
+            "Clock sync",
+            "clock",
+            tone,
+            sync.state === "established"
+              ? `±${(est?.uncertaintyHalfWidthMs ?? 0).toFixed(3)} ms`
+              : sync.state,
+            est !== null
+              ? `offset ${est.offsetMs.toFixed(3)} ms from ${est.samples} exchanges${est.driftPpm !== null ? ` · drift ${est.driftPpm.toFixed(1)} ppm` : ""}`
+              : sync.detail,
+          );
+        })(),
         diagTile(
           "Timing stability",
           "clock",
@@ -425,7 +526,12 @@ export function renderDiagnosticsView(
         "Connection settings",
         el("div", { class: "form-grid" }, [
           field("Helper URL", urlInput, { hint: "Loopback only — remote URLs are refused." }),
-          field("Session token (must match --token)", tokenInput),
+          field(
+            desktopBridge()
+              ? "Session token (managed by trAIMer)"
+              : "Session token (must match --token)",
+            tokenInput,
+          ),
           field("Check duration (seconds)", durationInput),
         ]),
       ),

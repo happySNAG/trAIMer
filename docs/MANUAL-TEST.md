@@ -1,6 +1,6 @@
-# Manual test harness — Aldo's Windows PC validation
+# Manual test harness — first real session on a Windows PC
 
-This is THE checklist for the first real session on Aldo's machine.
+This is THE checklist for the first real session on a player's Windows machine.
 Work top-to-bottom; do not skip ahead. Record PASS/FAIL plus evidence
 (screenshot, file, or note) for every row. If a HARD-GATE row fails,
 stop and fix before continuing.
@@ -8,8 +8,8 @@ stop and fix before continuing.
 Setup on the day:
 
 ```
-1. Copy Aldo-Aim-Lab-v*-windows-x64.zip to the desktop; extract it.
-2. Double-click start-aldo-lab.ps1 ("Run with PowerShell").
+1. Copy trAIMer-v*-windows-x64.zip to the desktop; extract it.
+2. Double-click start-traimer.ps1 ("Run with PowerShell").
 3. Keep the launcher window open for the whole session.
 ```
 
@@ -23,17 +23,17 @@ attach it to the report.
 |---|-------|----------|------|----------|
 | A1 | Zip SHA-256 matches the value printed by CI (`SHA256:` line in the windows-release job summary) | identical | HARD | |
 | A2 | `manifest.json` next to `app/` lists every release file + `helperBinaryIsPlaceholder: false` | true/false flag correct | HARD | |
-| A3 | `aldo_capture_helper.exe` exists beside `start-aldo-lab.ps1`, is a real exe (>100 KB) | present | HARD | |
+| A3 | `traimer_capture_helper.exe` exists beside `start-traimer.ps1`, is a real exe (>100 KB) | present | HARD | |
 | A4 | `verify-release.mjs --release-dir .` passes inside the extracted folder (run from a Node prompt if available; optional on-site) | all ✓ | soft | |
 
 ## B — Launcher start/stop
 
 | # | Check | Expected | Gate | Evidence |
 |---|-------|----------|------|----------|
-| B1 | Run `start-aldo-lab.ps1` | Browser opens automatically to `http://127.0.0.1:488xx/index.html?token=…`; launcher shows "capture helper : ws://127.0.0.1:48765" | HARD | |
+| B1 | Run `start-traimer.ps1` | Browser opens automatically to `http://127.0.0.1:488xx/index.html?token=…`; launcher shows "capture helper : ws://127.0.0.1:48765" | HARD | |
 | B2 | SmartScreen/firewall prompts | Approve once; helper allowed on loopback only | HARD | |
-| B3 | Run `start-aldo-lab.ps1` again while running | Clear "already running" message, no second helper | | |
-| B4 | Run `stop-aldo-lab.ps1` from another terminal (or close launcher window) | Helper + server stop; window prints "Stopped" | HARD | |
+| B3 | Run `start-traimer.ps1` again while running | Clear "already running" message, no second helper | | |
+| B4 | Run `stop-traimer.ps1` from another terminal (or close launcher window) | Helper + server stop; window prints "Stopped" | HARD | |
 | B5 | Start again after stop | Works cleanly (no port conflicts) | | |
 
 ## C — Machine facts
@@ -61,9 +61,20 @@ attach it to the report.
 
 | # | Check | Expected | Gate | Evidence |
 |---|-------|----------|------|----------|
-| E1 | Start a short session; click arena | OS cursor disappears; reticle appears; HUD counts trials | HARD | |
+| E1 | Start a short session; click anywhere in the arena | OS cursor disappears; reticle appears; state chip goes Live; HUD counts trials | HARD | |
+| E1a | Click the arena ON the overlay text itself | Same as E1 — the overlay never blocks the start click (rc.3 regression) | HARD | |
+| E1b | While the arena still says "Click to lock in", press **End session** | Confirmation appears; confirming returns to Session setup | HARD | |
+| E1c | While the arena still says "Click to lock in", press **Esc** | Returns to Session setup; nothing recorded | HARD | |
+| E1d | While the arena still says "Click to lock in", press **Pause** | Bar says the capture request was withdrawn; arena still startable | | |
+| E1e | Read the capture caption in the bottom bar | Names the path in use; hovering shows why native high-rate capture is or is not carrying the session | | |
 | E2 | Move mouse slowly then fast | Reticle tracks raw movement; targets clickable; hit ring feedback only | | |
 | E3 | Press Esc mid-trial | Session ends visibly ("Session ended"), completed trials saved, no silent continuation | HARD | |
+| E3a | Press Esc during a rest / between trials | Session ends visibly; it never continues with the mouse released | HARD | |
+| E8 | Reach the first break between candidate blocks | Overlay shows "Break" with a live countdown and a **Skip break** button; Space or Enter also ends it immediately | HARD | |
+| E9 | Turn automatic breaks OFF in setup, start a session | No break overlay ever appears between blocks | | |
+| E10 | Three-target switch drill | Exactly ONE orange target visible at a time; the next appears ~0.1 s after a hit; an ignored target fades out red after ~1.1 s and the next still appears; pips at the bottom fill as targets are hit | HARD | |
+| E11 | Hit any target | Flash + ring + shard burst at the target; a missed click shows a faint red ripple at the reticle | | |
+| E12 | Watch a full block | Drill families rotate (no drill twice in a row); the top bar shows Round/Block/Drill and the instruction | | |
 | E4 | Alt+Tab mid-session, return | Trial invalidated (POINTER_LOCK_LOST/focus), session aborts honestly — restart session afterwards | HARD | |
 | E5 | Resize/window-drag during a trial | Trial flagged RESIZE_DURING_TRIAL (or aborted); never silently kept | | |
 | E6 | Unplug/replug the mouse between trials | Next trials still capture; if not, preflight/diagnostics says so | | |
@@ -78,6 +89,23 @@ attach it to the report.
 | F3 | Data tab → Back up all data | JSON backup downloads; size sane | HARD | |
 | F4 | Restore the same backup after wiping site data (DevTools → Application → Clear storage) | Restored count > 0; History shows the session again | HARD | |
 | F5 | Calibration tab: run one guided axis rep set | Engine accepts adequate data / refuses inadequate with reasons | | |
+
+## F' — Game profile / sensitivity conversion (Game Profile Pass 1)
+
+| # | Check | Expected | Gate | Evidence |
+|---|-------|----------|------|----------|
+| FP1 | Aim Test tab → **Game sensitivity** card | One select ("Game"), no other game fields, and a line explaining that results are physical without one | HARD | |
+| FP2 | Open the Game select | "No game selected", then a Games (A–Z) group of eleven: Apex Legends, Battlefield 6, Call of Duty / Warzone, Counter-Strike 2, Fortnite, Marvel Rivals, Overwatch 2, PUBG: Battlegrounds, Rainbow Six Siege, The Finals, Valorant; then Other: Generic / Raw. A "Find a game" box sits above it. No "Fixture" entry | HARD | |
+| FP3 | Pick **Generic / Raw** | Current sensitivity and vertical fields appear; no field-of-view field; no scoped-matching select | | |
+| FP4 | Enter current sensitivity `1`, leave DPI at 800 | "Physical equivalent" reads **57.1 cm/360**, and a sentence names the DPI | HARD | |
+| FP5 | Change Mouse DPI to 1600 (leave the game value at 1) | The equivalent halves to **28.6 cm/360** — the same setting is a different physical sensitivity | HARD | |
+| FP6 | Open "About the … profile" | What 1.00 means, source, last verified, last reviewed, conversion definition v1 | | |
+| FP7 | Restart the app, return to Aim Test | The game and the entered sensitivity are still there | HARD | |
+| FP8 | Run a session, then open Results | A "Recommended for Generic / Raw" card shows **Current / Recommended / Physical equivalent** plus the value to type | HARD | |
+| FP9 | Read the game card carefully | If the exact value is not enterable, it says the exact value, the entry value and the difference. Nothing is silently rounded | HARD | |
+| FP10 | Set the game back to "No game selected", reopen Results | No game card at all — the physical result stands on its own | | |
+| FP11 | History tab → expand the session | A "Game conversion" block with profile id, version, DPI, both values, cm/360, method, rounding applied | | |
+| FP12 | History tab → expand an OLDER (pre-rc.9) session | Opens normally, with no game block and nothing broken | HARD | |
 
 ## G — Crash/resume
 

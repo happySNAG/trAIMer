@@ -1,0 +1,61 @@
+name: Installation problem
+description: The installer, the first launch, the upgrade, or the uninstall did not work
+title: "[Install] "
+labels: ["installation"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing: the SmartScreen "unknown publisher" warning is expected (the build is unsigned) — click More info → Run anyway. A Defender or firewall prompt for `traimer_capture_helper.exe` is also expected; allow it. See docs/INSTALL-WINDOWS.md.
+  - type: input
+    id: installer
+    attributes:
+      label: Installer filename
+      placeholder: trAIMer-Setup-1.0.0.exe
+    validations:
+      required: true
+  - type: input
+    id: checksum
+    attributes:
+      label: Did the SHA-256 match the published one?
+      placeholder: yes / no / did not check
+  - type: dropdown
+    id: stage
+    attributes:
+      label: Where did it fail?
+      options:
+        - Running the installer
+        - First launch after install
+        - Upgrading over a previous version
+        - Uninstalling
+        - Reinstalling after uninstall
+        - The capture helper did not start (app opened)
+    validations:
+      required: true
+  - type: input
+    id: windows
+    attributes:
+      label: Windows version
+      placeholder: Windows 11 24H2, 64-bit
+    validations:
+      required: true
+  - type: input
+    id: previous
+    attributes:
+      label: Previous trAIMer version installed, if any
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: The exact message if there was one. For the helper, the reason code from Diagnostics (HELPER_MISSING, HELPER_SPAWN_FAILED, ...).
+    validations:
+      required: true
+  - type: input
+    id: av
+    attributes:
+      label: Antivirus / security software, if any
+  - type: textarea
+    id: log
+    attributes:
+      label: Last lines of %APPDATA%\trAIMer\logs\desktop.log (optional)
+      render: text

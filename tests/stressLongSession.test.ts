@@ -6,6 +6,7 @@ import {
   createLoopbackSocketPair,
 } from "../src/capture/nativeClient.ts";
 import { NATIVE_CAPTURE_PROTOCOL_VERSION } from "../src/capture/native.ts";
+import { EXPECTED_HELPER_VERSION } from "../src/version.ts";
 import type { CaptureEvent } from "../src/capture/events.ts";
 import { validateTrial, DEFAULT_VALIDATION_CONFIG } from "../src/validation/validateTrial.ts";
 import { computeInputQuality } from "../src/diagnostics/inputQuality.ts";
@@ -101,6 +102,21 @@ describe("stress: long-session capture", () => {
       socketFactory: () => pair.client,
       reconnect: { maxAttempts: 0, initialDelayMs: 1, maxDelayMs: 1 },
     });
+    // The transport translates helper time into renderer time and emits
+    // nothing until that offset is established, so the stress run has to
+    // complete the same clock-sync chain a real session does.
+    pair.server.onMessage((data) => {
+      const msg = JSON.parse(data) as { type?: string; id?: string };
+      if (msg.type === "time-sync" && msg.id) {
+        source.handleRawMessage(
+          JSON.stringify({
+            type: "time-sync-reply",
+            id: msg.id,
+            helperMonotonicMs: performance.now() - 1000,
+          }),
+        );
+      }
+    });
     source.start({
       onEvent: (e) => {
         if (e.kind === "pointer-sample") received++;
@@ -116,9 +132,13 @@ describe("stress: long-session capture", () => {
         deviceDescription: "",
         nominalRateHz: 1000,
         timeOriginNote: "",
-        helperVersion: "helper-1.0.0",
+        helperVersion: EXPECTED_HELPER_VERSION,
       }),
     );
+    for (let i = 0; i < 60 && source.clockSync.state === "syncing"; i++) {
+      pair.server.deliverClientToServer();
+    }
+    expect(source.clockSync.state).toBe("established");
     const start = performance.now();
     const FRAMES = 100_000;
     for (let seq = 0; seq < FRAMES; seq++) {

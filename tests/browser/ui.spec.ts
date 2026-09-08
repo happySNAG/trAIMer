@@ -18,8 +18,9 @@ test.describe("app shell", () => {
 
   test("wordmark and brand identity render", async ({ page }) => {
     await page.goto("/");
-    await expect(page.locator(".wordmark-name")).toHaveText("ALDO");
-    await expect(page.locator(".wordmark-sub")).toHaveText("Aim Lab");
+    await expect(page.locator(".wordmark-name")).toHaveText("trAIMer");
+    await expect(page.locator(".wordmark-sub")).toHaveText("Train. Measure. Tune.");
+    await expect(page).toHaveTitle("trAIMer");
   });
 });
 
@@ -33,7 +34,9 @@ test.describe("run screen", () => {
     await expect(page.locator("#sidebar")).toBeHidden();
     await expect(page.locator(".run-topbar")).toBeVisible();
     await expect(page.locator("#run-canvas")).toBeVisible();
-    await expect(page.locator(".run-bottombar")).toContainText("measured trials");
+    await expect(page.locator(".run-bottombar")).toContainText("measured drills");
+    // Truthful calibration progress, from the engine's own plan.
+    await expect(page.locator(".run-bottombar")).toContainText("Calibration 0%");
     // Capture-source transparency is always visible during a session.
     await expect(page.locator(".run-bottombar")).toContainText("browser capture");
     await expect(page.locator(".overlay-title")).toContainText("Click to lock in");
@@ -54,7 +57,7 @@ test.describe("data safety surfaces", () => {
     const downloadPromise = page.waitForEvent("download");
     await page.click("#view-data button:has-text('Back up all data')");
     const download = await downloadPromise;
-    expect(download.suggestedFilename()).toContain("aldo-aim-lab-backup");
+    expect(download.suggestedFilename()).toContain("traimer-backup");
     await expect(page.locator("#view-data")).toContainText("SHA-256");
   });
 
@@ -94,7 +97,7 @@ test.describe("UI Pass 3 refinements", () => {
     await page.goto("/");
     await expect(page.locator("#view-home")).toContainText("Confirm your setup");
     await expect(page.locator("#view-home")).toContainText("Play the blinded test");
-    await expect(page.locator("#view-home")).toContainText("Get a measured answer");
+    await expect(page.locator("#view-home")).toContainText("Set it in your game");
   });
 });
 

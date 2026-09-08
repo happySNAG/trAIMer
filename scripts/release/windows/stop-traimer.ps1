@@ -1,15 +1,15 @@
 # --------------------------------------------------------------------
-# Aldo Aim Lab — Windows launcher (stop)
+# trAIMer — Windows launcher (stop)
 #
 # Stops the local static server and the capture helper started by
-# start-aldo-lab.ps1. Only acts on PIDs recorded by this install in
-# .aldo-lab/*.pid, parsed strictly as integers before any kill.
+# start-traimer.ps1. Only acts on PIDs recorded by this install in
+# .traimer/*.pid, parsed strictly as integers before any kill.
 # --------------------------------------------------------------------
 
 $ErrorActionPreference = "Stop"
 
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
-$stateDir = Join-Path $root ".aldo-lab"
+$stateDir = Join-Path $root ".traimer"
 
 $stoppedAnything = $false
 

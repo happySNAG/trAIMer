@@ -1,0 +1,74 @@
+name: Measurement / calibration problem
+description: Drills were rejected, the result does not make sense, candidates felt identical, or the recommendation looks wrong
+title: "[Measurement] "
+labels: ["measurement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The most useful thing you can attach is a **diagnostic bundle** from the Data tab (it contains your session data and the capture diagnostics, nothing else). Look inside it first if you have concerns.
+  - type: input
+    id: version
+    attributes:
+      label: trAIMer version
+      placeholder: 1.0.0
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Calibration mode
+      options:
+        - Quick
+        - Standard
+        - Precision
+        - Custom (advanced parameters edited)
+    validations:
+      required: true
+  - type: dropdown
+    id: symptom
+    attributes:
+      label: What went wrong?
+      options:
+        - Many drills were excluded ("Drills that could not be scored")
+        - Every candidate felt exactly the same
+        - '"More data needed" after a full session'
+        - The recommendation is far from anything playable
+        - Tracking drills never complete / shooting targets do not register
+        - Results screen shows something inconsistent
+        - Something else
+    validations:
+      required: true
+  - type: textarea
+    id: what
+    attributes:
+      label: Describe it
+      description: What you saw, what you expected, and what the results screen said (exclusion reason codes, confidence label, the range).
+    validations:
+      required: true
+  - type: dropdown
+    id: capture
+    attributes:
+      label: Capture path (Diagnostics tab)
+      options:
+        - Native helper, capture check passed (tier 1)
+        - Native helper running, capture check not run
+        - Browser capture
+        - Don't know
+    validations:
+      required: true
+  - type: input
+    id: mouse
+    attributes:
+      label: Mouse, DPI and polling rate
+      placeholder: e.g. wireless, 800 DPI, 1000 Hz
+  - type: input
+    id: display
+    attributes:
+      label: Monitor refresh rate and Windows display scaling
+      placeholder: 144 Hz, 100%
+  - type: input
+    id: game
+    attributes:
+      label: Game profile selected, and the current sensitivity you entered
+      placeholder: Valorant, 0.4

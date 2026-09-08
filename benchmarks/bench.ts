@@ -66,7 +66,7 @@ function ingest1000Hz(durationMs = 5000): {
 }
 
 function main(): void {
-  console.log("== Aldo Aim Lab performance benchmark ==\n");
+  console.log("== trAIMer performance benchmark ==\n");
 
   // 1. Raw ingestion at 1000 Hz.
   const ing = ingest1000Hz(5000);

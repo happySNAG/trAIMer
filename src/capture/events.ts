@@ -69,6 +69,17 @@ export const CAPTURE_SOURCE_KINDS = [
 export type CaptureSourceKind = (typeof CAPTURE_SOURCE_KINDS)[number];
 
 export const POINTER_LOCK_LOSS_REASON = "pointer-lock-loss";
+/**
+ * A pointer-lock exit the APPLICATION asked for — handing the mouse back so a
+ * break, a pause or the end of a session can present clickable UI.
+ *
+ * It must be distinguishable from POINTER_LOCK_LOSS_REASON: every consumer
+ * treats a loss as a fatal interruption (trial invalidated, session cancelled,
+ * validation failure POINTER_LOCK_LOSS). Before this reason existed, releasing
+ * the mouse deliberately was indistinguishable from losing it, which is why
+ * the break screen could not simply give the cursor back.
+ */
+export const CAPTURE_RELEASED_REASON = "capture-released";
 export const TAB_HIDDEN_REASON = "tab-hidden";
 export const WINDOW_BLUR_REASON = "window-blur";
 export const USER_ABORT_REASON = "user-abort";

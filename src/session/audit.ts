@@ -10,11 +10,30 @@ export const AUDIT_CATEGORIES = [
   "resumed",
   "session-resumed",
   "capture-source-changed",
+  /** The session could not obtain the input path it needs (Pass 10). */
+  "capture-unavailable",
+  /** The mouse was handed back for an interlude — a break or a pause (rc.6). */
+  "capture-suspended",
+  /** The mouse was taken back after an interlude (rc.6). */
+  "capture-resumed",
   "boundary-expansion-proposed",
   "adaptive-allocation-decision",
   "extra-block-requested",
   "retest-linked",
   "recommendation-created",
+  /**
+   * The engine could not continue (capture lost, resume refused). Distinct
+   * from a player cancel so a transcript never confuses the two (Pass 13).
+   */
+  "session-aborted",
+  /**
+   * Analysis ran but the evidence did not support a recommendation, so none
+   * was persisted. Recorded rather than silently skipped.
+   */
+  "evidence-insufficient",
+  "replacement-block-started",
+  "replacement-block-finished",
+  "replacement-stopped",
 ] as const;
 
 export type AuditCategory = (typeof AUDIT_CATEGORIES)[number];

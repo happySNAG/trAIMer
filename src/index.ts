@@ -78,3 +78,4 @@ export * from "./results/finalResult.ts";
 export * from "./persistence/backup.ts";
 export * from "./lifecycle/lifecycle.ts";
 export * from "./contracts/states.ts";
+export * from "./games/index.ts";

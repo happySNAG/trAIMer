@@ -11,6 +11,12 @@ export interface ScenarioDefinition {
   targetSpeedPxPerSec?: { min: number; max: number };
   trackingDurationMs?: number;
   targetsPerTrial?: number;
+  /**
+   * Sequential multi-target scenarios: how long each target stays up before
+   * it expires and the next one appears. The trial's `timeoutMs` is the hard
+   * ceiling for the whole sequence.
+   */
+  perTargetTimeoutMs?: number;
   difficulty: {
     tier: "easy" | "medium" | "hard";
     discriminatesDimensions: string[];
@@ -53,11 +59,21 @@ const FLICK_DYNAMIC_HORIZONTAL: ScenarioDefinition = {
   id: "flick-dynamic-horizontal",
   kind: "flick-dynamic",
   label: "Flick to horizontally strafing target",
-  timeoutMs: 1100,
+  // rc.6: the sweep now runs for the whole window and crosses the centre
+  // (scenarios/planner.ts). rc.5 gave a 1100 ms budget in which the target
+  // covered 272–515 px of a 1280 px field and then vanished mid-approach —
+  // "the light blue circle don't go far enough across the screen to be able
+  // to shoot". 2000 ms buys the full crossing at the SAME speed band, so the
+  // drill is no easier per pixel, it simply presents a real opportunity.
+  timeoutMs: 2000,
   targetRadiusPx: 24,
+  // Vertical spread only (the horizontal path is derived from speed × window);
+  // kept so the shared definition shape stays meaningful across scenarios.
   distanceRangePx: { min: 260, max: 560 },
   angleMode: "horizontal-biased",
-  targetSpeedPxPerSec: { min: 260, max: 520 },
+  // Upper bound trimmed 520 → 480 so a full-window sweep (speed × 2 s) always
+  // fits inside the fully-visible band and never has to be clamped short.
+  targetSpeedPxPerSec: { min: 260, max: 480 },
   difficulty: {
     tier: "hard",
     discriminatesDimensions: ["speed", "correctionEfficiency"],
@@ -69,7 +85,13 @@ const TARGET_SWITCH_SEQUENCE: ScenarioDefinition = {
   id: "target-switch-triple",
   kind: "target-switch",
   label: "Three-target switch sequence",
-  timeoutMs: 2400,
+  // One target at a time (Pass 11): each gets its own 1100 ms window — the
+  // same order of budget a single static flick gets — and the sequence ceiling
+  // covers three windows, the inter-target gaps and the spawn delays. rc.4 showed all three
+  // targets at once inside a single 2400 ms budget, so the third acquisition
+  // was routinely cut off by the trial timeout mid-flick.
+  timeoutMs: 3800,
+  perTargetTimeoutMs: 1100,
   targetRadiusPx: 24,
   distanceRangePx: { min: 220, max: 480 },
   angleMode: "any",

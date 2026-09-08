@@ -41,7 +41,10 @@ test.describe("viewport matrix", () => {
       await startBtn.scrollIntoViewIfNeeded();
       const box = await startBtn.boundingBox();
       expect(box, "start button bounding box").not.toBeNull();
-      expect(box!.y + box!.height).toBeLessThanOrEqual(size.height);
+      // Sub-pixel layout at 4K can place a bottom-aligned element a few
+      // hundredths of a pixel past the edge after scrollIntoView; the same
+      // 1 px tolerance the overflow check uses applies here.
+      expect(box!.y + box!.height).toBeLessThanOrEqual(size.height + 1);
       expect(box!.width).toBeGreaterThanOrEqual(100);
 
       // History empty-state CTA visible (primary action present). The view

@@ -63,8 +63,8 @@ per-sample noise `6px · (2.2 − 1.65·trackingSkill) · (1 + 2.2·max(0,x)² +
 | --- | --- | --- | --- |
 | flick-static-medium | 900 ms | 26 px | distances 220–620 px |
 | flick-static-small | 1000 ms | 16 px | distances 260–640 px |
-| flick-dynamic-horizontal | 1100 ms | 24 px | strafing 220–520 px/s |
-| target-switch-triple | 2400 ms total | 24 px | 3 sequential targets |
+| flick-dynamic-horizontal | 2000 ms | 24 px | full-window sweep across the centre, 260–480 px/s |
+| target-switch-triple | 3800 ms total | 24 px | 3 sequential targets, 1100 ms each |
 | tracking-smooth-sine | 6000 ms | 30 px | Lissajous path |
 
 Timeouts are deliberately tight (target-lifetime style protocols): with a
@@ -93,7 +93,7 @@ Consequences:
 
 ## Presets
 
-`consistent-medium` (default Aldo-like), `jittery-fast` (fast reactions, high
+`consistent-medium` (default), `jittery-fast` (fast reactions, high
 motor noise, weak correction), `deliberate-slow` (slow, precise, strong
 correction), `noisy-beginner` (high variance everywhere). All parameters are
-overridable; nothing is special-cased around "Aldo".
+overridable; nothing is special-cased around any one player.

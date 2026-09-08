@@ -127,8 +127,8 @@ describe("transport parser abuse", () => {
 });
 
 describe("windows launcher scripts (static contract)", () => {
-  const startScript = readFileSync("scripts/release/windows/start-aldo-lab.ps1", "utf8");
-  const stopScript = readFileSync("scripts/release/windows/stop-aldo-lab.ps1", "utf8");
+  const startScript = readFileSync("scripts/release/windows/start-traimer.ps1", "utf8");
+  const stopScript = readFileSync("scripts/release/windows/stop-traimer.ps1", "utf8");
 
   it("never uses shell-interpolation execution sinks", () => {
     for (const [name, script] of [["start", startScript], ["stop", stopScript]] as const) {
@@ -183,7 +183,7 @@ describe("release archive path safety", () => {
       null,
     ] as unknown[];
     for (const p of bad) expect(isSafeArchivePath(p), String(p)).toBe(false);
-    const good = ["app/index.html", "aldo_capture_helper.exe", "manifest.json"];
+    const good = ["app/index.html", "traimer_capture_helper.exe", "manifest.json"];
     for (const p of good) expect(isSafeArchivePath(p), String(p)).toBe(true);
   });
 });

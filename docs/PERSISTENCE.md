@@ -71,3 +71,47 @@ v0→v1 migration.
 - Calibration records gain OPTIONAL `estimator`, `qualityScore`,
   `consistency`, `contextFingerprint`, and optional `turns` on measurements.
 - History API reads through the same envelopes only; no new kinds.
+
+## Game Profile Pass 1 additions
+
+Two OPTIONAL fields, no new envelope kind, and no migration:
+
+- `human-session` payloads may carry `gameConversion`, a
+  `SessionGameConversionRecord` (`src/games/selection.ts`): profile id and
+  conversion-definition version, profile status, DPI, the player's current and
+  recommended values, the exact pre-rounding value, the canonical aim in
+  degrees per centimetre, cm/360, the conversion method, and the rounding
+  fraction the game's own entry grid imposed. Sessions written before game
+  profiles existed simply do not have the field; readers treat absence as
+  "no game profile", never as an error. Nothing already written is rewritten.
+- The app's `traimer-settings` localStorage blob may carry `gameProfile`, a
+  `GameProfileSelection`. It stores a profile **id and version**, never a
+  display name, so renaming a game later is cosmetic rather than a data-loss
+  event. A blob without it reads back as "no game selected".
+
+A saved selection naming a profile this build does not ship is preserved
+verbatim so history stays readable; `GameProfileRegistry.checkSelection()`
+reports the mismatch instead of reinterpreting the values. See
+docs/GAME-PROFILES.md §10.
+
+## Pass 15 addition — `arenaGain`
+
+One more OPTIONAL field on `human-session` payloads, no new envelope kind, and
+no migration:
+
+- `arenaGain`, a `SessionArenaGainRecord` (`src/session/arenaGainRecord.ts`):
+  the arena physical-model version (`arena-gain-v1`), the anchor the session
+  ran against and where it came from, the reference sensitivity and
+  degrees-per-centimetre, the arena's px-per-degree constant, the DPI, the
+  logical px/count actually applied for every candidate, and the largest ratio
+  between any two of them.
+
+**Here, absence carries meaning.** Every session written before 1.0.0-rc.9 ran
+on an arena that applied no candidate sensitivity at all, so it does not have
+the field — and that is precisely how a reader tells the two generations apart.
+`readSessionArenaGainRecord()` returns `null` for anything unrecognised, which
+is the same answer as "this session did not apply candidate gain", so an
+unreadable record can never make a historical session unreadable.
+
+Nothing already written is rewritten. See docs/ARENA-SENSITIVITY.md §8 and
+docs/HISTORY.md.

@@ -4,6 +4,8 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Lets a maintainer rebuild the Windows installer from any ref on demand.
+  workflow_dispatch:
 
 jobs:
   engine:
@@ -17,8 +19,29 @@ jobs:
       - run: npm run lint
       - run: npm run typecheck
       - run: npm test
+      - name: RELEASE GATE - user-data migration across the rename
+        run: npx vitest run tests/userDataMigration.test.ts
+      - name: RELEASE GATE - calibration journey, capture-release semantics, arena contract
+        run: npx vitest run tests/calibrationJourney.test.ts tests/captureReleaseSemantics.test.ts tests/arenaPresentation.test.ts tests/brandingGate.test.ts
+      - name: RELEASE GATE - the arena applies the blinded candidate sensitivity
+        # rc.8 moved the crosshair one pixel per mouse count for every
+        # candidate it was comparing, so a human calibration compared five
+        # sensitivities that all felt identical. See PASS-15-REPORT.md.
+        run: npx vitest run tests/arenaCandidateGain.test.ts tests/arenaGainHistoryValidity.test.ts
+      - name: RELEASE GATE - game profiles fail closed and stay out of the measurement core
+        # A malformed profile must never produce a sensitivity recommendation,
+        # and no profile may reach a running game. See docs/GAME-PROFILES.md.
+        run: npx vitest run tests/gameProfileSchema.test.ts tests/gameProfileRegistry.test.ts tests/gameProfileBoundary.test.ts tests/gameRoundTrip.test.ts tests/gameProfileIntegration.test.ts tests/gamePublicProfiles.test.ts tests/gamePublicProfilesPass3.test.ts
       - name: no-telemetry audit (sources)
         run: node scripts/audit-no-telemetry.mjs
+      - name: RELEASE GATE - branding (sources + player docs)
+        run: node scripts/verify-branding.mjs
+      - name: RELEASE GATE - public docs are current and consistent
+        # Every relative link in the public docs resolves, every version
+        # string in a player-facing document is this build's, and the
+        # public support matrix says exactly what the profile registry says
+        # (status and last-verified date, per game). See docs/SUPPORT-MATRIX.md.
+        run: node scripts/verify-docs.mjs
 
   browser:
     runs-on: ubuntu-latest
@@ -29,10 +52,20 @@ jobs:
           node-version: 20
       - run: npm ci
       - run: npx playwright install chromium --with-deps
-      - run: npm run test:browser
+      - name: browser suite (incl. calibration flow, tracking UX, shooting feel, results states)
+        run: npm run test:browser
+      - name: RELEASE GATE - two blinded candidates differ in the REAL arena
+        # Measured by observation only (inject a known mouse movement, watch
+        # the crosshair), so it proves what a player would feel and cannot
+        # weaken blinding. Fails if the arena reverts to 1 px/count.
+        run: npx playwright test tests/browser/candidateGain.spec.ts
       - run: npm run build
       - name: release artifact verification
         run: node scripts/verify-release.mjs
+      - name: RELEASE GATE - branding (sources + shipped bundle)
+        run: |
+          node scripts/verify-branding.mjs
+          node scripts/verify-branding.mjs --bundle dist-app
       - name: no-telemetry audit (bundle)
         run: node scripts/audit-no-telemetry.mjs
       - uses: actions/upload-artifact@v4
@@ -52,11 +85,11 @@ jobs:
       - name: PowerShell launcher scripts parse cleanly
         shell: pwsh
         run: |
-          foreach ($script in @("scripts/release/windows/start-aldo-lab.ps1","scripts/release/windows/stop-aldo-lab.ps1")) {
+          foreach ($script in @("scripts/release/windows/start-traimer.ps1","scripts/release/windows/stop-traimer.ps1")) {
             $parseErrors = $null
             [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $script), [ref]$null, [ref]$parseErrors)
             if ($parseErrors -and $parseErrors.Count -gt 0) {
-              $parseErrors | ForEach-Object { Write-Host "##[error]$script:$($_.Extent.StartLineNumber): $($_.Message)" }
+              $parseErrors | ForEach-Object { Write-Host "##[error]${script}:$($_.Extent.StartLineNumber): $($_.Message)" }
               throw "PowerShell parse errors in $script"
             }
             Write-Host "parsed OK: $script"
@@ -69,13 +102,31 @@ jobs:
           bash scripts/build-native-windows.sh
       - name: compile helper (MSVC, warnings are errors)
         shell: cmd
-        run: |
-          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\VC\Auxiliary\Build\vcvars64.bat" || exit /b 1
-          scripts\build-native-windows.bat
+        # The build script locates the MSVC toolset with vswhere; hardcoding a
+        # Visual Studio edition path here is what silently broke this step.
+        run: scripts\build-native-windows.bat
+      - name: RELEASE GATE - helper is a genuine Windows x64 PE
+        shell: bash
+        run: node scripts/verify-windows-artifacts.mjs --helper native/windows/traimer_capture_helper.exe
+      - name: RELEASE GATE - helper actually executes on Windows x64
+        shell: bash
+        # rc.1 shipped a "helper.exe" that was the C source file. A format
+        # check alone would not have caught a cross-compiled or corrupt
+        # binary, so the freshly built artifact is RUN here. Expected values
+        # come from src/version.ts, never from a literal in this file.
+        run: node scripts/verify-helper-version.mjs native/windows/traimer_capture_helper.exe
+      - name: RELEASE GATE - helper clock synchronizes with a client (real binary)
+        shell: bash
+        # The helper counts milliseconds from its own process start. Until
+        # that origin is measured against the app's clock, its timestamps
+        # cannot be placed on the same timeline as the drills. Every other
+        # test of this path uses a scripted stand-in; this one talks to the
+        # binary that ships. See docs/CLOCK-DOMAINS.md.
+        run: node scripts/verify-clock-sync.mjs native/windows/traimer_capture_helper.exe
       - uses: actions/upload-artifact@v4
         with:
-          name: aldo_capture_helper
-          path: native/windows/aldo_capture_helper.exe
+          name: traimer_capture_helper
+          path: native/windows/traimer_capture_helper.exe
           retention-days: 30
 
   # Pass 6: full downloadable V1 RC portable release artifact.
@@ -91,11 +142,11 @@ jobs:
       - name: PowerShell launcher scripts parse cleanly
         shell: pwsh
         run: |
-          foreach ($script in @("scripts/release/windows/start-aldo-lab.ps1","scripts/release/windows/stop-aldo-lab.ps1")) {
+          foreach ($script in @("scripts/release/windows/start-traimer.ps1","scripts/release/windows/stop-traimer.ps1")) {
             $parseErrors = $null
             [void][System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $script), [ref]$null, [ref]$parseErrors)
             if ($parseErrors -and $parseErrors.Count -gt 0) {
-              $parseErrors | ForEach-Object { Write-Host "##[error]$script:$($_.Extent.StartLineNumber): $($_.Message)" }
+              $parseErrors | ForEach-Object { Write-Host "##[error]${script}:$($_.Extent.StartLineNumber): $($_.Message)" }
               throw "PowerShell parse errors in $script"
             }
             Write-Host "parsed OK: $script"
@@ -117,6 +168,11 @@ jobs:
         run: npm run build
       - name: release verification
         run: node scripts/verify-release.mjs
+      - name: RELEASE GATE - branding (sources + shipped bundle)
+        shell: bash
+        run: |
+          node scripts/verify-branding.mjs
+          node scripts/verify-branding.mjs --bundle dist-app
       - name: no-telemetry audit (sources + bundle)
         run: node scripts/audit-no-telemetry.mjs
       - name: npm audit
@@ -124,31 +180,31 @@ jobs:
       - name: download compiled helper
         uses: actions/download-artifact@v4
         with:
-          name: aldo_capture_helper
+          name: traimer_capture_helper
           path: native/windows
       - name: package portable release folder + checksums
         shell: bash
         run: |
           node scripts/package-release.mjs \
-            --helper native/windows/aldo_capture_helper.exe \
+            --helper native/windows/traimer_capture_helper.exe \
             --commit "${{ github.sha }}"
       - name: verify packaged artifact contents
         shell: pwsh
         run: |
-          $manifest = Get-Content "release/AldoAimLab-*/manifest.json" -Raw | ConvertFrom-Json
+          $manifest = Get-Content "release/trAIMer-*/manifest.json" -Raw | ConvertFrom-Json
           if ($manifest.helperBinaryIsPlaceholder) { throw "release contains a placeholder helper" }
-          $required = @("aldo_capture_helper.exe","start-aldo-lab.ps1","stop-aldo-lab.ps1","FIRST-RUN.md","app/index.html")
+          $required = @("traimer_capture_helper.exe","start-traimer.ps1","stop-traimer.ps1","FIRST-RUN.md","app/index.html")
           foreach ($f in $required) {
-            $p = Join-Path "release/AldoAimLab-v$($manifest.appVersion)" $f
+            $p = Join-Path "release/trAIMer-v$($manifest.appVersion)" $f
             if (-not (Test-Path $p)) { throw "missing release file: $f" }
           }
           Write-Host "release artifact verified: $($manifest.files.Count) files"
       - name: zip the portable folder
         shell: pwsh
         run: |
-          $version = (Get-Content "release/AldoAimLab-*/manifest.json" -Raw | ConvertFrom-Json).appVersion
-          $zipName = "Aldo-Aim-Lab-v$version-windows-x64.zip"
-          Compress-Archive -Path "release/AldoAimLab-v*" -DestinationPath "release/$zipName" -Force
+          $version = (Get-Content "release/trAIMer-*/manifest.json" -Raw | ConvertFrom-Json).appVersion
+          $zipName = "trAIMer-v$version-windows-x64.zip"
+          Compress-Archive -Path "release/trAIMer-v*" -DestinationPath "release/$zipName" -Force
           "RELEASE_ZIP_NAME=$zipName" | Out-File -FilePath $env:GITHUB_ENV -Append
           # Publish the archive checksum directly in the job output.
           $hash = (Get-FileHash -Algorithm SHA256 "release/$zipName").Hash.ToLower()
@@ -156,8 +212,350 @@ jobs:
           Write-Host "SHA256: $hash  $zipName"
       - uses: actions/upload-artifact@v4
         with:
-          name: aldo-aim-lab-portable-release
+          name: traimer-portable-release
           path: |
-            release/Aldo-Aim-Lab-*-windows-x64.zip
-            release/AldoAimLab-*-SHA256SUMS.txt
+            release/trAIMer-*-windows-x64.zip
+            release/trAIMer-*-SHA256SUMS.txt
           retention-days: 90
+
+  # Pass 9: THE shipped Windows product — one double-clickable installer.
+  #
+  # Every gate the rc.1 pipeline was missing lives here: the helper must be a
+  # real x64 PE, it must execute, the installer must exist and be plausible,
+  # the installed layout must be complete, and the installed application must
+  # start and shut down cleanly before the artifact is published.
+  windows-installer:
+    runs-on: windows-latest
+    needs: [native-windows]
+    # The upgrade gate downloads the previous release candidate: from its
+    # GitHub release (contents: read) or, failing that, from the CI artifact
+    # of the run that built it (actions: read). The default token has neither
+    # spelled out, and the artifact route answered 403 without them.
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+
+      - name: lint + strict typecheck (engine + desktop shell)
+        shell: bash
+        run: |
+          npm run lint
+          npm run typecheck
+      - name: engine + desktop contract test suite
+        shell: bash
+        run: npx vitest run
+      - name: no-telemetry audit (sources)
+        run: node scripts/audit-no-telemetry.mjs
+
+      - name: build frontend bundle
+        run: npm run build
+      - name: build desktop shell (Electron main + preload)
+        run: npm run build:desktop
+      - name: RELEASE GATE - the arena can actually be started (dev tree)
+        # rc.3 passed every other gate here and still could not run one trial
+        # on real hardware: the overlay swallowed the arena click and pointer
+        # lock events were bound to the wrong target. The automated session
+        # suite missed it because ?e2e=1 grants the lock virtually and starts
+        # without any click. This gate clicks the arena for real.
+        shell: bash
+        run: node scripts/verify-arena-entry.mjs
+      - name: RELEASE GATE - the arena applies the candidate sensitivity (dev tree)
+        shell: bash
+        run: node scripts/verify-candidate-gain.mjs
+      - name: RELEASE GATE - the game picker offers every public profile (dev tree)
+        # Pass 2 proved the profiles were bundled; nothing drove the picker.
+        # This walks the real picker: every profile the registry declares is
+        # offered, renders its own fields, converts a value, and no fixture
+        # or legacy name appears. See docs/GAME-PROFILES.md §15.
+        shell: bash
+        run: node scripts/verify-game-picker.mjs
+      - name: RELEASE GATE - required frontend assets present
+        shell: bash
+        run: node scripts/verify-windows-artifacts.mjs --frontend dist-app
+      - name: RELEASE GATE - the shipped UI says trAIMer and nothing else
+        shell: bash
+        run: |
+          node scripts/verify-branding.mjs
+          node scripts/verify-branding.mjs --bundle dist-app
+      - name: release verification (versions, matrix, desktop build inputs)
+        run: node scripts/verify-release.mjs
+      - name: no-telemetry audit (sources + shipped bundle)
+        run: node scripts/audit-no-telemetry.mjs
+      - name: npm audit
+        run: npm audit --audit-level=moderate
+
+      - name: download compiled helper
+        uses: actions/download-artifact@v4
+        with:
+          name: traimer_capture_helper
+          path: native/windows
+      - name: RELEASE GATE - helper is a genuine Windows x64 PE
+        shell: bash
+        run: node scripts/verify-windows-artifacts.mjs --helper native/windows/traimer_capture_helper.exe
+      - name: RELEASE GATE - helper executes before it is bundled
+        shell: pwsh
+        run: |
+          $out = (& "native/windows/traimer_capture_helper.exe" --version 2>&1 | Out-String).Trim()
+          if ($LASTEXITCODE -ne 0) { throw "helper --version exited $LASTEXITCODE : $out" }
+          if ($out -notmatch 'arch=x64') { throw "helper is not the x64 build: $out" }
+          Write-Host "bundling helper: $out"
+
+      - name: build Windows installer (electron-builder / NSIS)
+        shell: bash
+        run: npx electron-builder --win nsis --x64 --publish never
+
+      - name: RELEASE GATE - installer exists and is plausible
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $installer = "release/installer/trAIMer-Setup-$version.exe"
+          if (-not (Test-Path $installer)) {
+            Get-ChildItem -Recurse release/installer | ForEach-Object { Write-Host $_.FullName }
+            throw "installer not produced: $installer"
+          }
+          node scripts/verify-windows-artifacts.mjs --installer $installer
+          if ($LASTEXITCODE -ne 0) { throw "installer verification failed" }
+          node scripts/verify-branding.mjs --installer $installer
+          if ($LASTEXITCODE -ne 0) { throw "installer branding gate failed" }
+          "INSTALLER_PATH=$installer" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "APP_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: RELEASE GATE - upgrade path, part 1 - install the previous release candidate and use it
+        shell: pwsh
+        # Pass 5, requirement 24. The new installer must be an in-place
+        # UPGRADE of the last RC a player could hold, and everything that
+        # player recorded must still be there afterwards. So the previous RC
+        # is installed first, a full calibration is completed on it (a real
+        # stored session with a game conversion), and the new installer then
+        # goes on top. The prior installer comes from the GitHub release that
+        # published it, or failing that from the CI artifact of the run that
+        # built it; its digest is checked against the one recorded in the
+        # pass report before it is run.
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PRIOR_RC_VERSION: 1.0.0-rc.13
+          PRIOR_RC_RUN_ID: "34228526352"
+          PRIOR_RC_SHA256: 0da0196f1429e64b8ede8bad23726db222b144f1a88b520ff43472971b5b1eb6
+        run: |
+          $dir = "$env:RUNNER_TEMP\prior-rc"
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $prior = Join-Path $dir "trAIMer-Setup-$env:PRIOR_RC_VERSION.exe"
+          gh release download "v$env:PRIOR_RC_VERSION" --pattern "trAIMer-Setup-$env:PRIOR_RC_VERSION.exe" --dir $dir 2>$null
+          if (-not (Test-Path $prior)) {
+            Write-Host "no GitHub release for v$env:PRIOR_RC_VERSION; using the CI artifact of run $env:PRIOR_RC_RUN_ID"
+            gh run download $env:PRIOR_RC_RUN_ID --name traimer-windows-installer --dir $dir
+          }
+          if (-not (Test-Path $prior)) { throw "previous RC installer not available: $prior" }
+          $hash = (Get-FileHash -Algorithm SHA256 $prior).Hash.ToLower()
+          if ($hash -ne $env:PRIOR_RC_SHA256) { throw "previous RC installer digest mismatch: $hash" }
+          Write-Host "previous RC installer verified: $prior ($hash)"
+          $target = "C:\traimer-install-test"
+          $proc = Start-Process -FilePath $prior -ArgumentList "/S", "/D=$target" -Wait -PassThru
+          if ($proc.ExitCode -ne 0) { throw "previous RC silent install exited $($proc.ExitCode)" }
+          Get-Process -Name "trAIMer", "traimer_capture_helper" -ErrorAction SilentlyContinue | Stop-Process -Force
+          Start-Sleep -Seconds 3
+          node scripts/verify-installed-smoke.mjs --exe "$target\trAIMer.exe" --prior-build --player PriorRcPlayer --out "$env:RUNNER_TEMP\smoke-prior-rc.json"
+          if ($LASTEXITCODE -ne 0) { throw "full smoke on the previous RC failed" }
+          Get-Process -Name "trAIMer", "traimer_capture_helper" -ErrorAction SilentlyContinue | Stop-Process -Force
+          if (-not (Test-Path "$env:APPDATA\trAIMer")) { throw "the previous RC left no user-data directory to carry forward" }
+          $entries = @(Get-ChildItem "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall" | Where-Object { $_.GetValue("DisplayName") -like "trAIMer*" })
+          if ($entries.Count -ne 1) { throw "expected one Apps & Features entry after installing the previous RC, found $($entries.Count)" }
+          Write-Host "previous RC installed and used: $($entries[0].GetValue('DisplayName'))"
+
+      - name: RELEASE GATE - upgrade path, part 2 - silent install produces a complete application over the previous one
+        shell: pwsh
+        run: |
+          $target = "C:\traimer-install-test"
+          # /D must be the last argument and unquoted (NSIS convention).
+          $proc = Start-Process -FilePath $env:INSTALLER_PATH -ArgumentList "/S", "/D=$target" -Wait -PassThru
+          if ($proc.ExitCode -ne 0) { throw "silent install exited $($proc.ExitCode)" }
+          if (-not (Test-Path $target)) { throw "installer did not create $target" }
+          # One entry in Apps & Features, carrying the new version: an upgrade,
+          # not a second install beside the old one.
+          $entries = @(Get-ChildItem "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall" | Where-Object { ($_.GetValue("DisplayName") -like "trAIMer*") -or ($_.GetValue("DisplayName") -like "Aldo*") })
+          if ($entries.Count -ne 1) { throw "expected exactly one Apps & Features entry after the upgrade, found $($entries.Count): $(($entries | ForEach-Object { $_.GetValue('DisplayName') }) -join ', ')" }
+          $display = $entries[0].GetValue("DisplayName")
+          if ($display -ne "trAIMer $env:APP_VERSION") { throw "Apps & Features entry is '$display', expected 'trAIMer $env:APP_VERSION'" }
+          if (-not (Test-Path "$env:APPDATA\trAIMer")) { throw "the upgrade removed the player's user-data directory" }
+          Write-Host "upgraded in place: $display; user data preserved"
+          Get-ChildItem -Recurse $target | Select-Object -First 40 | ForEach-Object { Write-Host $_.FullName }
+          node scripts/verify-windows-artifacts.mjs --installed-app $target
+          if ($LASTEXITCODE -ne 0) { throw "installed application verification failed" }
+          node scripts/verify-branding.mjs --installed-app $target
+          if ($LASTEXITCODE -ne 0) { throw "installed application branding gate failed" }
+          # Shortcuts and the Apps & Features entry come from productName /
+          # shortcutName / uninstallDisplayName; prove the NSIS script that was
+          # actually built carries the new ones.
+          if (-not (Test-Path (Join-Path $target "trAIMer.exe"))) { throw "installed executable is not named trAIMer.exe" }
+          $legacy = Get-ChildItem -Recurse $target | Where-Object { $_.Name -like "*Aldo*" }
+          if ($legacy) { throw "installed app still contains legacy-named files: $($legacy.Name -join ', ')" }
+
+      - name: RELEASE GATE - installed app starts and shuts down cleanly
+        shell: pwsh
+        run: |
+          $target = "C:\traimer-install-test"
+          $exe = Join-Path $target "trAIMer.exe"
+          # runAfterFinish may have launched a copy; the single-instance lock
+          # would otherwise turn a no-op into a false pass, and a leftover
+          # helper would trip the "nothing survives shutdown" check below.
+          Get-Process -Name "trAIMer" -ErrorAction SilentlyContinue | Stop-Process -Force
+          Get-Process -Name "traimer_capture_helper" -ErrorAction SilentlyContinue | Stop-Process -Force
+          Start-Sleep -Seconds 3
+          $out = "$env:RUNNER_TEMP\smoke-test-result.json"
+          $proc = Start-Process -FilePath $exe `
+            -ArgumentList "--smoke-test", "--require-helper", "--smoke-out", $out `
+            -Wait -PassThru
+          if (Test-Path $out) { Get-Content $out | Write-Host }
+          $log = "$env:APPDATA\trAIMer\logs\desktop.log"
+          if (Test-Path $log) { Write-Host "--- desktop.log ---"; Get-Content $log | Write-Host }
+          if ($proc.ExitCode -ne 0) { throw "installed app smoke test exited $($proc.ExitCode)" }
+          $result = Get-Content $out -Raw | ConvertFrom-Json
+          if (-not $result.pass) { throw "smoke test reported failure" }
+          if ($result.helperState -ne "ready") { throw "capture helper never reached ready: $($result.helperDetail)" }
+          # Nothing may survive the shutdown.
+          Start-Sleep -Seconds 2
+          $stragglers = Get-Process -Name "trAIMer", "traimer_capture_helper" -ErrorAction SilentlyContinue
+          if ($stragglers) { throw "processes survived shutdown: $($stragglers.Name -join ', ')" }
+          Write-Host "startup + clean shutdown verified"
+
+      - name: RELEASE GATE - the INSTALLED app can start a test
+        shell: pwsh
+        run: |
+          $exe = "C:\traimer-install-test\trAIMer.exe"
+          Get-Process -Name "trAIMer" -ErrorAction SilentlyContinue | Stop-Process -Force
+          Get-Process -Name "traimer_capture_helper" -ErrorAction SilentlyContinue | Stop-Process -Force
+          Start-Sleep -Seconds 2
+          node scripts/verify-arena-entry.mjs --exe $exe
+          if ($LASTEXITCODE -ne 0) { throw "arena entry gate failed on the installed app" }
+          Get-Process -Name "trAIMer" -ErrorAction SilentlyContinue | Stop-Process -Force
+          Get-Process -Name "traimer_capture_helper" -ErrorAction SilentlyContinue | Stop-Process -Force
+
+      - name: RELEASE GATE - the INSTALLED app changes sensitivity between candidates
+        shell: pwsh
+        # The gate rc.8 did not have. Starting a test is not enough: the test
+        # has to compare something. This drives the installed application and
+        # measures how far the crosshair actually travels for a known mouse
+        # movement, requiring that the answer changes with the blinded
+        # candidate. See PASS-15-REPORT.md.
+        run: |
+          $exe = "C:\traimer-install-test\trAIMer.exe"
+          Start-Sleep -Seconds 2
+          node scripts/verify-candidate-gain.mjs --exe $exe
+          if ($LASTEXITCODE -ne 0) { throw "candidate-gain gate failed on the installed app" }
+          Get-Process -Name "trAIMer" -ErrorAction SilentlyContinue | Stop-Process -Force
+          Get-Process -Name "traimer_capture_helper" -ErrorAction SilentlyContinue | Stop-Process -Force
+
+      - name: RELEASE GATE - the INSTALLED app's game picker offers every public profile
+        shell: pwsh
+        # The gap Pass 2 reported: the installer carried the profiles, but no
+        # gate selected one inside the installed application. This one does,
+        # for every public profile, plus Generic / Raw, persistence across a
+        # reload, the filter box, and the absence of fixtures and legacy names.
+        run: |
+          $exe = "C:\traimer-install-test\trAIMer.exe"
+          Get-Process -Name "trAIMer" -ErrorAction SilentlyContinue | Stop-Process -Force
+          Get-Process -Name "traimer_capture_helper" -ErrorAction SilentlyContinue | Stop-Process -Force
+          Start-Sleep -Seconds 2
+          node scripts/verify-game-picker.mjs --exe $exe
+          if ($LASTEXITCODE -ne 0) { throw "game-picker gate failed on the installed app" }
+          Get-Process -Name "trAIMer" -ErrorAction SilentlyContinue | Stop-Process -Force
+          Get-Process -Name "traimer_capture_helper" -ErrorAction SilentlyContinue | Stop-Process -Force
+
+      - name: RELEASE GATE - the INSTALLED app completes a calibration end to end
+        shell: pwsh
+        # Pass 5, requirement 25: launch, pick a real game profile, enter DPI
+        # and the sensitivity played there, choose Quick, hit shooting
+        # targets, complete tracking drills, pass through a break, reach
+        # Results with the game conversion, open History, close cleanly. The
+        # session recorded by the previous RC (part 1 above) must still be
+        # listed: that is the upgrade's data-preservation proof.
+        run: |
+          $exe = "C:\traimer-install-test\trAIMer.exe"
+          Get-Process -Name "trAIMer" -ErrorAction SilentlyContinue | Stop-Process -Force
+          Get-Process -Name "traimer_capture_helper" -ErrorAction SilentlyContinue | Stop-Process -Force
+          Start-Sleep -Seconds 2
+          node scripts/verify-installed-smoke.mjs --exe $exe --player UpgradedPlayer --expect-history 2 --expect-player PriorRcPlayer --out "$env:RUNNER_TEMP\smoke-installed.json"
+          if ($LASTEXITCODE -ne 0) { throw "full smoke failed on the installed app" }
+          Get-Process -Name "trAIMer" -ErrorAction SilentlyContinue | Stop-Process -Force
+          Get-Process -Name "traimer_capture_helper" -ErrorAction SilentlyContinue | Stop-Process -Force
+          Start-Sleep -Seconds 2
+          $stragglers = Get-Process -Name "trAIMer", "traimer_capture_helper" -ErrorAction SilentlyContinue
+          if ($stragglers) { throw "processes survived the full smoke: $($stragglers.Name -join ', ')" }
+
+      - name: RELEASE GATE - uninstall keeps the player's data by default, and a reinstall finds it
+        shell: pwsh
+        # Pass 5, requirement 24. A silent or automated uninstall must never
+        # delete a player's sessions (the uninstaller's "also delete my data?"
+        # question defaults to No and cannot be answered Yes silently), the
+        # Apps & Features entry must go, and a clean reinstall must open with
+        # every earlier session still in History.
+        run: |
+          $target = "C:\traimer-install-test"
+          $uninstaller = Join-Path $target "Uninstall trAIMer.exe"
+          if (-not (Test-Path $uninstaller)) { Get-ChildItem $target | ForEach-Object { Write-Host $_.Name }; throw "uninstaller not found: $uninstaller" }
+          # _?= runs the uninstaller in place (so -Wait really waits) and must be last.
+          $proc = Start-Process -FilePath $uninstaller -ArgumentList "/S", "_?=$target" -Wait -PassThru
+          if ($proc.ExitCode -ne 0) { throw "silent uninstall exited $($proc.ExitCode)" }
+          if (Test-Path (Join-Path $target "trAIMer.exe")) { throw "uninstall left trAIMer.exe behind" }
+          if (Test-Path (Join-Path $target "resources\traimer_capture_helper.exe")) { throw "uninstall left the capture helper behind" }
+          if (-not (Test-Path "$env:APPDATA\trAIMer")) { throw "silent uninstall DELETED the player's data" }
+          $entries = @(Get-ChildItem "HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall" | Where-Object { ($_.GetValue("DisplayName") -like "trAIMer*") -or ($_.GetValue("DisplayName") -like "Aldo*") })
+          if ($entries.Count -ne 0) { throw "Apps & Features entry survived the uninstall: $(($entries | ForEach-Object { $_.GetValue('DisplayName') }) -join ', ')" }
+          Write-Host "uninstalled; user data kept at $env:APPDATA\trAIMer"
+          Remove-Item -Recurse -Force $target -ErrorAction SilentlyContinue
+
+          $proc = Start-Process -FilePath $env:INSTALLER_PATH -ArgumentList "/S", "/D=$target" -Wait -PassThru
+          if ($proc.ExitCode -ne 0) { throw "reinstall exited $($proc.ExitCode)" }
+          node scripts/verify-windows-artifacts.mjs --installed-app $target
+          if ($LASTEXITCODE -ne 0) { throw "reinstalled application verification failed" }
+          Get-Process -Name "trAIMer", "traimer_capture_helper" -ErrorAction SilentlyContinue | Stop-Process -Force
+          Start-Sleep -Seconds 3
+          node scripts/verify-installed-smoke.mjs --exe "$target\trAIMer.exe" --history-only --expect-history 2 --expect-player PriorRcPlayer --out "$env:RUNNER_TEMP\smoke-reinstalled.json"
+          if ($LASTEXITCODE -ne 0) { throw "history was not preserved across uninstall + reinstall" }
+          Get-Process -Name "trAIMer", "traimer_capture_helper" -ErrorAction SilentlyContinue | Stop-Process -Force
+          Write-Host "reinstalled; every earlier session is still in History"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: installed-app-smoke-results
+          path: |
+            ${{ runner.temp }}/smoke-*.json
+          retention-days: 90
+
+      - name: publish installer with checksum
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path release/publish | Out-Null
+          Copy-Item $env:INSTALLER_PATH "release/publish/trAIMer-Setup-$env:APP_VERSION.exe"
+          # A stable, version-free name so the flash-drive instructions never
+          # go stale.
+          Copy-Item $env:INSTALLER_PATH "release/publish/trAIMer-Setup.exe"
+          $hash = (Get-FileHash -Algorithm SHA256 $env:INSTALLER_PATH).Hash.ToLower()
+          $bytes = (Get-Item $env:INSTALLER_PATH).Length
+          "$hash  trAIMer-Setup-$env:APP_VERSION.exe" |
+            Out-File -FilePath "release/publish/trAIMer-Setup-SHA256.txt" -Encoding ascii
+          "## trAIMer $env:APP_VERSION Windows installer" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "- file: ``trAIMer-Setup-$env:APP_VERSION.exe`` ($bytes bytes)" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          "- sha256: ``$hash``" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+      - uses: actions/upload-artifact@v4
+        with:
+          name: traimer-windows-installer
+          path: |
+            release/publish/trAIMer-Setup.exe
+            release/publish/trAIMer-Setup-*.exe
+            release/publish/trAIMer-Setup-SHA256.txt
+          retention-days: 90
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: windows-installer-diagnostics
+          path: |
+            release/installer/**/*.yml
+            release/installer/builder-*.yml
+          retention-days: 7

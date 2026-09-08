@@ -27,7 +27,7 @@ export const V1_RC_PROTOCOL_DEFAULTS = {
     id: "v1-rc-protocol",
     version: "rc-defaults-v1",
     honestyNote:
-      "Chosen conservatively from simulation campaigns only. First real Aldo sessions may justify tuning; until then these stay fixed so results remain comparable.",
+      "Chosen conservatively from simulation campaigns only. First real player sessions may justify tuning; until then these stay fixed so results remain comparable.",
   },
 
   warmupTrialsPerCandidateBlock: {
@@ -90,13 +90,15 @@ export const V1_RC_PROTOCOL_DEFAULTS = {
   } as DocumentedDefault<number>,
 
   restDurationMs: {
-    value: 45 * 1000,
-    rationale: "Long enough for grip/arm relaxation between blocks without breaking session momentum.",
+    value: 30 * 1000,
+    rationale:
+      "Fatigue-triggered rest (12 min continuous, or measured slowdown). Pass 11: 30 s, down from 45 s, and always skippable — real-hardware feedback was that an enforced idle wait felt intrusive; a break the player does not want is idle time, not recovery.",
   } as DocumentedDefault<number>,
 
   restBetweenCandidatesMs: {
-    value: 15_000,
-    rationale: "Short mental reset between blinded candidate blocks; candidates change but scenarios continue.",
+    value: 10_000,
+    rationale:
+      "Short mental reset between blinded candidate blocks; candidates change but scenarios continue. Pass 11: 10 s default (was 15 s), player-adjustable 5–60 s or off, and always skippable (Skip break / Space / Enter).",
   } as DocumentedDefault<number>,
 
   degradationWindowTrials: {

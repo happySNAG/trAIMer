@@ -13,3 +13,11 @@ test-results/
 playwright-report/
 # Packaged release output (NOT the launcher sources under scripts/release/)
 /release/
+
+dist-desktop/
+
+# Compiled native helper: always produced by the Windows CI job, never
+# committed. A checked-in binary is a binary nobody can re-verify.
+native/windows/*.exe
+native/windows/*.obj
+native/windows/*.pdb

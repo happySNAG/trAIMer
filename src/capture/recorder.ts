@@ -35,8 +35,34 @@ export interface TrialRecordingRequest {
   sensitivity: SensitivityConfiguration;
   dpi: number;
   expectedSampleIntervalMs: number | null;
+  /**
+   * The capture source's declared occurrence→observation lead tolerance.
+   * Omitted (or 0) for sources that stamp events with the same clock reading
+   * the caller uses to start the trial — synthetic and replay streams.
+   */
+  timestampLeadToleranceMs?: number;
   startedAtMonotonicMs: number;
   seedTag?: string;
+}
+
+/** Presentation view of a live target (positions in logical px). */
+export interface ActiveTargetView {
+  id: TargetSpan["targetId"];
+  x: number;
+  y: number;
+  radius: number;
+  appearedMs: number;
+  moving: boolean;
+}
+
+/** Presentation view of a target that has just left the arena. */
+export interface RemovedTargetView {
+  id: TargetSpan["targetId"];
+  x: number;
+  y: number;
+  radius: number;
+  removedMs: number;
+  reason: "hit" | "expired" | "trial-end";
 }
 
 export class TrialRecorder {
@@ -58,8 +84,8 @@ export class TrialRecorder {
     return this.#cursor;
   }
 
-  activeTargetsAt(tMs: number): { x: number; y: number; radius: number }[] {
-    const out: { x: number; y: number; radius: number }[] = [];
+  activeTargetsAt(tMs: number): ActiveTargetView[] {
+    const out: ActiveTargetView[] = [];
     for (const span of this.#targets) {
       if (span.removedMs !== null && span.removedMs <= tMs) continue;
       if (span.appearedMs > tMs) continue;
@@ -68,13 +94,51 @@ export class TrialRecorder {
           ? span.motion.position
           : targetPositionAt(span, tMs);
       if (!pos) continue;
-      out.push({ x: pos.x, y: pos.y, radius: span.radiusPx });
+      out.push({
+        id: span.targetId,
+        x: pos.x,
+        y: pos.y,
+        radius: span.radiusPx,
+        appearedMs: span.appearedMs,
+        moving: span.motion.kind === "path",
+      });
+    }
+    return out;
+  }
+
+  /**
+   * Targets removed at or before `tMs` — presentation reads this to animate a
+   * pop (hit) or a fade (expired) at the place the target was. Never used for
+   * measurement.
+   */
+  removedTargetsAt(tMs: number): RemovedTargetView[] {
+    const out: RemovedTargetView[] = [];
+    for (const span of this.#targets) {
+      if (span.removedMs === null || span.removedMs > tMs) continue;
+      const pos =
+        span.motion.kind === "static"
+          ? span.motion.position
+          : targetPositionAt(span, span.removedMs);
+      if (!pos) continue;
+      out.push({
+        id: span.targetId,
+        x: pos.x,
+        y: pos.y,
+        radius: span.radiusPx,
+        removedMs: span.removedMs,
+        reason: span.removalReason ?? "trial-end",
+      });
     }
     return out;
   }
 
   get state(): {
-    spawnedTargets: { removedMs: number | null; removalReason: string | null }[];
+    spawnedTargets: {
+      targetId: TargetSpan["targetId"];
+      appearedMs: number;
+      removedMs: number | null;
+      removalReason: string | null;
+    }[];
     shotCount: number;
     hitCount: number;
     latestShot: { aimTargetId: string | null; hit: boolean; tMs: number } | null;
@@ -82,6 +146,8 @@ export class TrialRecorder {
     const last = this.#shots.at(-1);
     return {
       spawnedTargets: this.#targets.map((t) => ({
+        targetId: t.targetId,
+        appearedMs: t.appearedMs,
         removedMs: t.removedMs,
         removalReason: t.removalReason,
       })),
@@ -206,6 +272,10 @@ export class TrialRecorder {
         sensitivity: req.sensitivity,
         dpi: req.dpi,
         expectedSampleIntervalMs: req.expectedSampleIntervalMs,
+        ...(req.timestampLeadToleranceMs !== undefined &&
+        req.timestampLeadToleranceMs > 0
+          ? { timestampLeadToleranceMs: req.timestampLeadToleranceMs }
+          : {}),
       },
       startedAtMonotonicMs: req.startedAtMonotonicMs,
       endedAtMonotonicMs,
@@ -254,11 +324,23 @@ export class TrialRecorder {
     return record;
   }
 
+  /**
+   * The target a shot at `tMs` landed on, or null for a miss.
+   *
+   * Positions come from `targetPositionAt` — the SAME function the renderer
+   * draws from (`activeTargetsAt`). Until rc.6 this path used a local helper
+   * that snapped to the previous keyframe instead of interpolating between
+   * them, so on a moving target the hit disc trailed the drawn disc by up to
+   * one keyframe interval. On the strafing drill (50 ms keyframes, up to
+   * 520 px/s, 24 px radius) that put the hit disc as much as 26 px behind the
+   * circle on screen: a pixel-perfect shot at the visible centre was scored a
+   * miss. That is why Aldo did not hit a single light-blue target.
+   */
   #targetUnderCursor(tMs: number): TargetSpan["targetId"] | null {
     for (const span of this.#targets) {
       if (span.appearedMs > tMs) continue;
-      if (span.removedMs !== null && span.removedMs < tMs) continue;
-      const pos = spanMotionPosition(span, tMs);
+      if (this.#isResolved(span, tMs)) continue;
+      const pos = targetPositionAt(span, tMs);
       if (
         pos &&
         Math.hypot(pos.x - this.#cursor.x, pos.y - this.#cursor.y) <=
@@ -270,32 +352,28 @@ export class TrialRecorder {
     return null;
   }
 
+  /**
+   * A target that has already been hit (or has expired) can never be shot
+   * again — not even by a second click carrying the SAME millisecond
+   * timestamp, which is exactly how a fast double-click used to score two
+   * hits on one target.
+   */
+  #isResolved(span: TargetSpan, tMs: number): boolean {
+    if (span.removedMs === null) return false;
+    return span.removalReason === "hit" || span.removedMs <= tMs;
+  }
+
   #nearestTargetDistance(tMs: number): number | null {
     let best: number | null = null;
     for (const span of this.#targets) {
       if (span.appearedMs > tMs) continue;
-      const pos = spanMotionPosition(span, tMs);
+      const pos = targetPositionAt(span, tMs);
       if (!pos) continue;
       const d = Math.hypot(pos.x - this.#cursor.x, pos.y - this.#cursor.y);
       best = best === null ? d : Math.min(best, d);
     }
     return best;
   }
-}
-
-function spanMotionPosition(
-  span: TargetSpan,
-  tMs: number,
-): Vec2 | null {
-  if (span.motion.kind === "static") return span.motion.position;
-  const keys = span.motion.keyframes;
-  let prev: { tMs: number; position: Vec2 } | null = null;
-  for (const key of keys) {
-    if (key.tMs <= tMs) prev = key;
-    else break;
-  }
-  if (!prev) return null;
-  return prev.position;
 }
 
 export function lastSampleTime(record: TrialRecord): number | null {

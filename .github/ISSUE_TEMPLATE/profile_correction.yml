@@ -1,0 +1,77 @@
+name: Game-profile correction
+description: A converted number for a supported game is wrong, or a profile's constant / range / model needs correcting
+title: "[Profile] "
+labels: ["game-profile"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Profiles are data with provenance. A correction needs evidence the profile can cite; a measured 360° turn is the best evidence there is. See CONTRIBUTING.md, *Reporting a formula problem*.
+  - type: dropdown
+    id: game
+    attributes:
+      label: Game
+      options:
+        - Fortnite
+        - Valorant
+        - Counter-Strike 2
+        - Apex Legends
+        - Call of Duty / Warzone
+        - Overwatch 2
+        - Rainbow Six Siege
+        - Marvel Rivals
+        - "PUBG: Battlegrounds"
+        - The Finals
+        - Battlefield 6
+        - Generic / Raw
+    validations:
+      required: true
+  - type: input
+    id: build
+    attributes:
+      label: Game version / season you checked against
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: trAIMer version
+      placeholder: 1.0.0
+    validations:
+      required: true
+  - type: input
+    id: setting
+    attributes:
+      label: Which setting is wrong?
+      placeholder: hip-fire sensitivity / ADS multiplier / 4x scope / FOV default / slider range
+    validations:
+      required: true
+  - type: textarea
+    id: values
+    attributes:
+      label: What trAIMer produced, and what you believe is right
+      placeholder: |
+        DPI 800, current 0.4 → trAIMer said 0.352; measured 360° says 0.338.
+    validations:
+      required: true
+  - type: textarea
+    id: measurement
+    attributes:
+      label: Measurement, if you made one
+      description: DPI, sensitivity, method (full 360° back to a landmark), repetitions, counts or centimetres per turn. For a linearity question, two sensitivities.
+      placeholder: |
+        800 DPI, sens 0.4, 6 reps: 6412, 6398, 6420, 6405, 6411, 6399 counts per 360°
+  - type: textarea
+    id: sources
+    attributes:
+      label: Sources
+      description: URL, what kind of source it is (official documentation, config-file behaviour, technical reference, community reference), and whether it states where its own numbers came from.
+    validations:
+      required: true
+  - type: checkboxes
+    id: honesty
+    attributes:
+      label: Evidence check
+      options:
+        - label: My evidence is not only "another converter gives a different number"
+          required: true

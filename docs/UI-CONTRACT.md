@@ -159,3 +159,106 @@ additive or presentation-only; no seam shape was removed or renamed:
 - The Windows launcher scripts now exist at
   `scripts/release/windows/` (they were referenced by Pass 6 tests/packaging
   but never committed — the integration defect Pass 7 fixed).
+
+### Game Profile Pass 1 additions (additive, non-breaking)
+
+The game-profile layer is a TRANSLATION layer over the frozen contracts above.
+Nothing in this section changes an existing shape, verdict enum, or reason
+code, and the measurement engine does not import any of it
+(`tests/gameProfileBoundary.test.ts` enforces that statically).
+
+New stable engine seams:
+
+| API | Module | Notes |
+| --- | --- | --- |
+| `GAME_PROFILE_REGISTRY` (`get` / `require` / `list` / `selectable` / `checkSelection`) | `src/games/registry.ts` | THE profile lookup; no switch on a game name anywhere in the app |
+| `canonicalFromGameSettings` / `gameSettingsFromCanonical` / `changeDpi` / `roundTrip` | `src/games/convert.ts` | all conversion arithmetic; views must never reimplement it |
+| `buildGameRecommendationExport` → `GameRecommendationExport` (`game-recommendation-v1`) | `src/games/export.ts` | THE object the results screen renders when a game is selected |
+| `importCurrentSensitivity` | `src/games/export.ts` | "what am I on today?", with no calibration and no session |
+| `sanitizeGameSelection` / `defaultSelectionFor` / `matchingMethodOf` | `src/games/selection.ts` | persisted selection; ids and versions only, never display names |
+| `buildSessionGameConversionRecord` / `readSessionGameConversionRecord` | `src/games/selection.ts` | the optional history record |
+| `describeMatching`, `MATCHING` | `src/games/matching.ts` | player-facing wording for each zoom-matching philosophy |
+
+Additions to §2 (engine APIs that must stay stable):
+
+- `renderResultsView(container, input)` gained OPTIONAL `gameRecommendation`
+  and `onChooseGameProfile`. Callers that omit both behave exactly as before —
+  no game section is drawn.
+- `AppSettings` gained OPTIONAL `gameProfile`. A settings blob written before
+  game profiles existed reads back with `gameProfile: null`, which means "no
+  game selected" and is a supported state, not an error.
+- `SessionSummaryViewModel` gained `gameConversion`, null for every session
+  recorded before game profiles existed.
+- `HumanSessionRecord` gained an OPTIONAL `gameConversion` field. It is
+  imported **type-only**, so nothing from the game layer exists at runtime in
+  the session module.
+
+Additions to §4 (calculations that must stay out of presentation code):
+
+- sensitivity conversion in either direction, cm/360 and degrees-per-count
+  arithmetic, slider quantization and clamping, zoom-matching ratios, and FOV
+  normalization. If a converted number in the UI is not read from a
+  `GameConversion` or `GameRecommendationExport` field, that is a bug.
+
+### Game Profile Pass 2 additions (additive, non-breaking)
+
+- `GameRecommendationExport.exactVsEntered` — one entry per value the game's
+  grid or range moved: the exact equivalent, what to enter, a finer
+  configuration-file value when the profile has one, and whether it was
+  clamped. `current` gained `hipfireDisplay` / `verticalDisplay`, formatted
+  as the game shows them. The results view renders these verbatim.
+- `ConvertedZoom.achievedDegreesPerCount` / `achievedCmPer360` may now be
+  `null`: a game-applied coefficient gives every optic its own value.
+- `conversionUsesFov(profile)` (`src/games/convert.ts`) decides whether the
+  picker shows a field-of-view input at all.
+- `PUBLIC_GAME_PROFILES` is six profiles in picker order; the generic control
+  is now displayed as "Generic / Raw" (its id is unchanged).
+
+### Game Profile Pass 3 additions (additive, non-breaking)
+
+- `FovModel` gained `scaled-from-hipfire` (zoom levels only) and an optional
+  `hipfireScaling` on configurable hip-fire FOVs; `hipfireFovFactor` and
+  `resolveScaledFov` (`src/games/fov.ts`) are the only places either is
+  evaluated.
+- `QuantizedValue.clampedToMin/Max` now mean "the EXACT value lies outside
+  the game's range", including a value the grid would have snapped onto the
+  floor.
+- `window.__ALDO_GAME_PROFILES_FOR_TESTING__` — a read-only, test-mode-only
+  registry hook the installed-app picker gate reads; it converts nothing.
+- The picker groups options (`Recently used` / `Games (A–Z)` / `Other`) and
+  shows a `#game-profile-filter` box once more than six profiles are
+  selectable. Option values are still profile ids.
+
+Additions to §5 (non-negotiable product behaviors):
+
+- Rounding loss is never hidden. When a game's own entry grid cannot express
+  the exact equivalent, the exact value, the enterable value and the
+  difference are all shown.
+- A conversion never reads as more certain than the calibration behind it.
+- A malformed profile fails closed: the registry refuses to load rather than
+  producing a sensitivity recommendation.
+- trAIMer never touches a game — no processes, no memory, no files, no input
+  injection. See docs/GAME-PROFILES.md §11.
+
+### Pass 5 additions (additive, non-breaking)
+
+- The Aim Test screen's card order is: session setup (name, DPI, starting
+  sensitivity, breaks, advanced parameters), then `#setup-game-profile`,
+  then the calibration-length cards (`#setup-modes`), then a Start card
+  holding the submit button. Every id is unchanged; only the order moved.
+  The first `details.details` in `#view-setup` is still the advanced
+  parameters block whenever no game is selected.
+- `#game-profile-status` renders **above** the profile's inputs, carries the
+  classes `profile-status profile-status-<status>`, and contains the badge
+  plus a `.profile-status-text` sentence. Its text still contains
+  "What it does not cover:" for every non-verified profile.
+- Picker option text for an experimental profile is
+  `<displayName> (experimental)` (`profileOptionLabel`). Option values are
+  still profile ids; the Generic / Raw option text is unchanged.
+- Provenance URLs render as `a.reference-link[target=_blank]` in the profile
+  details and in the results conversion's "How this conversion was made".
+  The app never fetches them; the desktop shell hands the click to the
+  system browser.
+- The results "What to do next" card adds one line naming the manual step
+  when a game conversion is ready: it refers to the "What to set in <game>"
+  list and states that trAIMer does not change game settings.

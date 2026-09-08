@@ -65,6 +65,21 @@ export interface TrialCaptureContext {
   sensitivity: SensitivityConfiguration;
   dpi: number;
   expectedSampleIntervalMs: number | null;
+  /**
+   * How far an event's timestamp may legitimately precede this trial's start,
+   * in milliseconds, for the capture source that produced it.
+   *
+   * A capture source stamps events with the moment the input OCCURRED; the
+   * application starts a trial by reading the clock at the moment it OBSERVES
+   * it. The two are the same clock but not the same instant, so a burst of
+   * coalesced samples delivered just after a trial begins can legitimately
+   * carry timestamps a few milliseconds earlier. See src/capture/timebase.ts.
+   *
+   * OPTIONAL, and absent on every record written by 1.0.0-rc.7 and earlier.
+   * Absent is read as 0 — the historical rule — so a stored session is
+   * validated exactly as it was when it was recorded.
+   */
+  timestampLeadToleranceMs?: number;
 }
 
 export interface TrialRecord {

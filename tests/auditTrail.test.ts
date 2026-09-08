@@ -1,3 +1,4 @@
+import { LOCK_GRANTED } from "../src/capture/browserSource.ts";
 import { describe, expect, it } from "vitest";
 import {
   SessionRunner,
@@ -12,14 +13,31 @@ import {
 import type { TrialExecutionPort, SessionStateName } from "../src/session/types.ts";
 import type { TrialPlanSpec } from "../src/experiments/protocol.ts";
 import type { TrialRecord } from "../src/domain/trial.ts";
+import type { ExperimentDefinition } from "../src/domain/experiment.ts";
 import { equalXy } from "../src/domain/settings.ts";
 
 class QuickPort implements TrialExecutionPort {
+  /**
+   * See ScriptedExecutionPort: a trial must record the sensitivity it was
+   * actually played at, or validation rejects every non-baseline candidate.
+   */
+  definition: ExperimentDefinition | null = null;
   constructor(private clock: ManualClock) {}
+
+  #sensitivityFor(candidateId: string) {
+    return (
+      this.definition?.candidates.find((c) => c.id === candidateId)?.sensitivity ??
+      equalXy(7)
+    );
+  }
   async requestLock() {
-    return true;
+    return LOCK_GRANTED;
   }
   async releaseCapture() {}
+  async suspendCapture() {}
+  async resumeCapture() {
+    return LOCK_GRANTED;
+  }
   async executeTrial(spec: TrialPlanSpec, _round: number, repIndex: number | null): Promise<TrialRecord> {
     void repIndex;
     const scenario = scenarioById(spec.scenarioId);
@@ -36,7 +54,7 @@ class QuickPort implements TrialExecutionPort {
       captureContext: {
         scenarioKind: scenario.kind,
         viewport: { widthPx: 1280, heightPx: 720 },
-        sensitivity: equalXy(7),
+        sensitivity: this.#sensitivityFor(spec.candidateId),
         dpi: 800,
         expectedSampleIntervalMs: null,
       },
@@ -100,6 +118,8 @@ describe("session audit trail", () => {
       adaptiveAllocation: { enabled: true, minRepsBeforeAdaptive: 4 },
       stoppingCriteria: { maxSearchRounds: 2 },
     });
+    const quickPort = new QuickPort(clock);
+    quickPort.definition = definition;
     const runner = new SessionRunner(definition, {
       clock,
       sleep: async (ms) => {
@@ -108,7 +128,7 @@ describe("session audit trail", () => {
       },
       nowIso: () => new Date(2026, 5, 1).toISOString(),
       store: new LocalJsonStore(backend),
-      execution: new QuickPort(clock),
+      execution: quickPort,
       onStateChange: (_state: SessionStateName) => {},
     });
 
