@@ -512,6 +512,47 @@ as a curiosity — the two are not comparable, and the old number is not a prior
 
 ---
 
+## 13b. Build outcome
+
+CI run **34174943067** on commit `99634e6` — **all five jobs green**
+(`engine`, `browser`, `native-windows`, `windows-release`,
+`windows-installer`).
+
+The three new gates ran and passed on the authoritative runners:
+
+| Gate | Job | Result |
+| --- | --- | --- |
+| `arenaCandidateGain` + `arenaGainHistoryValidity` | engine | 52 tests passed |
+| two blinded candidates differ in the REAL arena | browser | 2 passed |
+| the arena applies the candidate sensitivity (dev tree) | windows-installer | all checks passed |
+| **the INSTALLED app changes sensitivity between candidates** | windows-installer | all checks passed |
+
+The last one is the one that matters. It silently installed this exact
+installer to `C:\traimer-install-test`, launched the installed
+`trAIMer.exe`, ran a real session, injected a known mouse movement and
+measured the crosshair:
+
+```
+candidate-gain gate: installed app at C:\traimer-install-test\trAIMer.exe
+  ok   the shipped bundle's arena answered the probe — 7 probes
+  ok   two blinded candidates move the crosshair by different amounts — gains observed: 0.8696, 1
+  ok   the difference is at least one ladder step — spread 1.1500x
+  ok   the arena has NOT reverted to 1 px/count regardless of candidate
+```
+
+**Artifact**, downloaded and checksum-verified against the value CI published:
+
+| | |
+| --- | --- |
+| `release/rc9/trAIMer-Setup.exe` | 100,535,072 bytes |
+| `release/rc9/trAIMer-Setup-1.0.0-rc.9.exe` | identical copy |
+| SHA-256 | `758312d371ffbedb35f9b72b4edd9087d95333f550f5c8e88599c33f24535732` |
+
+`/Volumes/NO NAME` was absent throughout. The installer is staged locally and
+the flash drive is **not** prepared.
+
+---
+
 ## 14. Files
 
 **New**
