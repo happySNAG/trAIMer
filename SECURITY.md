@@ -67,8 +67,8 @@ verify what you downloaded against its published SHA-256 checksum.
 Please report security problems privately rather than in a public issue.
 
 1. Preferred: use GitHub's private vulnerability reporting on this
-   repository (**Security → Report a vulnerability**), if the repository has
-   it enabled.
+   repository (**Security → Report a vulnerability**). It is enabled:
+   https://github.com/happySNAG/trAIMer/security/advisories/new
 2. Otherwise: open an issue titled "Security: please contact me" with **no
    details of the problem**, and a maintainer will reach out to arrange a
    private channel.

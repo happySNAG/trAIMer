@@ -18,7 +18,7 @@ candidate, is in the repository history and in PASS-19-REPORT.md.
 | 7 | Supported games stated honestly, with per-game limits | Done: `docs/SUPPORT-MATRIX.md` | `verify-docs.mjs` cross-checks status and verified date against the registry; `tests/gameSourceGolden.test.ts` cross-profile audit | — |
 | 8 | Experimental profiles labelled in the list, above the inputs, and on every conversion | Done | `tests/browser/gameProfilesPass3.spec.ts`; installed-app picker gate | — |
 | 9 | Privacy documented and enforced | Done: `PRIVACY.md` | `scripts/audit-no-telemetry.mjs` on sources and bundle; uninstall keeps data (CI) | — |
-| 10 | Security / safety boundary documented, reporting path stated | Done: `SECURITY.md` | `tests/nativeProtocolConstants.test.ts`, `tests/gameProfileBoundary.test.ts` | Private vulnerability reporting: see PASS-20-REPORT.md for whether it could be enabled from the CLI |
+| 10 | Security / safety boundary documented, reporting path stated | Done: `SECURITY.md` | `tests/nativeProtocolConstants.test.ts`, `tests/gameProfileBoundary.test.ts` | — (private vulnerability reporting enabled for 1.0.0) |
 | 11 | Contributing guide and profile proposal template | Done | — | — |
 | 12 | Issue templates: bug, profile correction, new profile, installation, measurement | Done | YAML validated | — |
 | 13 | CI: lint, typecheck, engine, browser, Electron, profile, golden, audit, gain, capture/timing, picker, full smoke, migration, branding, telemetry, release, docs | Done, all gates on every push | `.github/workflows/ci.yml` | — |
