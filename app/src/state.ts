@@ -8,6 +8,10 @@ import {
   type CalibrationMode,
   type CalibrationModeId,
 } from "../../src/experiments/sessionModes.ts";
+import {
+  sanitizeGameSelection,
+  type GameProfileSelection,
+} from "../../src/games/selection.ts";
 
 export interface AppSettings {
   playerName: string;
@@ -31,6 +35,17 @@ export interface AppSettings {
   autoBreaks: boolean;
   /** Length of an automatic break, seconds (5–60). */
   breakSeconds: number;
+  /**
+   * The game whose numbers trAIMer should translate its recommendation into.
+   *
+   * Null means "no game selected", which is a supported state: the aim test
+   * measures physical sensitivity and reports it, and the game layer is an
+   * optional translation on top (Game Profile Pass 1, requirement 11).
+   *
+   * Stored as a profile ID plus the conversion-definition version it was made
+   * under — never a display name (requirement 17).
+   */
+  gameProfile: GameProfileSelection | null;
 }
 
 export const SETTINGS_KEY = "traimer-settings";
@@ -61,6 +76,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   yExploration: false,
   autoBreaks: true,
   breakSeconds: 10,
+  gameProfile: null,
 };
 
 /** Shared sanitizer: every persisted settings blob goes through this. */
@@ -140,6 +156,9 @@ export function sanitizeSettings(raw: unknown): AppSettings {
       finiteNumber(obj.breakSeconds) !== null
         ? clamp(Math.round(obj.breakSeconds as number), 5, 60)
         : DEFAULT_SETTINGS.breakSeconds,
+    // Absent in every settings blob written before game profiles existed;
+    // absence means "no game selected", never an error.
+    gameProfile: sanitizeGameSelection(obj.gameProfile),
   };
 }
 

@@ -6,7 +6,31 @@
  * these strings so any historical result can be traced to the exact code that
  * produced it.
  *
- * The V1 release candidate is identified as 1.0.0-rc.8 (Pass 14: measurement
+ * The V1 release candidate is identified as 1.0.0-rc.9 (Game Profile Campaign
+ * Pass 1 of 5: the game-profile and sensitivity-conversion architecture. The
+ * measurement core stays game-agnostic; a new translation layer
+ * (`src/games/**`) turns a measured physical aim into the number a specific
+ * FPS accepts. One canonical internal representation — degrees of view
+ * rotation per centimetre of mouse travel — sits between every pair of games,
+ * so no conversion is ever pairwise. Profiles are versioned data validated
+ * fail-closed by a central registry, carry provenance including the game build
+ * they were checked against, and report every place a game's own slider
+ * granularity costs precision rather than absorbing it. One public profile
+ * ships: the generic/raw control. See docs/GAME-PROFILES.md.
+ *
+ * rc.9 also fixes the release-blocking measurement defect that pass uncovered:
+ * up to and including rc.8 the arena moved the crosshair one logical pixel per
+ * mouse count for EVERY candidate it was comparing, so the blinded candidate
+ * sensitivity reached the trial record, the optimizer, the results page and
+ * the simulator's player model — and never the player's hand. Every human
+ * calibration on rc.5-rc.8 therefore compared sensitivities that felt
+ * identical, and its recommended sensitivity is not evidence about
+ * sensitivity. There is now one authoritative candidate-to-reticle conversion
+ * (src/sensmath/arenaGain.ts) that the simulator and the arena share, applied
+ * in exactly one place, with the applied gain recorded on every session so
+ * pre-fix history is marked rather than trusted or deleted. See
+ * docs/ARENA-SENSITIVITY.md.)
+ * rc.8 (Pass 14: measurement
  * integrity, selectable calibration length, and a player-first results page.
  * A completed real-hardware session on rc.7 threw away 43 of its 80 measured
  * drills as "broken timestamps"; the cause was that browser Pointer Lock
@@ -67,7 +91,7 @@ export const PRODUCT_NAME = "trAIMer";
 export const PRODUCT_TAGLINE = "Train. Measure. Tune.";
 
 /** Application release version for the V1 release candidate. */
-export const APP_VERSION = "1.0.0-rc.8";
+export const APP_VERSION = "1.0.0-rc.9";
 
 /**
  * Engine contract version: bump when a persisted engine-facing data contract
@@ -105,6 +129,18 @@ export const NATIVE_PROTOCOL_VERSION = 1;
 export const EXPECTED_HELPER_VERSION = "helper-1.1.0";
 
 /**
+ * The arena's candidate-sensitivity model (Pass 15).
+ *
+ * Persisted on every session this build records. Its PRESENCE is what
+ * distinguishes a session in which the player physically experienced the
+ * blinded candidate sensitivities from one on a build whose arena moved the
+ * reticle one pixel per mouse count regardless of candidate. Bump it when the
+ * physical model in src/sensmath/arenaGain.ts changes in a way that makes two
+ * sessions' gains incomparable.
+ */
+export const ARENA_GAIN_MODEL_VERSION = "arena-gain-v1";
+
+/**
  * Calibration workflow version: multi-turn reps, median/MAD robust fitting,
  * adequacy gates, staleness fingerprints.
  */
@@ -124,6 +160,7 @@ export interface ReleaseMetadata {
 }
 
 export interface FullReleaseMetadata extends ReleaseMetadata {
+  arenaGainModelVersion: string;
   scoringModelVersion: string;
   nativeProtocolVersion: number;
   expectedHelperVersion: string;
@@ -154,6 +191,7 @@ export function releaseMetadata(): ReleaseMetadata {
 export function fullReleaseMetadata(): FullReleaseMetadata {
   return {
     ...releaseMetadata(),
+    arenaGainModelVersion: ARENA_GAIN_MODEL_VERSION,
     scoringModelVersion: SCORING_MODEL_VERSION,
     nativeProtocolVersion: NATIVE_PROTOCOL_VERSION,
     expectedHelperVersion: EXPECTED_HELPER_VERSION,
@@ -204,5 +242,6 @@ export const ARTIFACT_COMPATIBILITY_MATRIX: readonly ArtifactCompatibility[] = [
   { artifact: "session bundle import", readableVersions: "schemaVersion <= 1", olderPolicy: "migrated", newerPolicy: "rejected" },
   { artifact: "calibration record", readableVersions: "schemaVersion 1 (optional Pass-4 fields)", olderPolicy: "flagged-stale", newerPolicy: "rejected" },
   { artifact: "engine-tagged artifacts", readableVersions: `${ENGINE_VERSION} or untagged`, olderPolicy: "rejected", newerPolicy: "rejected" },
+  { artifact: "human-session arena gain (candidate sensitivity actually applied)", readableVersions: `${ARENA_GAIN_MODEL_VERSION}; ABSENT on every session recorded before 1.0.0-rc.9`, olderPolicy: "flagged-stale", newerPolicy: "flagged" },
   { artifact: "native transport frames", readableVersions: `protocolVersion ${NATIVE_PROTOCOL_VERSION}`, olderPolicy: "rejected", newerPolicy: "rejected" },
 ];

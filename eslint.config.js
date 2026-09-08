@@ -37,9 +37,14 @@ export default tseslint.config(
   {
     // Browser-driving gates: page.evaluate() bodies are serialised and run
     // inside the app's renderer, so DOM globals are correct there.
-    files: ["scripts/verify-arena-entry.mjs"],
+    files: ["scripts/verify-arena-entry.mjs", "scripts/verify-candidate-gain.mjs"],
     languageOptions: {
-      globals: { document: "readonly", getComputedStyle: "readonly" },
+      globals: {
+        document: "readonly",
+        getComputedStyle: "readonly",
+        window: "readonly",
+        performance: "readonly",
+      },
     },
   },
 );

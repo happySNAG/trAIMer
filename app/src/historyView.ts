@@ -83,8 +83,10 @@ export async function renderHistoryView(
       statTile("Sessions", String(snap.sessions.length)),
       statTile(
         "Latest eDPI",
-        latest.recommendedEdpi !== null ? latest.recommendedEdpi.toFixed(0) : "—",
-        { tone: "accent" },
+        latest.recommendedEdpi !== null && latest.candidateGainApplied
+          ? latest.recommendedEdpi.toFixed(0)
+          : "—",
+        latest.candidateGainApplied ? { tone: "accent" } : {},
       ),
       statTile(
         "Latest confidence",
@@ -96,6 +98,22 @@ export async function renderHistoryView(
     stripBody.append(cells);
   }
   container.append(strip);
+
+  // Validity: sessions recorded before the arena applied candidate gain are
+  // real sessions whose RECOMMENDED SENSITIVITY is not evidence about
+  // sensitivity. Said once at the top, and again on every affected row —
+  // a warning a player has to expand a detail panel to find is a warning that
+  // does not exist.
+  const preGain = snap.sessions.filter((s) => !s.candidateGainApplied);
+  if (preGain.length > 0) {
+    container.append(
+      inlineAlert(
+        "warn",
+        `${preGain.length} of ${snap.sessions.length} stored sessions cannot tell you a sensitivity.`,
+        `${preGain[0]!.candidateGainWarning ?? ""} Affected sessions are marked below. Run a new aim test on this build for a sensitivity recommendation you can act on.`,
+      ),
+    );
+  }
 
   // Comparability: flag when stored sessions span multiple optimizer versions.
   const versions = new Set(
@@ -204,7 +222,11 @@ function buildSessionsTable(snap: HistorySnapshot): HTMLElement {
       s.confidence !== null ? `${(s.confidence * 100).toFixed(0)}%` : "—",
       s.captureQualityScore !== null ? s.captureQualityScore.toFixed(2) : "—",
       `${s.measuredTrials}${s.invalidTrials > 0 ? ` (+${s.invalidTrials} excluded)` : ""}`,
-      s.retestOfExperimentId ? badge("info", "retest") : "",
+      s.candidateGainApplied
+        ? s.retestOfExperimentId
+          ? badge("info", "retest")
+          : ""
+        : badge("warn", "no sensitivity difference"),
     ];
     for (const cell of cells) {
       const td = el("td", {});
@@ -248,8 +270,40 @@ function buildSessionsTable(snap: HistorySnapshot): HTMLElement {
   return wrap;
 }
 
+/** One labelled chip in a session's detail row. */
+function chipOf(name: string, value: string): HTMLElement {
+  const chip = el("div", { class: "dim-chip" });
+  chip.append(
+    el("span", { class: "dim-chip-name", text: name }),
+    el("span", { class: "dim-chip-value", text: value }),
+  );
+  return chip;
+}
+
 function buildSessionDetail(s: SessionSummaryViewModel, snap: HistorySnapshot): HTMLElement {
   const detail = el("div", { class: "session-detail-grid" });
+
+  // Why this session's recommendation cannot be acted on, in full, before any
+  // of its statistics — which remain visible and unaltered.
+  if (!s.candidateGainApplied && s.candidateGainWarning) {
+    const col = el("div", { class: "session-detail-wide" });
+    col.append(
+      el("p", { class: "session-detail-title", text: "Sensitivity validity" }),
+      el("p", { class: "muted", text: s.candidateGainWarning }),
+    );
+    detail.append(col);
+  } else if (s.arenaGain) {
+    const col = el("div", { class: "session-detail-wide" });
+    const spread = ((s.arenaGain.gainSpreadRatio - 1) * 100).toFixed(0);
+    col.append(
+      el("p", { class: "session-detail-title", text: "Sensitivity validity" }),
+      el("p", {
+        class: "muted",
+        text: `The sensitivities compared here spanned ${spread}% in how far the crosshair moved for the same mouse movement, based on ${s.arenaGain.anchorBasis}.`,
+      }),
+    );
+    detail.append(col);
+  }
 
   // Candidate ranking for this experiment (engine view model, verbatim).
   const ranking = snap.rankingHistory.find((r) => r.experimentId === s.experimentId);
@@ -298,6 +352,34 @@ function buildSessionDetail(s: SessionSummaryViewModel, snap: HistorySnapshot): 
   } else {
     dimCol.append(el("p", { class: "muted", text: "No dimension estimates stored for this session." }));
   }
+  // The game conversion this session produced, when it had one. A session
+  // recorded before game profiles existed simply has no block here — its
+  // stored result is never re-interpreted under a profile it never used
+  // (Game Profile Pass 1, requirement 18).
+  const game = s.gameConversion;
+  if (game) {
+    const gameCol = el("div", {});
+    gameCol.append(
+      el("p", { class: "session-detail-title", text: "Game conversion" }),
+      el("div", { class: "dim-chips" }, [
+        chipOf("Profile", `${game.profileId} v${game.profileVersion}`),
+        chipOf("DPI", String(game.dpi)),
+        chipOf(
+          "Current",
+          game.currentHipfire !== null ? game.currentHipfire.toFixed(2) : "—",
+        ),
+        chipOf("Recommended", game.recommendedHipfire.toFixed(2)),
+        chipOf("Physical", `${game.cmPer360X.toFixed(1)} cm/360`),
+        chipOf("Method", game.conversionMethod),
+        chipOf(
+          "Rounding applied",
+          `${(game.roundingAppliedFraction * 100).toFixed(2)}%`,
+        ),
+      ]),
+    );
+    detail.append(gameCol);
+  }
+
   const meta = el("p", { class: "muted", style: "margin-top:10px" });
   meta.append(
     el("span", { text: "Experiment " }),

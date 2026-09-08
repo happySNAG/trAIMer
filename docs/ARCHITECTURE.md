@@ -160,7 +160,8 @@ plugged in later without touching any call site (`rotationDegreesForCounts`,
 - **PointerLockCaptureSource + VirtualReticle** (`src/capture/browserSource.ts`):
   real mouse deltas normalized into CaptureEvents, applied-delta clamping so
   recorded cursor == rendered reticle, lock-loss/denial handling, blur /
-  visibility / resize events.
+  visibility / resize events. Since rc.9 the reticle also applies the blinded
+  candidate's sensitivity — see **Arena sensitivity** below.
 - **Scenario instance planner** (`src/scenarios/planner.ts`): single source of
   deterministic geometry shared by simulator and browser runtime — identical
   instances per `(seed, round, scenario, repIndex)` across candidates.
@@ -236,3 +237,72 @@ plugged in later without touching any call site (`rotationDegreesForCounts`,
   across artifacts with compatibility checks.
 - **Browser automation** (`tests/browser/`, Playwright) with a test-only
   pointer-lock adapter (`?e2e=1`).
+
+## Game Profile Campaign, Pass 1 additions
+
+A new top-level module, `src/games/**`, translates a measured physical aim
+into the numbers a specific FPS accepts. It is a **translation layer over** the
+engine, never an input to it: no module that decides what a measurement means
+imports it, and `tests/gameProfileBoundary.test.ts` enforces that statically.
+
+```
+src/games/
+  canonical.ts       THE canonical representation: degrees of view rotation
+                     per centimetre of physical mouse travel (DPI-free)
+  rounding.ts        slider granularity, clamping, and the rounding report
+  fov.ts             FOV axes and horizontal/vertical normalization
+  matching.ts        zoom matching philosophies and their ratios
+  profileSchema.ts   the versioned profile types
+  validate.ts        fail-closed validation
+  registry.ts        THE profile lookup; refuses to load anything malformed
+  convert.ts         canonical ↔ game, in both directions, with round-trip
+  measurement.ts     the bridge from what trAIMer measured to canonical
+  export.ts          the object a results screen renders
+  selection.ts       persisted selection and the optional history record
+  profiles/          one file per public profile
+  fixtures.ts        synthetic, test-only profiles (never public)
+```
+
+Every conversion goes `game A → CanonicalAim → game B`; there is no pairwise
+formula anywhere, so adding a game cannot change the arithmetic of a game that
+already exists. Profiles are versioned data with provenance, and a profile
+version bump is reported to the player rather than silently applied to their
+stored history.
+
+See `docs/GAME-PROFILES.md` for the full architecture, the matching-philosophy
+maths, the safety boundary, and the procedure for adding a profile.
+
+## Arena sensitivity (Pass 15)
+
+The arena applies the blinded candidate's sensitivity to the player's mouse.
+Until 1.0.0-rc.9 it did not: `VirtualReticle.applyRawDelta` moved one logical
+pixel per mouse count for every candidate, so a human calibration compared
+sensitivities that all felt identical and the resulting recommendation carried
+no information about sensitivity.
+
+```
+src/sensmath/units.ts        the inch — one definition, re-exported by games/
+src/sensmath/arenaGain.ts    THE candidate → px/count conversion, and the
+                             anchor types the three evidence rungs produce
+app/src/arenaSensitivity.ts  which anchor this session runs against
+                             (calibration → game profile → declared reference)
+src/session/arenaGainRecord.ts  what a session records about what it applied
+```
+
+Two rules hold this together:
+
+- **One function.** `arenaGainPxPerCount` is the only candidate-gain arithmetic
+  in the tree. `SyntheticExperimentRunner` computes its player's sensitivity
+  effect from it too, so the simulator can no longer stay correct while the
+  real arena diverges — which is exactly how the defect survived four release
+  candidates.
+- **One application point.** `VirtualReticle.applyRawDelta`, which every scored
+  input path converges on, and which emits the logical delta the recorder
+  integrates. Nothing downstream can scale it a second time.
+
+Absence of the `arenaGain` field on a stored session is the marker for a
+pre-fix session; `HistoryApi` reports it and History shows it rather than
+presenting an old recommendation as actionable.
+
+See `docs/ARENA-SENSITIVITY.md` for the equation, the DPI contract, the anchor
+ladder, the blinding argument and the four gates.

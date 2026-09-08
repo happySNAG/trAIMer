@@ -14,6 +14,30 @@ import {
   type AppSettings,
 } from "./state.ts";
 import { badge, button, card, detailsBlock, field, icon, inlineAlert, pageHeader, sectionLabel } from "./ui.ts";
+import { renderGameProfilePanel } from "./gameProfileView.ts";
+import type { GameProfileSelection } from "../../src/games/selection.ts";
+import { resolveArenaAnchor } from "./arenaSensitivity.ts";
+import { arenaCmPer360 } from "../../src/sensmath/arenaGain.ts";
+import type { CalibrationHistoryEntry } from "../../src/history/api.ts";
+
+/**
+ * The player's calibration history, cached for the arena-feel note below.
+ *
+ * Setup renders synchronously at boot while the calibration store opens
+ * asynchronously, so main.ts pushes the history in when it arrives (the same
+ * shape as the capture-status banner). Until then the note describes the
+ * declared-reference anchor, which is what an uncalibrated player really gets.
+ */
+let cachedCalibrationHistory: readonly CalibrationHistoryEntry[] = [];
+let refreshArenaFeelNote: (() => void) | null = null;
+
+/** Called by main.ts once the calibration store has been read. */
+export function setSetupCalibrationHistory(
+  history: readonly CalibrationHistoryEntry[],
+): void {
+  cachedCalibrationHistory = history;
+  refreshArenaFeelNote?.();
+}
 
 export interface SetupCallbacks {
   onStart(settings: AppSettings): void;
@@ -271,6 +295,59 @@ export function renderSetupView(
     "Rests are enforced automatically. Press Esc or switch windows at any time to stop safely — completed trials are always saved.",
   ]);
 
+  // ---- what the arena will actually feel like -------------------------
+  //
+  // The player is about to spend twenty minutes comparing sensitivities with
+  // their hand, so they are told what the arena anchors that comparison to
+  // BEFORE they start, not afterwards on a results page. The differences
+  // between candidates are exact on every anchor; only the absolute feel
+  // depends on the evidence available (docs/ARENA-SENSITIVITY.md §4).
+  const arenaNote = el("p", { class: "note", id: "setup-arena-feel" });
+  const refreshArenaNote = (): void => {
+    const dpi = numberField(dpiInput, settings.dpi);
+    const baseline = {
+      sensX: numberField(sensXInput, settings.sensX),
+      sensY: numberField(sensYInput, settings.sensY),
+    };
+    const anchor = resolveArenaAnchor(
+      { baseline, dpi, gameProfile: gameSelection },
+      cachedCalibrationHistory,
+    );
+    const cm = arenaCmPer360(anchor, baseline, dpi).x;
+    arenaNote.textContent = `The test arena turns at about ${cm.toFixed(0)} cm per 360° at your starting sensitivity — based on ${anchor.basis}. Each blinded candidate speeds that up or slows it down by its own amount, which is the difference you are being asked to feel.`;
+  };
+
+  // ---- game profile (progressive disclosure) --------------------------
+  //
+  // One select until a game is chosen; the game's own settings and a live
+  // physical equivalent only after. The panel re-renders on every change so
+  // the equivalent can never be stale relative to the DPI field above it.
+  const gameHolder = el("div", { id: "setup-game-profile" });
+  let gameSelection: GameProfileSelection | null = settings.gameProfile;
+  const refreshGamePanel = (): void => {
+    renderGameProfilePanel(
+      gameHolder,
+      { selection: gameSelection, dpi: numberField(dpiInput, settings.dpi) },
+      {
+        onChange(next) {
+          gameSelection = next;
+          settings = { ...settings, gameProfile: next };
+          saveSettings(settings);
+          refreshGamePanel();
+          // Choosing a game (or typing the sensitivity they play at) changes
+          // which anchor the arena runs on, so the feel note must follow.
+          refreshArenaNote();
+        },
+      },
+    );
+  };
+  dpiInput.addEventListener("change", refreshGamePanel);
+  for (const input of [dpiInput, sensXInput, sensYInput]) {
+    input.addEventListener("change", refreshArenaNote);
+  }
+  refreshArenaFeelNote = refreshArenaNote;
+  refreshArenaNote();
+
   const form = el("form", {}, []);
   form.append(modeCard);
   const formCard = card(
@@ -292,6 +369,7 @@ export function renderSetupView(
       advancedGrid,
     ),
     sessionNote,
+    arenaNote,
     el("div", {}, [startBtn]),
   );
   form.append(formCard);
@@ -305,12 +383,12 @@ export function renderSetupView(
    * silently got 2 instead, and the automated suites inherited the same
    * surprise.
    */
-  const numberField = (input: HTMLElement, fallback: number): number => {
+  function numberField(input: HTMLElement, fallback: number): number {
     const raw = (input as HTMLInputElement).value.trim();
     if (raw === "") return fallback;
     const parsed = Number(raw);
     return Number.isFinite(parsed) ? parsed : fallback;
-  };
+  }
 
   form.addEventListener("submit", (event) => {
     event.preventDefault();
@@ -327,12 +405,15 @@ export function renderSetupView(
       yExploration: yCheck.checked,
       autoBreaks: breaksCheck.checked,
       breakSeconds: Math.max(5, Math.min(60, numberField(breakSecondsInput, 10))),
+      gameProfile: gameSelection,
     };
     saveSettings(next);
     callbacks.onStart(next);
   });
 
   refreshModeSelection();
+  form.append(gameHolder);
+  refreshGamePanel();
   container.append(form);
 }
 

@@ -1,4 +1,8 @@
-import { renderSetupCaptureStatus, renderSetupView } from "./setupView.ts";
+import {
+  renderSetupCaptureStatus,
+  renderSetupView,
+  setSetupCalibrationHistory,
+} from "./setupView.ts";
 import { loadSettings, type AppSettings } from "./state.ts";
 import {
   BrowserRunController,
@@ -55,6 +59,7 @@ import {
   type LockOutcomeCode,
 } from "../../src/capture/browserSource.ts";
 import { reportCaptureTier } from "./captureTiers.ts";
+import { buildGameRecommendation } from "./gameConversionBridge.ts";
 
 const view = (id: string): HTMLElement => {
   const node = document.getElementById(id);
@@ -212,6 +217,14 @@ function activate(tab: string): void {
       void mountResumeList(resumeContainer);
     }
     void mountSetupCaptureStatus();
+    // Tells the setup screen how fast the arena will actually turn, using a
+    // measured calibration when the player has one (docs/ARENA-SENSITIVITY.md
+    // §4). Best-effort: an unreadable store leaves the declared-reference
+    // note in place, which is what an uncalibrated player gets anyway.
+    void store()
+      .then((s) => new HistoryApi(s).calibrationHistory())
+      .then((history) => setSetupCalibrationHistory(history))
+      .catch(() => undefined);
   }
   if (tab === "data") {
     void renderDataView(views.data).catch((err) => {
@@ -322,6 +335,27 @@ async function renderHome(): Promise<void> {
   }
 }
 
+
+/**
+ * The game-facing conversion of a recommendation, or the reason there is none.
+ *
+ * Built here, once, from the ENGINE's game-profile layer and handed to the
+ * results view whole. The view formats it; it never converts anything itself
+ * (docs/UI-CONTRACT.md §4).
+ */
+function gameRecommendationFor(
+  recommendation: Recommendation | null,
+  finalResult: FinalResult | null,
+): ReturnType<typeof buildGameRecommendation> {
+  return buildGameRecommendation(loadSettings(), recommendation, {
+    // The engine's own confidence wording, passed through verbatim so a
+    // converted number can never read as more certain than the calibration.
+    calibrationConfidenceLine: finalResult
+      ? `Confidence in the measurement behind this: ${finalResult.confidenceLabel}.`
+      : null,
+  });
+}
+
 // ---- results (in-memory result, or latest persisted recommendation) ----
 
 async function renderResults(): Promise<void> {
@@ -341,6 +375,11 @@ async function renderResults(): Promise<void> {
       onContinueCalibration: lastOutcomeReport.recommendationAvailable
         ? null
         : () => void continueCalibration(experimentId),
+      gameRecommendation: gameRecommendationFor(
+        lastOutcomeReport.recommendationAvailable ? lastRecommendation : null,
+        lastOutcomeReport.recommendationAvailable ? lastFinalResult : null,
+      ),
+      onChooseGameProfile: () => activate("setup"),
     });
     return;
   }
@@ -351,6 +390,8 @@ async function renderResults(): Promise<void> {
       finalResult: lastFinalResult,
       onStartTest: () => activate("setup"),
       onRunCaptureCheck: () => activate("diagnostics"),
+      gameRecommendation: gameRecommendationFor(lastRecommendation, lastFinalResult),
+      onChooseGameProfile: () => activate("setup"),
     });
     return;
   }
@@ -393,6 +434,8 @@ async function renderResults(): Promise<void> {
         finalResult,
         onStartTest: () => activate("setup"),
         onRunCaptureCheck: () => activate("diagnostics"),
+        gameRecommendation: gameRecommendationFor(rec, finalResult),
+        onChooseGameProfile: () => activate("setup"),
       });
       return;
     }
@@ -986,6 +1029,11 @@ function makeCallbacks(run: RunView): RunControllerCallbacks {
             onContinueCalibration: continueTarget
               ? () => void continueCalibration(continueTarget.experimentId)
               : null,
+            gameRecommendation: gameRecommendationFor(
+              outcomeReport.recommendationAvailable ? lastRecommendation : null,
+              finalResult,
+            ),
+            onChooseGameProfile: () => activate("setup"),
           });
         }
         activate("results");
@@ -1142,6 +1190,8 @@ function startSession(settings: AppSettings, resume?: ResumeInput): void {
           onStartTest: () => activate("setup"),
           onRunCaptureCheck: () => activate("diagnostics"),
           onContinueCalibration: outcome ? () => activate("setup") : null,
+          gameRecommendation: gameRecommendationFor(recommendation, finalResult),
+          onChooseGameProfile: () => activate("setup"),
         });
         activate("results");
       },

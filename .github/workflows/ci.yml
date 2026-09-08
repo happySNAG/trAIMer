@@ -23,6 +23,15 @@ jobs:
         run: npx vitest run tests/userDataMigration.test.ts
       - name: RELEASE GATE - calibration journey, capture-release semantics, arena contract
         run: npx vitest run tests/calibrationJourney.test.ts tests/captureReleaseSemantics.test.ts tests/arenaPresentation.test.ts tests/brandingGate.test.ts
+      - name: RELEASE GATE - the arena applies the blinded candidate sensitivity
+        # rc.8 moved the crosshair one pixel per mouse count for every
+        # candidate it was comparing, so a human calibration compared five
+        # sensitivities that all felt identical. See PASS-15-REPORT.md.
+        run: npx vitest run tests/arenaCandidateGain.test.ts tests/arenaGainHistoryValidity.test.ts
+      - name: RELEASE GATE - game profiles fail closed and stay out of the measurement core
+        # A malformed profile must never produce a sensitivity recommendation,
+        # and no profile may reach a running game. See docs/GAME-PROFILES.md.
+        run: npx vitest run tests/gameProfileSchema.test.ts tests/gameProfileRegistry.test.ts tests/gameProfileBoundary.test.ts tests/gameRoundTrip.test.ts tests/gameProfileIntegration.test.ts
       - name: no-telemetry audit (sources)
         run: node scripts/audit-no-telemetry.mjs
       - name: RELEASE GATE - branding (sources + player docs)
@@ -39,6 +48,11 @@ jobs:
       - run: npx playwright install chromium --with-deps
       - name: browser suite (incl. calibration flow, tracking UX, shooting feel, results states)
         run: npm run test:browser
+      - name: RELEASE GATE - two blinded candidates differ in the REAL arena
+        # Measured by observation only (inject a known mouse movement, watch
+        # the crosshair), so it proves what a player would feel and cannot
+        # weaken blinding. Fails if the arena reverts to 1 px/count.
+        run: npx playwright test tests/browser/candidateGain.spec.ts
       - run: npm run build
       - name: release artifact verification
         run: node scripts/verify-release.mjs
@@ -237,6 +251,9 @@ jobs:
         # without any click. This gate clicks the arena for real.
         shell: bash
         run: node scripts/verify-arena-entry.mjs
+      - name: RELEASE GATE - the arena applies the candidate sensitivity (dev tree)
+        shell: bash
+        run: node scripts/verify-candidate-gain.mjs
       - name: RELEASE GATE - required frontend assets present
         shell: bash
         run: node scripts/verify-windows-artifacts.mjs --frontend dist-app
@@ -345,6 +362,21 @@ jobs:
           Start-Sleep -Seconds 2
           node scripts/verify-arena-entry.mjs --exe $exe
           if ($LASTEXITCODE -ne 0) { throw "arena entry gate failed on the installed app" }
+          Get-Process -Name "trAIMer" -ErrorAction SilentlyContinue | Stop-Process -Force
+          Get-Process -Name "traimer_capture_helper" -ErrorAction SilentlyContinue | Stop-Process -Force
+
+      - name: RELEASE GATE - the INSTALLED app changes sensitivity between candidates
+        shell: pwsh
+        # The gate rc.8 did not have. Starting a test is not enough: the test
+        # has to compare something. This drives the installed application and
+        # measures how far the crosshair actually travels for a known mouse
+        # movement, requiring that the answer changes with the blinded
+        # candidate. See PASS-15-REPORT.md.
+        run: |
+          $exe = "C:\traimer-install-test\trAIMer.exe"
+          Start-Sleep -Seconds 2
+          node scripts/verify-candidate-gain.mjs --exe $exe
+          if ($LASTEXITCODE -ne 0) { throw "candidate-gain gate failed on the installed app" }
           Get-Process -Name "trAIMer" -ErrorAction SilentlyContinue | Stop-Process -Force
           Get-Process -Name "traimer_capture_helper" -ErrorAction SilentlyContinue | Stop-Process -Force
 

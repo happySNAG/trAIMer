@@ -2,7 +2,10 @@
 
 **Train. Measure. Tune.**
 
-A Fortnite-focused aim measurement and sensitivity optimization engine.
+An aim measurement and sensitivity optimization engine. The measurement core
+is game-agnostic: it measures physical mouse performance and reports a physical
+sensitivity. A separate, versioned **game-profile layer** translates that into
+the numbers a specific FPS accepts — see `docs/GAME-PROFILES.md`.
 This repository currently contains the **headless core**: domain model,
 measurement pipeline, metrics, deterministic synthetic-player simulator,
 evidence-based optimizer, persistence, tests, and a developer CLI.
@@ -117,6 +120,8 @@ src/
   sim/         seeded RNG-free zone: player model, submovements, runner, calibration harness
   optimizer/   scoring, evaluation, surrogate fit, confidence, search loop
   persistence/ envelope wrap/unwrap, migrations, LocalJsonStore
+  games/       game-profile schema, registry, validation, canonical sensitivity
+               conversion, provenance (translation layer — never a measurement input)
   demo/        CLI demonstration
 tests/         unit + integration + blind-recovery suites
 docs/          architecture, metric definitions, optimizer & simulator methodology
@@ -125,7 +130,12 @@ docs/          architecture, metric definitions, optimizer & simulator methodolo
 See `docs/ARCHITECTURE.md` for the design tour and decision record,
 `docs/METRICS.md` for exact metric definitions and constants,
 `docs/OPTIMIZER.md` and `docs/SIMULATOR.md` for methodology,
-and `docs/PERSISTENCE.md` for storage formats.
+`docs/PERSISTENCE.md` for storage formats,
+`docs/GAME-PROFILES.md` for the game-profile architecture and how to add
+a profile,
+and `docs/ARENA-SENSITIVITY.md` for how a blinded candidate sensitivity becomes
+movement the player's hand actually feels — the model, the DPI contract, and
+the four gates that keep it applied.
 
 ## Initial player context (configurable, not hard-coded)
 

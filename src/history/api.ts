@@ -1,5 +1,15 @@
 import type { LocalJsonStore } from "../persistence/store.ts";
 import type { Recommendation } from "../domain/recommendation.ts";
+import {
+  readSessionGameConversionRecord,
+  type SessionGameConversionRecord,
+} from "../games/selection.ts";
+import {
+  PRE_GAIN_SESSION_WARNING,
+  readSessionArenaGainRecord,
+  sessionAppliedCandidateGain,
+  type SessionArenaGainRecord,
+} from "../session/arenaGainRecord.ts";
 
 /**
  * Stable, UI-independent History API (Pass 4, requirement M).
@@ -29,6 +39,30 @@ export interface SessionSummaryViewModel {
   optimizerVersion: string | null;
   appVersion: string | null;
   retestOfExperimentId: string | null;
+  /**
+   * The game conversion this session produced, or null when it had no game
+   * profile — which every session written before game profiles existed does
+   * (Game Profile Pass 1, requirement 18). Never an error, never rewritten.
+   */
+  gameConversion: SessionGameConversionRecord | null;
+  /**
+   * The sensitivity this session's arena actually applied, or null for every
+   * session recorded before the arena applied candidate gain at all
+   * (Pass 15). Never an error, never rewritten.
+   */
+  arenaGain: SessionArenaGainRecord | null;
+  /**
+   * Whether the player physically experienced the sensitivities this session
+   * compared.
+   *
+   * FALSE means the session is a real record of real drills whose RECOMMENDED
+   * SENSITIVITY is not evidence about sensitivity, because every candidate
+   * moved the crosshair by the same amount. Presentation must show
+   * `candidateGainWarning` wherever it shows that recommendation.
+   */
+  candidateGainApplied: boolean;
+  /** The sentence to show alongside a recommendation that lacks the gain. */
+  candidateGainWarning: string | null;
 }
 
 export interface TrendPoint {
@@ -132,6 +166,26 @@ interface HumanSessionLike {
   recommendationConfidence?: number | null;
   optimizerVersion?: string;
   retestOfExperimentId?: string | null;
+  gameConversion?: unknown;
+  arenaGain?: unknown;
+}
+
+/**
+ * The three validity fields every session summary carries about candidate
+ * gain, derived once so no caller can compute them differently.
+ */
+function arenaGainFields(raw: unknown): {
+  arenaGain: SessionArenaGainRecord | null;
+  candidateGainApplied: boolean;
+  candidateGainWarning: string | null;
+} {
+  const arenaGain = readSessionArenaGainRecord(raw);
+  const applied = sessionAppliedCandidateGain(arenaGain);
+  return {
+    arenaGain,
+    candidateGainApplied: applied,
+    candidateGainWarning: applied ? null : PRE_GAIN_SESSION_WARNING,
+  };
 }
 
 /**
@@ -180,6 +234,13 @@ export class HistoryApi {
         optimizerVersion: null,
         appVersion: null,
         retestOfExperimentId: null,
+        gameConversion: null,
+        // An experiment with no human-session artifact cannot say what its
+        // arena applied, so it is treated exactly like a pre-fix session:
+        // unproven, and labelled as such rather than assumed good.
+        arenaGain: null,
+        candidateGainApplied: false,
+        candidateGainWarning: PRE_GAIN_SESSION_WARNING,
       });
     }
     return out.sort(
@@ -212,6 +273,10 @@ export class HistoryApi {
       optimizerVersion: hs.optimizerVersion ?? null,
       appVersion: null,
       retestOfExperimentId: hs.retestOfExperimentId ?? null,
+      // An unreadable or absent game record must never make an otherwise
+      // valid historical session unreadable.
+      gameConversion: readSessionGameConversionRecord(hs.gameConversion),
+      ...arenaGainFields(hs.arenaGain),
     };
   }
 

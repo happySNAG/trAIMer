@@ -124,11 +124,23 @@ native client (never synthesized into recorded streams).
 Pointer Lock suppresses the OS cursor; the runtime owns a virtual reticle:
 
 - starts centered each trial,
-- integrates raw deltas,
+- **scales raw counts by the blinded candidate's gain** — this is the one and
+  only place the sensitivity under test becomes movement the player feels; see
+  docs/ARENA-SENSITIVITY.md,
+- integrates the result,
 - clamps to viewport bounds and emits only the **applied** delta downstream so
   the recorder's integrated cursor position always equals the rendered reticle
   position (raw cumulative input is kept separately for diagnostics),
-- is reset between trials.
+- is reset between trials — position only. `reset()` deliberately does not
+  touch the gain: a trial start, a pause/resume and a re-acquired lock all
+  recentre, and any of them reverting the gain to 1 px/count would reintroduce
+  the rc.8 defect one drill at a time.
+
+Until 1.0.0-rc.9 the reticle moved exactly 1 logical px per mouse count for
+every candidate, so a human calibration compared sensitivities that all felt
+identical. `PointerLockCaptureSource.setReticleGain()` is the production entry
+point; `BrowserRunController` calls it at the start of every trial from that
+trial's own candidate.
 
 Three quantities stay distinct everywhere: raw mouse delta, virtual reticle
 position, target position.

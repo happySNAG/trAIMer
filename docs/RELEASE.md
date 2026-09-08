@@ -2,7 +2,7 @@
 
 ## Version strings (`src/version.ts`)
 
-- `APP_VERSION` — `1.0.0-rc.8` for the V1 release line (rc.1 was the Pass 5
+- `APP_VERSION` — `1.0.0-rc.9` for the V1 release line (rc.1 was the Pass 5
   candidate and shipped a non-executable helper; rc.2 was the Pass 8
   pre-hardware candidate and still launched via PowerShell; rc.3 was the Pass 9
   installed-desktop-application candidate, which installed and launched on
@@ -12,7 +12,17 @@
   drill sequencing, new arena presentation; rc.6 is the Pass 12 real-PC bugfix
   pass: the strafing target is hit-tested where it is drawn and sweeps the
   field, a click no longer deletes the tracking target, and breaks/pauses hand
-  the mouse back before showing anything clickable).
+  the mouse back before showing anything clickable; rc.7 renamed the product
+  to trAIMer and fixed the break/tracking/shot-feedback defects from the third
+  hardware session; rc.8 was the Pass 14 measurement-integrity candidate —
+  capture timestamp domains, selectable calibration length, and a
+  player-first results page; rc.9 is Game Profile Campaign Pass 1, which adds
+  the versioned game-profile and sensitivity-conversion layer described in
+  docs/GAME-PROFILES.md and ships one public profile, the generic/raw control
+  — and which also fixes the release-blocking measurement defect found during
+  that pass: rc.5–rc.8 never applied the blinded candidate sensitivity to the
+  arena at all, so every human calibration on those builds compared
+  sensitivities that felt identical. See docs/ARENA-SENSITIVITY.md).
 - `ENGINE_VERSION` — `engine-v4` (bumped per engineering pass with contract
   changes).
 - `OPTIMIZER_VERSION_V4` — `optimizer-v3` (paired-effects surrogate,
@@ -24,7 +34,7 @@
 | --- | --- |
 | Recommendation | `engineVersion`, `appVersion` (+ optimizer-run record) |
 | ResumeCheckpoint | `appVersion`, `engineVersion`, `optimizerVersion` |
-| HumanSessionRecord | `optimizerVersion` (+ release fields on export) |
+| HumanSessionRecord | `optimizerVersion`, `arenaGain.modelVersion` (+ release fields on export) |
 | Diagnostic bundle | full `ReleaseMetadata` block |
 
 ## Compatibility checks
@@ -33,12 +43,19 @@
   different engine generation loudly; pre-versioning artifacts (null) load.
 - Bundle imports reject `schemaVersion` newer than supported.
 - Checkpoints reject unknown resume schemaVersions.
+- A stored session with **no** `arenaGain` record predates 1.0.0-rc.9 and its
+  recommended sensitivity is not evidence about sensitivity; `HistoryApi`
+  reports that and the History view shows it. The session itself stays
+  readable and complete (docs/ARENA-SENSITIVITY.md §8).
 
 ## V1 release checklist
 
 1. `npm test && npm run lint && npm run typecheck && npm run build`
 2. `npm run test:browser`
 3. `npm run build:desktop` — the Electron shell must compile clean.
+3b. `npm run verify:candidate-gain` — two blinded candidates must move the
+   crosshair by measurably different amounts in the real shell. A build that
+   fails this measures everything except the variable it exists to measure.
 4. Push and let the `windows-installer` CI job build the real artifacts on a
    Windows runner. It compiles the helper with MSVC `/W4 /WX`, **verifies the
    binary is a genuine x64 PE**, runs it with `--version` to prove it
@@ -62,15 +79,18 @@
 
 | Component | Version |
 |---|---|
-| App | 1.0.0-rc.8 |
+| App | 1.0.0-rc.9 |
 | Engine | engine-v4 |
 | Optimizer | optimizer-v3 (paired fit + adequacy gating + change-point) |
 | Scoring model | scoring-v1 (weights: accuracy .28, speed .14, tracking .14, correction .12, overshoot .11, undershoot .11, consistency .10) |
 | Native transport | protocolVersion 1 |
 | Native helper | helper-1.1.0 |
+| Arena sensitivity model | arena-gain-v1 (candidate → logical px per mouse count; see docs/ARENA-SENSITIVITY.md) |
 | Calibration workflow | calibration-v2 |
 | Resume checkpoints | resume schemaVersion 2 |
 | Persistence envelopes | schemaVersion 1 |
+| Game profile schema | schemaVersion 1 (see docs/GAME-PROFILES.md) |
+| Public game profiles | `generic-raw` v1 |
 
 The machine-readable copy of this matrix lives in `src/version.ts`
 (`fullReleaseMetadata()`, `ARTIFACT_COMPATIBILITY_MATRIX`) and is verified

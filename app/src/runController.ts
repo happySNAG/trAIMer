@@ -49,8 +49,25 @@ import {
   buildHumanSessionRecord,
   finalizeHumanSessionRecord,
 } from "../../src/session/humanSession.ts";
+import { buildSessionGameConversionRecord } from "../../src/games/selection.ts";
+import { buildGameRecommendation } from "./gameConversionBridge.ts";
 import { makePlayerId } from "../../src/domain/ids.ts";
-import { OPTIMIZER_VERSION } from "../../src/version.ts";
+import { ARENA_GAIN_MODEL_VERSION, OPTIMIZER_VERSION } from "../../src/version.ts";
+import { HistoryApi, type CalibrationHistoryEntry } from "../../src/history/api.ts";
+import type { SensitivityCandidate } from "../../src/domain/candidate.ts";
+import {
+  candidateReticleGain,
+  resolveArenaAnchor,
+  type ArenaSensitivityAnchor,
+} from "./arenaSensitivity.ts";
+import {
+  buildSessionArenaGainRecord,
+  type SessionArenaGainRecord,
+} from "../../src/session/arenaGainRecord.ts";
+import {
+  ARENA_PX_PER_DEGREE,
+  arenaCmPer360,
+} from "../../src/sensmath/arenaGain.ts";
 import { assessTimeJump } from "../../src/lifecycle/lifecycle.ts";
 import { ArenaAudio } from "./arenaAudio.ts";
 import type { CaptureTierReport } from "./captureTiers.ts";
@@ -240,6 +257,19 @@ export class BrowserRunController {
   #store: LocalJsonStore | null = null;
   #runner: SessionRunner | null = null;
   /**
+   * What one unit of this player's sensitivity slider is worth physically.
+   *
+   * Resolved once, in `create()`, from the best evidence available (a
+   * measured calibration, else their game profile, else the declared
+   * reference — see app/src/arenaSensitivity.ts) and then held fixed for the
+   * whole session. Fixed on purpose: the anchor is the thing every candidate
+   * is measured against, so re-resolving it mid-session would move the ruler
+   * during the measurement.
+   */
+  #arenaAnchor: ArenaSensitivityAnchor;
+  /** The gain applied for each candidate, for the session's provenance record. */
+  readonly #appliedGains = new Map<string, { x: number; y: number }>();
+  /**
    * A cancel can arrive BEFORE the runner exists (End session while the arena
    * still says "Click to lock in"). Without this flag the request landed on a
    * null runner and did nothing at all — which is exactly how rc.3 trapped a
@@ -294,6 +324,7 @@ export class BrowserRunController {
     // different blinding, so "continue" would silently be "start over".
     if (this.#resume) {
       this.#definition = this.#resume.definition;
+      this.#arenaAnchor = this.#resolveAnchor();
       return;
     }
 
@@ -321,6 +352,31 @@ export class BrowserRunController {
         (settings.autoBreaks ? settings.breakSeconds * 1000 : 0),
       notes: "browser live session",
     });
+    // The declared-reference anchor is always available and never throws;
+    // create() upgrades it to a measured calibration when one exists. Set on
+    // every construction path so nothing can reach a trial with no anchor.
+    this.#arenaAnchor = this.#resolveAnchor();
+  }
+
+  /**
+   * The anchor for THIS experiment.
+   *
+   * Read from the experiment definition, never from the live setup form. On a
+   * resumed session the definition is the original one, so the second half of
+   * a calibration is measured against exactly the ruler the first half was —
+   * even if the player edited their sensitivity or DPI in between.
+   */
+  #resolveAnchor(
+    calibrationHistory: readonly CalibrationHistoryEntry[] = [],
+  ): ArenaSensitivityAnchor {
+    return resolveArenaAnchor(
+      {
+        baseline: this.#definition.baselineSensitivity,
+        dpi: this.#definition.dpi,
+        gameProfile: this.#settings.gameProfile,
+      },
+      calibrationHistory,
+    );
   }
 
   static async create(
@@ -332,6 +388,16 @@ export class BrowserRunController {
     const controller = new BrowserRunController(canvas, settings, callbacks, options);
     const backend = new IndexedDbBackend(await openTraimerDb());
     controller.#store = new LocalJsonStore(backend);
+    // Upgrade the arena's physical anchor if this player has ever completed a
+    // calibration. Best-effort by design: an unreadable calibration store must
+    // not stop a session, and the declared-reference anchor already in place
+    // measures the differences between candidates exactly either way.
+    try {
+      const history = await new HistoryApi(controller.#store).calibrationHistory();
+      controller.#arenaAnchor = controller.#resolveAnchor(history);
+    } catch {
+      /* keep the anchor the constructor established */
+    }
     // The capture source exists BEFORE start(): the arena click must be able
     // to call requestPointerLock() synchronously inside the user gesture, and
     // start() does async storage work before it reaches its execution gate.
@@ -552,11 +618,23 @@ export class BrowserRunController {
         this.#store !== null
           ? await this.#store.loadRecommendation(this.#definition.id)
           : null;
+      // What game profile this session converted through, and what it
+      // produced, recorded ALONGSIDE the result rather than inside it: the
+      // recommendation itself stays game-agnostic (requirement 18).
+      const conversion = buildGameRecommendation(this.#settings, recommendation);
       record = finalizeHumanSessionRecord(
         record,
         new Date().toISOString(),
         recommendation,
         0,
+        conversion.kind === "ready"
+          ? buildSessionGameConversionRecord(conversion.exported, new Date().toISOString())
+          : null,
+        // Which sensitivities the player's hand actually felt. Written for
+        // every session this build produces, so a future reader can tell a
+        // genuine sensitivity comparison from a pre-fix one without guessing
+        // from a version string.
+        this.#arenaGainRecord(),
       );
       await this.#store?.saveRaw(
         "human-session",
@@ -878,6 +956,51 @@ export class BrowserRunController {
     return SCENARIO_INSTRUCTIONS[scenarioById(scenarioId).kind];
   }
 
+  /**
+   * Puts the blinded candidate's sensitivity into the player's hand.
+   *
+   * Blinding is untouched: the value goes to the capture source, which draws
+   * nothing and labels nothing. No candidate id, sensitivity or ladder
+   * position reaches the arena, the overlay or any other player-facing
+   * surface — the only thing that changes is how far the crosshair travels,
+   * which is the variable under test.
+   */
+  #applyCandidateGain(candidate: SensitivityCandidate): void {
+    if (!this.#capture) return;
+    const gain = candidateReticleGain(
+      this.#arenaAnchor,
+      candidate,
+      this.#definition.dpi,
+    );
+    this.#capture.setReticleGain(gain);
+    this.#appliedGains.set(candidate.id, gain);
+  }
+
+  /** The provenance record proving which sensitivities this session applied. */
+  #arenaGainRecord(): SessionArenaGainRecord {
+    return buildSessionArenaGainRecord({
+      modelVersion: ARENA_GAIN_MODEL_VERSION,
+      anchorSource: this.#arenaAnchor.source,
+      anchorBasis: this.#arenaAnchor.basis,
+      referenceSensX: this.#arenaAnchor.referenceSensX,
+      referenceSensY: this.#arenaAnchor.referenceSensY,
+      referenceDegreesPerCmX: this.#arenaAnchor.referenceDegreesPerCmX,
+      referenceDegreesPerCmY: this.#arenaAnchor.referenceDegreesPerCmY,
+      pxPerDegree: ARENA_PX_PER_DEGREE,
+      dpi: this.#definition.dpi,
+      candidates: this.#definition.candidates.map((c) => ({
+        id: c.id,
+        sensitivity: c.sensitivity,
+        // The gain actually applied when this candidate ran; the model value
+        // for one that never got a trial (an aborted session).
+        gain:
+          this.#appliedGains.get(c.id) ??
+          candidateReticleGain(this.#arenaAnchor, c, this.#definition.dpi),
+        cmPer360X: arenaCmPer360(this.#arenaAnchor, c.sensitivity, this.#definition.dpi).x,
+      })),
+    });
+  }
+
   async #executeTrial(
     spec: TrialPlanSpec,
     round: number,
@@ -950,6 +1073,15 @@ export class BrowserRunController {
       };
     });
 
+    // THE line whose absence was the rc.8 measurement defect: what the
+    // player's hand does now depends on which blinded candidate is running.
+    //
+    // Set before reset() and before the drill is presented, so the gain is
+    // already in force for the very first sample of the trial, and set for
+    // EVERY trial (warmup included) rather than only at block boundaries —
+    // a per-trial call cannot drift out of step with the candidate the trial
+    // is recorded under, because it reads that same candidate.
+    this.#applyCandidateGain(candidate);
     this.#capture.reticle.reset();
     this.#beginTrialPresentation(scenario);
     director.start(performance.now());

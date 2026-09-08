@@ -14,6 +14,7 @@ import {
   DomTimestampNormalizer,
   type DomTimestampStats,
 } from "./timebase.ts";
+import { UNIT_RETICLE_GAIN, type ReticleGain } from "../sensmath/arenaGain.ts";
 
 export interface DomEventTargetLike {
   addEventListener(type: string, listener: (ev: unknown) => void): void;
@@ -146,6 +147,23 @@ export interface BrowserCaptureOptions {
 export class VirtualReticle {
   readonly #viewport: Viewport;
   #position: { x: number; y: number };
+  /**
+   * Logical arena pixels per raw mouse count, per axis — the ONE place the
+   * blinded candidate's sensitivity is turned into movement the player feels.
+   *
+   * Every scored input path in the product converges on `applyRawDelta`:
+   * Pointer Lock `movementX/Y` (coalesced and un-coalesced) through
+   * `PointerLockCaptureSource.start()`, and scripted samples through
+   * `emitForTesting`. Applying the gain here therefore applies it exactly
+   * once, and there is nowhere else it *could* be applied without being
+   * applied twice. See src/sensmath/arenaGain.ts.
+   *
+   * Defaults to 1 px/count so a reticle nobody has configured behaves
+   * exactly as it always did; a session that forgot to set it is caught by
+   * the run controller's own assertion rather than by silently measuring
+   * nothing (which is precisely the rc.8 defect).
+   */
+  #gain: ReticleGain = UNIT_RETICLE_GAIN;
 
   constructor(viewport: Viewport) {
     this.#viewport = viewport;
@@ -156,18 +174,55 @@ export class VirtualReticle {
     return { ...this.#position };
   }
 
+  /** The gain currently in force. Engine-facing; never rendered to a player. */
+  get gain(): ReticleGain {
+    return { x: this.#gain.x, y: this.#gain.y };
+  }
+
+  /**
+   * Sets the candidate gain. Called at a candidate boundary and never during
+   * a drill, so the sensitivity under test cannot change mid-measurement.
+   */
+  setGain(gain: ReticleGain): void {
+    if (
+      !Number.isFinite(gain.x) ||
+      !Number.isFinite(gain.y) ||
+      gain.x <= 0 ||
+      gain.y <= 0
+    ) {
+      throw new Error(
+        `reticle gain must be positive and finite (got ${String(gain.x)}, ${String(gain.y)})`,
+      );
+    }
+    this.#gain = { x: gain.x, y: gain.y };
+  }
+
+  /**
+   * Recentres the reticle. Deliberately does NOT touch the gain: a trial
+   * start, a pause/resume and a re-acquired pointer lock all reset the
+   * position, and any of them silently reverting the sensitivity under test
+   * to 1 px/count would reintroduce the defect one drill at a time.
+   */
   reset(): void {
     this.#position = initialReticlePosition(this.#viewport);
   }
 
+  /**
+   * Applies raw mouse counts, scaled by the candidate gain, and reports the
+   * LOGICAL movement that survived clamping — which is what the recorder
+   * integrates into the cursor track, so the recorded cursor and the drawn
+   * reticle are the same thing by construction.
+   */
   applyRawDelta(dx: number, dy: number): { dx: number; dy: number } {
+    const gainedX = dx * this.#gain.x;
+    const gainedY = dy * this.#gain.y;
     const nextX = Math.min(
       this.#viewport.widthPx,
-      Math.max(0, this.#position.x + dx),
+      Math.max(0, this.#position.x + gainedX),
     );
     const nextY = Math.min(
       this.#viewport.heightPx,
-      Math.max(0, this.#position.y + dy),
+      Math.max(0, this.#position.y + gainedY),
     );
     const appliedX = nextX - this.#position.x;
     const appliedY = nextY - this.#position.y;
@@ -268,6 +323,18 @@ export class PointerLockCaptureSource implements CaptureSource {
 
   get reticle(): VirtualReticle {
     return this.#reticle;
+  }
+
+  /**
+   * Sets the arena gain for the blinded candidate that is about to run.
+   *
+   * The run controller calls this at every candidate boundary. It is the only
+   * production entry point to the reticle's gain, and it deliberately lives
+   * on the capture SOURCE rather than on the reticle so that the same call
+   * covers every input path the source owns.
+   */
+  setReticleGain(gain: ReticleGain): void {
+    this.#reticle.setGain(gain);
   }
 
   start(sink: CaptureSink): void {

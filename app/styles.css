@@ -1966,6 +1966,12 @@ body.capture-suspended #run-canvas {
   .session-detail-grid { grid-template-columns: 1fr; }
 }
 
+/* Spans both columns: a validity statement is about the whole session, not
+   about one of the two statistics panels beside it. */
+.session-detail-wide {
+  grid-column: 1 / -1;
+}
+
 .session-detail-title {
   font-size: 12px;
   font-weight: 700;

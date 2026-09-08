@@ -14,6 +14,8 @@ import {
   type RecommendationPresentation,
 } from "../../src/results/recommendationState.ts";
 import { CALIBRATION_MODES } from "../../src/experiments/sessionModes.ts";
+import type { GameRecommendationOutcome } from "./gameConversionBridge.ts";
+import { profileStatusBadge } from "./gameProfileView.ts";
 import { el, clear } from "./dom.ts";
 import {
   badge,
@@ -55,6 +57,14 @@ export interface ResultsInput {
   onContinueCalibration?: (() => void) | null | undefined;
   /** Opens Diagnostics on the capture check. */
   onRunCaptureCheck?: (() => void) | null | undefined;
+  /**
+   * The selected game's conversion of this recommendation, built by the
+   * engine's game-profile layer (Game Profile Pass 1, requirement 19).
+   * Absent or `no-profile-selected` simply means no game section is drawn.
+   */
+  gameRecommendation?: GameRecommendationOutcome | null | undefined;
+  /** Opens the Aim Test screen, where a game profile is chosen. */
+  onChooseGameProfile?: (() => void) | null | undefined;
 }
 
 const NEXT_ACTION_LABELS: Record<string, string> = {
@@ -942,6 +952,134 @@ function renderMoreDataNeeded(outcome: SessionOutcomeReport): HTMLElement {
 // FinalResult (frozen results contract) — the headline experience
 // ---------------------------------------------------------------------------
 
+/**
+ * "Recommended for [Game]" (Game Profile Pass 1, requirement 19).
+ *
+ * Three numbers, in the order a player asks for them — what they are on now,
+ * what to set, and the physical sensitivity underneath both — plus every
+ * consequence of the game's own precision limits. Nothing here is computed in
+ * the view: it renders `GameRecommendationExport` fields verbatim.
+ *
+ * The section deliberately claims no more certainty than the calibration
+ * above it: it converts the recommendation, it does not strengthen it.
+ */
+function renderGameRecommendation(input: ResultsInput): HTMLElement | null {
+  const outcome = input.gameRecommendation ?? null;
+  if (!outcome || outcome.kind === "no-profile-selected") return null;
+
+  if (outcome.kind === "unavailable") {
+    const actions: (Node | string)[] = [
+      el("p", { class: "note", text: outcome.reason }),
+    ];
+    if (input.onChooseGameProfile) {
+      actions.push(
+        el("div", {}, [
+          button("Choose a game", {
+            variant: "secondary",
+            icon: "target",
+            onClick: () => input.onChooseGameProfile?.(),
+          }),
+        ]),
+      );
+    }
+    return card(
+      { title: "Recommended for your game", icon: "target" },
+      ...actions,
+    );
+  }
+
+  const g = outcome.exported;
+  const body: (Node | string)[] = [];
+
+  const statusBadge = profileStatusBadge({ status: g.profileStatus });
+  if (statusBadge) body.push(el("div", {}, [statusBadge]));
+
+  body.push(
+    grid(
+      3,
+      statTile(
+        "Current",
+        g.current ? g.current.hipfire.toFixed(2) : "\u2014",
+        {
+          sub: g.current
+            ? `${g.current.cmPer360X.toFixed(1)} cm/360`
+            : "not entered",
+        },
+      ),
+      statTile("Recommended", g.recommended.hipfire.value.ui.toFixed(2), {
+        tone: "accent",
+        sub: `${g.recommended.achievedCmPer360.x.toFixed(1)} cm/360`,
+      }),
+      statTile("Physical equivalent", g.physicalEquivalent.cmPer360X.toFixed(1), {
+        unit: "cm/360",
+        sub: "How far your hand moves for a full turn",
+      }),
+    ),
+  );
+
+  body.push(sectionLabel(`What to set in ${g.profileDisplayName}`));
+  body.push(
+    kvList(
+      g.entryLines.map((line): [string, string] => {
+        const split = line.indexOf(": ");
+        return [line.slice(0, split), line.slice(split + 2)];
+      }),
+    ),
+  );
+
+  if (g.changeFromCurrentPercent) {
+    const change = g.changeFromCurrentPercent.x;
+    body.push(
+      el("p", {
+        class: "result-summary",
+        text:
+          Math.abs(change) < 0.5
+            ? "That is the sensitivity you already run, within what this game can express."
+            : `That is ${Math.abs(change).toFixed(1)}% ${change > 0 ? "faster" : "slower"} than what you use today.`,
+      }),
+    );
+  }
+
+  // Rounding loss is never hidden (requirement 15).
+  for (const note of g.precisionNotes) {
+    body.push(el("p", { class: "note", text: note }));
+  }
+  for (const warning of g.warnings) {
+    body.push(inlineAlert("warn", "Worth knowing", warning));
+  }
+  if (g.calibrationConfidenceLine) {
+    body.push(el("p", { class: "note", text: g.calibrationConfidenceLine }));
+  }
+  body.push(
+    el("p", {
+      class: "note",
+      text: "Converting a recommendation cannot make it more certain than the measurement above.",
+    }),
+  );
+
+  const provenance: [string, string][] = [
+    ["Scoped aim matched by", g.matchingLabel],
+    ["Based on", g.physicalEquivalent.basis],
+    ["What 1.00 means", g.unitDefinition],
+    ["Profile source", g.provenance.sourceTitle],
+    ["Checked against", g.provenance.gameVersion ?? "not tied to a game build"],
+    ["Last verified", g.provenance.verifiedAtIso],
+    ["Conversion definition", `v${g.profileVersion}`],
+    ["DPI used", String(g.dpi)],
+  ];
+  if (g.provenance.sourceUrl) provenance.push(["Reference", g.provenance.sourceUrl]);
+  body.push(detailsBlock("How this conversion was made", kvList(provenance)));
+
+  return card(
+    {
+      title: `Recommended for ${g.profileDisplayName}`,
+      subtitle: g.matchingDetail,
+      icon: "target",
+    },
+    ...body,
+  );
+}
+
 function renderFinalResult(
   outerContainer: HTMLElement,
   fr: FinalResult,
@@ -962,6 +1100,10 @@ function renderFinalResult(
 
   // 1–2. What to use, and how much trAIMer will stand behind it.
   container.append(renderHeadline(fr, presentation, outcome));
+
+  // 1b. The same answer, in the numbers the player's game accepts.
+  const gameSection = renderGameRecommendation(input);
+  if (gameSection) container.append(gameSection);
 
   // 3–4. How you performed.
   if (outcome) container.append(renderPerformanceCards(outcome, presentation));

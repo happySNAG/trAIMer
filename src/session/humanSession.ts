@@ -2,6 +2,8 @@ import type { SessionId, ExperimentId, PlayerId } from "../domain/ids.ts";
 import type { SensitivityConfiguration } from "../domain/settings.ts";
 import type { Recommendation } from "../domain/recommendation.ts";
 import { wrapEnvelope } from "../persistence/migrations.ts";
+import type { SessionGameConversionRecord } from "../games/selection.ts";
+import type { SessionArenaGainRecord } from "./arenaGainRecord.ts";
 
 export interface HumanSessionDevice {
   userAgent: string;
@@ -50,6 +52,25 @@ export interface HumanSessionRecord {
   calibrationAdequateY: boolean | null;
   retestOfExperimentId: ExperimentId | null;
   sessionIndexForPlayer: number;
+  /**
+   * The game conversion this session produced, when a game profile was
+   * selected (Game Profile Pass 1, requirement 18).
+   *
+   * OPTIONAL and type-only: no measurement code reads it, and every session
+   * written before game profiles existed simply does not have the field.
+   * Readers must treat absence as "no game profile", never as an error.
+   */
+  gameConversion?: SessionGameConversionRecord | null | undefined;
+  /**
+   * The sensitivity this session's arena actually applied, per candidate
+   * (Pass 15, requirement I).
+   *
+   * OPTIONAL, and its ABSENCE is meaningful: every session written before the
+   * arena applied candidate gain simply does not have it, and a reader must
+   * treat that as "the player felt one sensitivity throughout", not as an
+   * error and not as an unknown. See src/session/arenaGainRecord.ts.
+   */
+  arenaGain?: SessionArenaGainRecord | null | undefined;
 }
 
 export const HUMAN_SESSION_RECORD_VERSION = 1;
@@ -120,6 +141,8 @@ export function finalizeHumanSessionRecord(
   endedAtIso: string,
   recommendation: Recommendation | null,
   activeTestingMs: number,
+  gameConversion: SessionGameConversionRecord | null = null,
+  arenaGain: SessionArenaGainRecord | null = null,
 ): HumanSessionRecord {
   const ended = new Date(endedAtIso).getTime();
   const started = new Date(record.startedAtIso).getTime();
@@ -136,6 +159,13 @@ export function finalizeHumanSessionRecord(
           max: recommendation.edpiRange.max,
         }
       : null,
+    // Only written when a game profile was actually selected; a session with
+    // none keeps the field absent rather than storing a null shape.
+    ...(gameConversion ? { gameConversion } : {}),
+    // Same rule: written only when the arena really applied per-candidate
+    // gain, so a missing field is the honest marker for a pre-fix session
+    // rather than a value that could be mistaken for one.
+    ...(arenaGain ? { arenaGain } : {}),
   };
 }
 
