@@ -85,7 +85,7 @@ if (lock.version !== appVersion || lock.packages?.[""]?.version !== appVersion) 
 const CURRENT_DOCS = ["README.md", "docs/INSTALL-WINDOWS.md", "docs/RELEASE-NOTES.md", "docs/SUPPORT-MATRIX.md", "docs/CODE-SIGNING.md"];
 const VERSION_RE = /1\.0\.0(?:-rc\.\d+)?/g;
 /** Versions a current document may legitimately name as history. */
-const HISTORICAL_OK = new Set(["1.0.0-rc.6", "1.0.0-rc.7", "1.0.0-rc.9", "1.0.0-rc.12", "1.0.0"]);
+const HISTORICAL_OK = new Set(["1.0.0-rc.6", "1.0.0-rc.7", "1.0.0-rc.9", "1.0.0-rc.12", "1.0.0-rc.13", "1.0.0"]);
 for (const file of CURRENT_DOCS) {
   if (!existsSync(file)) {
     fail(`missing public document: ${file}`);

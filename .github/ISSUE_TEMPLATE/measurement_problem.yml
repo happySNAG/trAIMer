@@ -11,7 +11,7 @@ body:
     id: version
     attributes:
       label: trAIMer version
-      placeholder: 1.0.0-rc.13
+      placeholder: 1.0.0
     validations:
       required: true
   - type: dropdown

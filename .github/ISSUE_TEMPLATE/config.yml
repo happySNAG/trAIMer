@@ -1,8 +1,8 @@
 blank_issues_enabled: true
 contact_links:
   - name: Security problem
-    url: https://github.com/happySNAG/Aldo-Aim-Lab/security/advisories/new
+    url: https://github.com/happySNAG/trAIMer/security/advisories/new
     about: Please report vulnerabilities privately (see SECURITY.md), not as a public issue.
   - name: Propose a new game profile
-    url: https://github.com/happySNAG/Aldo-Aim-Lab/blob/main/docs/PROFILE-PROPOSAL-TEMPLATE.md
+    url: https://github.com/happySNAG/trAIMer/blob/main/docs/PROFILE-PROPOSAL-TEMPLATE.md
     about: The full proposal template. Copy it into a "New game-profile request" issue or a pull request.

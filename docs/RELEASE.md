@@ -2,7 +2,10 @@
 
 ## Version strings (`src/version.ts`)
 
-- `APP_VERSION` — `1.0.0-rc.13` for the V1 release line (rc.1 was the Pass 5
+- `APP_VERSION` — `1.0.0`, the public release: the engine, profiles, shell,
+  helper and installer pipeline of rc.13 with the version number, release
+  notes and repository metadata updated after the hardware validation below.
+  The release-candidate line that led to it: rc.1 was the Pass 5
   candidate and shipped a non-executable helper; rc.2 was the Pass 8
   pre-hardware candidate and still launched via PowerShell; rc.3 was the Pass 9
   installed-desktop-application candidate, which installed and launched on
@@ -38,7 +41,7 @@
   picker, first-run ordering, and three new installed-app gates: a complete
   calibration on the installed build, an in-place upgrade from rc.12 with
   the earlier session preserved, and a silent uninstall that keeps data
-  followed by a reinstall that finds it).
+  followed by a reinstall that finds it.
 - `ENGINE_VERSION` — `engine-v4` (bumped per engineering pass with contract
   changes).
 - `OPTIMIZER_VERSION_V4` — `optimizer-v3` (paired-effects surrogate,
@@ -71,18 +74,37 @@ a human running the on-hardware validation — has been done on a build no
 older than rc.9. That is the build in which the arena first applied the
 blinded candidate sensitivity (docs/ARENA-SENSITIVITY.md); every hardware
 session before it compared sensitivities that felt identical, so none of
-them counts. As of rc.13 the last hardware session on record is rc.7
-(PASS-15-REPORT.md), so step 6 is the one open item, and the release stays a
-candidate. The automated installed-app gates (arena entry, candidate gain,
+them counts. Through rc.13 the last hardware session on record was rc.7
+(PASS-15-REPORT.md), so step 6 was the one open item and the release stayed
+a candidate. The automated installed-app gates (arena entry, candidate gain,
 picker, full calibration, upgrade, uninstall/reinstall) are evidence that
 the build works; they are not a substitute for one person doing it.
 
-What "done" looks like for step 6: one Standard or Precision calibration on
-the installed rc.13 build, with a real mouse, recorded in a pass report
+What "done" was defined as for step 6: one Standard or Precision calibration
+on the installed rc.13 build, with a real mouse, recorded in a pass report
 with the session's History detail (candidate gain applied, capture tier,
 recommendation state). No specific result is required — "More data needed"
 is an acceptable honest outcome — only that the flow was completed by a
 person and behaved as documented.
+
+### Hardware validation record (step 6, closed)
+
+| | |
+| --- | --- |
+| Build | `1.0.0-rc.13`, installer `trAIMer-Setup-1.0.0-rc.13.exe`, SHA-256 `0da0196f1429e64b8ede8bad23726db222b144f1a88b520ff43472971b5b1eb6`, built by CI run 34228526352 from commit `8d6b16f` |
+| Date | 2026-09-08 |
+| Who | The maintainer, on their own Windows PC, with a real mouse |
+| What was done | Installed the rc.13 installer, launched the installed application, and ran a calibration to completion |
+| Outcome | Reported by the maintainer as "it all works". No release-blocking issue was observed |
+| What this establishes | A person completed the calibration path on a build whose arena applies the blinded candidate sensitivities, i.e. the post-rc.9 candidate-gain implementation was exercised by a human, not only by the CI driver |
+| What was not supplied | The calibration mode, the session's History detail (candidate gain record, capture tier, recommendation state) and any measured values. None of them is claimed here |
+
+The record is the maintainer's report, not an exported bundle, and it is
+less detailed than the definition above asked for. The maintainer reviewed
+that gap and approved cutting 1.0.0 on the report as given. Anyone who wants
+the fuller record can produce it: run a Standard or Precision calibration on
+the installed 1.0.0 build and export the hardware validation bundle from
+Diagnostics (docs/MANUAL-TEST.md, step D5).
 
 ## V1 release checklist
 
@@ -125,11 +147,11 @@ person and behaved as documented.
 | `trAIMer-Setup-<version>.exe` | players | CI `windows-installer` job |
 | `trAIMer-v<version>-windows-x64.zip` (portable folder) | development / diagnostics | CI `windows-release` job |
 
-## Component version matrix (V1 RC, frozen)
+## Component version matrix (1.0.0, frozen)
 
 | Component | Version |
 |---|---|
-| App | 1.0.0-rc.13 |
+| App | 1.0.0 |
 | Engine | engine-v4 |
 | Optimizer | optimizer-v3 (paired fit + adequacy gating + change-point) |
 | Scoring model | scoring-v1 (weights: accuracy .28, speed .14, tracking .14, correction .12, overshoot .11, undershoot .11, consistency .10) |

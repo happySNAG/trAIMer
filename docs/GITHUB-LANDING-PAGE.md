@@ -1,20 +1,23 @@
 # GitHub landing page
 
-Recommended repository metadata for the public release. None of this is set
-by code; a maintainer applies it in the repository settings. Where a value
-was chosen over alternatives, the reason is given so it can be revisited.
+Repository metadata for the public release. None of this is set by code; a
+maintainer applies it in the repository settings, and the values below were
+applied for 1.0.0 (PASS-20-REPORT.md records what was set and how). Where a
+value was chosen over alternatives, the reason is given so it can be
+revisited.
 
 ## Name
 
-**Recommendation: rename the repository to `traimer`.**
+**`trAIMer`** — `https://github.com/happySNAG/trAIMer`.
 
-The current slug carries the product's working title, which no longer
-appears anywhere a player sees except this URL. GitHub redirects the old
-slug to the new one, so existing clones, links and the open pull request
-keep working. After renaming: update the two absolute URLs in
-`.github/ISSUE_TEMPLATE/config.yml`, remove the matching entry from
-`ALLOWED` in `scripts/verify-branding.mjs`, and update `origin` in local
-clones.
+The previous slug carried the product's working title, which no longer
+appeared anywhere a player saw except that URL. GitHub redirects the old
+slug to the new one, so existing clones and links keep working; local
+clones should still point `origin` at the new address:
+
+```bash
+git remote set-url origin https://github.com/happySNAG/trAIMer.git
+```
 
 ## Description
 
@@ -36,25 +39,21 @@ the README does not back. Alternatives considered:
 ## Topics
 
 ```
-sensitivity
 aim-trainer
+aim-training
 fps
-mouse
+sensitivity
+mouse-sensitivity
 calibration
+gaming
 windows
 electron
 typescript
-counter-strike-2
-valorant
-fortnite
-apex-legends
-overwatch
-raw-input
-local-first
+open-source
 ```
 
-Game topics are limited to the games with the most searched-for sensitivity
-questions; the support matrix lists the rest.
+Game-specific topics were left off: eleven of them would read as keyword
+stuffing, and the support matrix is where the games are listed.
 
 ## Homepage
 
@@ -64,20 +63,19 @@ is the homepage. If a release page is wanted as the homepage later, use the
 
 ## Release title
 
-> trAIMer 1.0.0-rc.13 — Train. Measure. Tune.
+> trAIMer 1.0.0 — Train. Measure. Tune.
 
-Body: `docs/RELEASE-NOTES.md`. Mark release candidates as **pre-release**.
-Assets: `trAIMer-Setup-1.0.0-rc.13.exe`, `trAIMer-Setup.exe`,
-`trAIMer-Setup-SHA256.txt`.
+Body: `docs/RELEASE-NOTES.md`. Release candidates are marked
+**pre-release**; `v1.0.0` is a normal release. Assets:
+`trAIMer-Setup-1.0.0.exe`, `trAIMer-Setup.exe`, `trAIMer-Setup-SHA256.txt`.
 
 ## Repository settings worth setting
 
-- **Visibility:** the repository is private today. Making it public is the
-  maintainer's decision and is not something CI or a script does. Before
-  flipping it, run through `docs/PUBLIC-SHARE-CHECKLIST.md`.
-- **Default branch:** `main`. The release candidates so far were built from
-  the working branch on pull request #1; merge it before or with the first
-  public release so `main` is what strangers read.
+- **Visibility:** public since 1.0.0. `docs/PUBLIC-SHARE-CHECKLIST.md` is
+  what was checked before the flip.
+- **Default branch:** `main`. The release candidates were built from the
+  working branch on pull request #1; it was merged for 1.0.0, and 1.0.0 was
+  built from `main`.
 - **Security → Private vulnerability reporting:** enable it. `SECURITY.md`
   points there.
 - **Issues:** enabled, with the templates in `.github/ISSUE_TEMPLATE/`.

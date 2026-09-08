@@ -21,7 +21,7 @@ Every release publishes a SHA-256 checksum next to the installer. To verify
 on Windows, in PowerShell:
 
 ```powershell
-Get-FileHash -Algorithm SHA256 .\trAIMer-Setup-1.0.0-rc.13.exe
+Get-FileHash -Algorithm SHA256 .\trAIMer-Setup-1.0.0.exe
 ```
 
 Compare the printed hash with the one in `trAIMer-Setup-SHA256.txt` on the

@@ -1,6 +1,6 @@
 # Game profile support matrix
 
-What trAIMer can and cannot convert, per game, as of **1.0.0-rc.13**. This
+What trAIMer can and cannot convert, per game, as of **1.0.0**. This
 table is checked against the profile registry in CI (`scripts/verify-docs.mjs`):
 the status and the last-verified date in each row must match what the shipped
 profile declares.

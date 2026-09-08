@@ -1,10 +1,33 @@
 # Changelog
 
-All notable changes to trAIMer. The public release line is `1.0.0`; the
-entries below are its release candidates. Player-visible changes come first
-in each entry; the detailed engineering record for every pass lives in the
-`PASS-*-REPORT.md` files at the repository root and is deliberately not
-repeated here.
+All notable changes to trAIMer. `1.0.0` is the first public release; the
+entries below it are the release candidates that led to it. Player-visible
+changes come first in each entry; the detailed engineering record for every
+pass lives in the `PASS-*-REPORT.md` files at the repository root and is
+deliberately not repeated here.
+
+## 1.0.0 — 2026-09-08 — public release
+
+The first public release. The calibration engine, the twelve game profiles,
+the desktop shell, the capture helper and the installer pipeline are those
+of 1.0.0-rc.13; no formula, constant, status or gate changed. What changed
+is the version number, the release notes, and the repository's public face.
+
+**Why this is 1.0.0**
+
+- A person installed 1.0.0-rc.13 on a real Windows PC, launched it, and
+  completed a calibration with a real mouse on a build whose arena applies
+  the blinded candidate sensitivities. No release-blocking issue was
+  observed. That was the one item docs/RELEASE.md required before 1.0.0,
+  and the record is there.
+
+**Repository**
+
+- Renamed from the working title's slug to `trAIMer` and made public;
+  issue-template links, the contributing guide and the README point at the
+  new address. GitHub redirects the old one.
+- The upgrade gate in CI now installs 1.0.0-rc.13 first and upgrades it to
+  this build in place, with the earlier session still in History.
 
 ## 1.0.0-rc.13 — 2026-09-08 — public-release hardening
 

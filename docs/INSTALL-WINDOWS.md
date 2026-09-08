@@ -14,8 +14,9 @@ One file. Double-click it. That is the whole procedure.
 
 ## What you need
 
-- `trAIMer-Setup-1.0.0-rc.13.exe` from the release page (also published as
-  `trAIMer-Setup.exe`, the same file under a version-free name)
+- `trAIMer-Setup-1.0.0.exe` from the [release page](https://github.com/happySNAG/trAIMer/releases/latest)
+  (also published as `trAIMer-Setup.exe`, the same file under a version-free
+  name)
 - Windows 10 or 11, 64-bit
 - A mouse. Any DPI; you will type the DPI in.
 
@@ -29,7 +30,7 @@ check the download matches it, open PowerShell in the folder you downloaded
 to and run:
 
 ```powershell
-Get-FileHash -Algorithm SHA256 .\trAIMer-Setup-1.0.0-rc.13.exe
+Get-FileHash -Algorithm SHA256 .\trAIMer-Setup-1.0.0.exe
 ```
 
 The hash it prints should equal the one in the text file. If it does not, do

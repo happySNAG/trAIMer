@@ -13,8 +13,8 @@ the desktop shell and the native helper; the engine, the frontend and the
 browser suite run anywhere.
 
 ```bash
-git clone <this repository>
-cd traimer
+git clone https://github.com/happySNAG/trAIMer.git
+cd trAIMer
 npm install
 npm test              # engine suite (unit, integration, blind-recovery campaigns)
 npm run lint

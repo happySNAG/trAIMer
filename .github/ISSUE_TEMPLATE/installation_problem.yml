@@ -11,7 +11,7 @@ body:
     id: installer
     attributes:
       label: Installer filename
-      placeholder: trAIMer-Setup-1.0.0-rc.13.exe
+      placeholder: trAIMer-Setup-1.0.0.exe
     validations:
       required: true
   - type: input

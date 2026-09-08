@@ -126,12 +126,6 @@ export const ALLOWED = [
     text: "migrated from `%APPDATA%\\AldoAimLab` on first launch",
     reason: "Architecture table documenting the user-data migration.",
   },
-  {
-    file: ".github/ISSUE_TEMPLATE/config.yml",
-    text: "github.com/happySNAG/Aldo-Aim-Lab",
-    reason:
-      "GitHub contact links must be absolute URLs, and the repository's slug still carries the working title. Renaming the repository (docs/GITHUB-LANDING-PAGE.md recommends it) retires this entry; GitHub redirects the old slug.",
-  },
 ];
 
 /** Files whose every line must be free of the legacy names. */

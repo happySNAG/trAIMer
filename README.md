@@ -2,6 +2,10 @@
 
 **Train. Measure. Tune.**
 
+[![CI](https://github.com/happySNAG/trAIMer/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/happySNAG/trAIMer/actions/workflows/ci.yml)
+[![Latest release](https://img.shields.io/github/v/release/happySNAG/trAIMer?display_name=tag&label=release)](https://github.com/happySNAG/trAIMer/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 trAIMer is a sensitivity calibration and aim-training tool for mouse-and-
 keyboard FPS players on Windows. It runs a short, blinded aim test across
 several candidate sensitivities, measures how you actually perform on each,
@@ -9,11 +13,12 @@ estimates the physical sensitivity the evidence supports, and translates that
 into the settings of the game you play. It does not touch the game: you type
 the number in yourself.
 
-> **Status: 1.0.0-rc.13.** The installer, the calibration engine, the results
-> and the twelve game profiles are complete and gated in CI. What still
-> stands between this build and 1.0.0 is one thing: a human completing a
-> calibration on real Windows hardware on a build since rc.9, when the arena
-> first applied the blinded candidate sensitivity. See
+> **Status: 1.0.0**, the first public release. The installer, the calibration
+> engine, the results and the twelve game profiles are complete and gated in
+> CI, and a person has completed a calibration on the installed build on real
+> Windows hardware. Download it from the
+> [releases page](https://github.com/happySNAG/trAIMer/releases/latest); what
+> was checked before this version was cut is in
 > [docs/RELEASE.md](docs/RELEASE.md).
 
 ![The Aim Test screen with a game chosen](docs/screenshots/02-setup-game-picker.png)
@@ -88,8 +93,8 @@ and why some settings are deliberately refused, is
 
 Windows 10 or 11, 64-bit. One installer, no admin rights, no terminal.
 
-1. Download `trAIMer-Setup-1.0.0-rc.13.exe` and its SHA-256 checksum from the
-   release page.
+1. Download `trAIMer-Setup-1.0.0.exe` and its SHA-256 checksum from the
+   [release page](https://github.com/happySNAG/trAIMer/releases/latest).
 2. Windows SmartScreen will say the publisher is unknown, because the build
    is not code-signed. Click **More info → Run anyway**. You can verify the
    file against its checksum first.
@@ -168,9 +173,11 @@ readable but are marked as unable to tell you a sensitivity.
 - Two profiles are experimental and several settings are deliberately not
   converted. The support matrix lists each.
 - The build is unsigned; SmartScreen warns on install.
-- No human has yet completed a calibration on real hardware on a build since
-  rc.9. Automated gates drive the installed app through a full calibration on
-  every CI run, but that is not the same thing.
+- Real-hardware evidence is still thin: automated gates drive the installed
+  app through a full calibration on every CI run, and one person has
+  completed a calibration on the installed build on a real Windows PC. Wider
+  experience will come from players; the issue templates are how to report
+  what you find.
 
 ## Privacy
 
@@ -199,6 +206,8 @@ it. Start with [CONTRIBUTING.md](CONTRIBUTING.md).
 ## For developers
 
 ```bash
+git clone https://github.com/happySNAG/trAIMer.git
+cd trAIMer
 npm install
 npm test              # engine suite (1200+ tests)
 npm run lint

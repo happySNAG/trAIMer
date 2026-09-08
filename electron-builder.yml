@@ -43,9 +43,9 @@ extraResources:
 
 asar: true
 compression: maximum
-# Unsigned for V1: Aldo installs from a flash drive we hand him, and a code
-# signing certificate is not yet purchased. SmartScreen shows a "More info ->
-# Run anyway" prompt; docs/INSTALL-WINDOWS.md says so plainly.
+# Unsigned for V1: a code signing certificate is not yet purchased.
+# SmartScreen shows a "More info -> Run anyway" prompt; docs/INSTALL-WINDOWS.md
+# and docs/CODE-SIGNING.md say so plainly.
 forceCodeSigning: false
 
 win:

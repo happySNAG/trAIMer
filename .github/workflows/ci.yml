@@ -338,9 +338,9 @@ jobs:
         # pass report before it is run.
         env:
           GH_TOKEN: ${{ github.token }}
-          PRIOR_RC_VERSION: 1.0.0-rc.12
-          PRIOR_RC_RUN_ID: "34197845506"
-          PRIOR_RC_SHA256: dcc93df94fc52bbad49d82f2045d89388670b47e7a361b262a73d78cfae079a1
+          PRIOR_RC_VERSION: 1.0.0-rc.13
+          PRIOR_RC_RUN_ID: "34228526352"
+          PRIOR_RC_SHA256: 0da0196f1429e64b8ede8bad23726db222b144f1a88b520ff43472971b5b1eb6
         run: |
           $dir = "$env:RUNNER_TEMP\prior-rc"
           New-Item -ItemType Directory -Force -Path $dir | Out-Null

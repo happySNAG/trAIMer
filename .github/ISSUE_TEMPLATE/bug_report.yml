@@ -11,8 +11,8 @@ body:
     id: version
     attributes:
       label: trAIMer version
-      description: Shown at the bottom of the sidebar (for example `1.0.0-rc.13 · engine-v4`) and in the installer filename.
-      placeholder: 1.0.0-rc.13
+      description: Shown at the bottom of the sidebar (for example `1.0.0 · engine-v4`) and in the installer filename.
+      placeholder: 1.0.0
     validations:
       required: true
   - type: dropdown

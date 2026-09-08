@@ -1,12 +1,20 @@
 /**
- * Explicit application and engine version metadata (V1 release candidate).
+ * Explicit application and engine version metadata (V1 public release).
  *
  * Every persisted artifact that records a decision (human session, optimizer
  * run, recommendation, export bundle, audit data, capture self-test) embeds
  * these strings so any historical result can be traced to the exact code that
  * produced it.
  *
- * The V1 release candidate is identified as 1.0.0-rc.13 (Game Profile
+ * The public release is identified as 1.0.0. It carries the same engine,
+ * profiles, desktop shell, helper and installer pipeline as 1.0.0-rc.13;
+ * the version number, the release notes and the repository's public face
+ * are what changed. The one item that kept rc.13 a candidate — a person
+ * completing a calibration on real Windows hardware on a build since rc.9,
+ * when the arena first applied the blinded candidate sensitivity — was done
+ * on the installed rc.13 build on 2026-09-08 (docs/RELEASE.md, "Hardware
+ * validation record"). The release candidates that led here:
+ * rc.13 (Game Profile
  * Campaign Pass 5 of 5: public-release hardening. No profile formula
  * changed. Adds the public README, support matrix, license, contributing
  * guide, profile-proposal template, issue templates, security and privacy
@@ -136,8 +144,8 @@ export const PRODUCT_NAME = "trAIMer";
 /** The product tagline, shown beside the wordmark. */
 export const PRODUCT_TAGLINE = "Train. Measure. Tune.";
 
-/** Application release version for the V1 release candidate. */
-export const APP_VERSION = "1.0.0-rc.13";
+/** Application release version for the V1 public release. */
+export const APP_VERSION = "1.0.0";
 
 /**
  * Engine contract version: bump when a persisted engine-facing data contract
