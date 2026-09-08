@@ -132,10 +132,16 @@ describe("safety boundary — profiles are informational only (requirement 21)",
   });
 
   it("makes no network request for provenance URLs", () => {
-    // A source URL is displayed text. Nothing in the layer can fetch it, and
-    // this pass ships none at all.
+    // A source URL is displayed text. Nothing in the layer can fetch it; a
+    // named game cites one (https only), the control and the fixtures none.
     for (const profile of [...PUBLIC_GAME_PROFILES, ...ARCHITECTURE_FIXTURE_PROFILES]) {
-      expect(profile.source.url).toBeNull();
+      if (profile.source.url !== null) {
+        expect(profile.source.type).not.toBe("unit-definition");
+        expect(profile.source.url).toMatch(/^https:\/\/[^\s"']+$/);
+      }
+    }
+    for (const fixture of ARCHITECTURE_FIXTURE_PROFILES) {
+      expect(fixture.source.url).toBeNull();
     }
   });
 
@@ -148,9 +154,16 @@ describe("safety boundary — profiles are informational only (requirement 21)",
   });
 });
 
-describe("this pass ships one public profile (requirement 27)", () => {
-  it("the public list is the generic/raw control and nothing else", () => {
-    expect(PUBLIC_GAME_PROFILES.map((p) => p.id)).toEqual(["generic-raw"]);
+describe("the public profile set (Pass 2, requirement 8)", () => {
+  it("the public list is the five named games and the generic/raw control", () => {
+    expect(PUBLIC_GAME_PROFILES.map((p) => p.id)).toEqual([
+      "fortnite",
+      "valorant",
+      "counter-strike-2",
+      "apex-legends",
+      "call-of-duty-warzone",
+      "generic-raw",
+    ]);
   });
 
   it("no fixture is reachable through the public registry", () => {
@@ -163,8 +176,13 @@ describe("this pass ships one public profile (requirement 27)", () => {
   it("fixtures live in their own module, never in the profiles directory", () => {
     const profileFiles = listTs("src/games/profiles");
     expect(profileFiles.sort()).toEqual([
+      "src/games/profiles/apexLegends.ts",
+      "src/games/profiles/callOfDutyWarzone.ts",
+      "src/games/profiles/counterStrike2.ts",
+      "src/games/profiles/fortnite.ts",
       "src/games/profiles/generic.ts",
       "src/games/profiles/index.ts",
+      "src/games/profiles/valorant.ts",
     ]);
     for (const file of profileFiles) {
       expect(read(file)).not.toContain("fixture");

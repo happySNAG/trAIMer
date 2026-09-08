@@ -1,7 +1,7 @@
 /**
  * The generic / raw sensitivity profile (Game Profile Pass 1, requirement 12).
  *
- * This is the CONTROL profile and, in this pass, the only public one. It is
+ * This is the CONTROL profile. It is
  * how a player works in physical units — DPI, cm/360, and a plain sensitivity
  * number — with no game-specific behaviour anywhere in the path.
  *
@@ -42,7 +42,7 @@ export const GENERIC_PROFILE_ID = "generic-raw";
 export const GENERIC_RAW_PROFILE: GameProfile = {
   schemaVersion: GAME_PROFILE_SCHEMA_VERSION,
   id: GENERIC_PROFILE_ID,
-  displayName: "Generic (raw sensitivity)",
+  displayName: "Generic / Raw",
   publisher: null,
   gameFamily: null,
   profileVersion: 1,

@@ -4,7 +4,7 @@ import {
   GameProfileRegistryError,
 } from "../src/games/registry.ts";
 import { GAME_PROFILE_REGISTRY } from "../src/games/index.ts";
-import { PUBLIC_GAME_PROFILES } from "../src/games/profiles/index.ts";
+import { NAMED_GAME_PROFILE_IDS, PUBLIC_GAME_PROFILES } from "../src/games/profiles/index.ts";
 import { GENERIC_PROFILE_ID, GENERIC_RAW_PROFILE } from "../src/games/profiles/generic.ts";
 import {
   ARCHITECTURE_FIXTURE_PROFILES,
@@ -37,11 +37,13 @@ describe("game profile registry — deterministic lookup (requirement 8)", () =>
     const first = registry.ids();
     const second = GameProfileRegistry.create(ALL).ids();
     expect([...second]).toEqual([...first]);
-    expect(first[0]).toBe(GENERIC_PROFILE_ID);
+    // Picker order: the five named games, then the generic/raw control.
+    expect(first.slice(0, 6)).toEqual([...NAMED_GAME_PROFILE_IDS, GENERIC_PROFILE_ID]);
   });
 
   it("filters by status and visibility", () => {
     expect(registry.list({ visibility: "public" }).map((p) => p.id)).toEqual([
+      ...NAMED_GAME_PROFILE_IDS,
       GENERIC_PROFILE_ID,
     ]);
     expect(registry.list({ status: "deprecated" }).map((p) => p.id)).toEqual([
@@ -49,7 +51,14 @@ describe("game profile registry — deterministic lookup (requirement 8)", () =>
     ]);
     expect(
       registry.list({ status: ["experimental", "partially-verified"] }).map((p) => p.id),
-    ).toEqual(["fixture-per-scope", "fixture-power-law"]);
+    ).toEqual([
+      "fortnite",
+      "valorant",
+      "apex-legends",
+      "call-of-duty-warzone",
+      "fixture-per-scope",
+      "fixture-power-law",
+    ]);
     expect(registry.list({ excludeDeprecated: true }).map((p) => p.id)).not.toContain(
       FIXTURE_DEPRECATED.id,
     );
@@ -57,7 +66,7 @@ describe("game profile registry — deterministic lookup (requirement 8)", () =>
 
   it("never offers a fixture or a deprecated profile for selection", () => {
     const selectable = registry.selectable();
-    expect(selectable.map((p) => p.id)).toEqual([GENERIC_PROFILE_ID]);
+    expect(selectable.map((p) => p.id)).toEqual([...NAMED_GAME_PROFILE_IDS, GENERIC_PROFILE_ID]);
     for (const profile of selectable) {
       expect(profile.visibility).toBe("public");
       expect(profile.status).not.toBe("deprecated");
@@ -170,16 +179,30 @@ describe("game profile registry — saved selections (requirements 17, 20)", () 
   });
 });
 
-describe("the shipped public registry (requirement 27)", () => {
-  it("contains exactly the generic/raw control profile", () => {
-    expect(GAME_PROFILE_REGISTRY.ids()).toEqual([GENERIC_PROFILE_ID]);
-    expect(PUBLIC_GAME_PROFILES).toHaveLength(1);
+describe("the shipped public registry (Pass 2, requirement 8)", () => {
+  it("contains the five named games and the generic/raw control, in picker order", () => {
+    expect(GAME_PROFILE_REGISTRY.ids()).toEqual([...NAMED_GAME_PROFILE_IDS, GENERIC_PROFILE_ID]);
+    expect(PUBLIC_GAME_PROFILES).toHaveLength(6);
+    expect(GAME_PROFILE_REGISTRY.selectable().map((p) => p.displayName)).toEqual([
+      "Fortnite",
+      "Valorant",
+      "Counter-Strike 2",
+      "Apex Legends",
+      "Call of Duty / Warzone",
+      "Generic / Raw",
+    ]);
   });
 
-  it("ships no named-game profile", () => {
+  it("every named game carries a publisher and a cited source; only the control is a unit definition", () => {
     for (const profile of GAME_PROFILE_REGISTRY.list()) {
-      expect(profile.publisher).toBeNull();
-      expect(profile.source.type).toBe("unit-definition");
+      if (profile.id === GENERIC_PROFILE_ID) {
+        expect(profile.publisher).toBeNull();
+        expect(profile.source.type).toBe("unit-definition");
+      } else {
+        expect(profile.publisher).not.toBeNull();
+        expect(profile.source.type).not.toBe("unit-definition");
+        expect(profile.source.url).toMatch(/^https:\/\//);
+      }
     }
   });
 

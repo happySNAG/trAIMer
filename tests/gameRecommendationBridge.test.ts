@@ -63,7 +63,7 @@ describe("game recommendation bridge", () => {
     );
     expect(outcome.kind).toBe("unavailable");
     if (outcome.kind !== "unavailable") throw new Error("unreachable");
-    expect(outcome.reason).toContain("Generic (raw sensitivity)");
+    expect(outcome.reason).toContain("Generic / Raw");
     expect(outcome.reason).toContain("Aim Test");
   });
 
@@ -150,7 +150,7 @@ describe("results integration renders engine values (requirement 19)", () => {
 
   it("draws the game section from the export, never from its own arithmetic", () => {
     expect(view).toContain("function renderGameRecommendation(");
-    expect(view).toContain("g.recommended.hipfire.value.ui");
+    expect(view).toContain("g.recommended.hipfire.display");
     expect(view).toContain("g.physicalEquivalent.cmPer360X");
     expect(view).toContain("g.entryLines");
     // The view must not convert anything itself.
