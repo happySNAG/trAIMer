@@ -157,11 +157,17 @@ describe("safety boundary — profiles are informational only (requirement 21)",
 describe("the public profile set (Pass 2, requirement 8)", () => {
   it("the public list is the five named games and the generic/raw control", () => {
     expect(PUBLIC_GAME_PROFILES.map((p) => p.id)).toEqual([
-      "fortnite",
-      "valorant",
-      "counter-strike-2",
       "apex-legends",
+      "battlefield-6",
       "call-of-duty-warzone",
+      "counter-strike-2",
+      "fortnite",
+      "marvel-rivals",
+      "overwatch-2",
+      "pubg-battlegrounds",
+      "rainbow-six-siege",
+      "the-finals",
+      "valorant",
       "generic-raw",
     ]);
   });
@@ -177,11 +183,17 @@ describe("the public profile set (Pass 2, requirement 8)", () => {
     const profileFiles = listTs("src/games/profiles");
     expect(profileFiles.sort()).toEqual([
       "src/games/profiles/apexLegends.ts",
+      "src/games/profiles/battlefield6.ts",
       "src/games/profiles/callOfDutyWarzone.ts",
       "src/games/profiles/counterStrike2.ts",
       "src/games/profiles/fortnite.ts",
       "src/games/profiles/generic.ts",
       "src/games/profiles/index.ts",
+      "src/games/profiles/marvelRivals.ts",
+      "src/games/profiles/overwatch2.ts",
+      "src/games/profiles/pubg.ts",
+      "src/games/profiles/rainbowSixSiege.ts",
+      "src/games/profiles/theFinals.ts",
       "src/games/profiles/valorant.ts",
     ]);
     for (const file of profileFiles) {

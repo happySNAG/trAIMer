@@ -38,7 +38,7 @@ describe("game profile registry — deterministic lookup (requirement 8)", () =>
     const second = GameProfileRegistry.create(ALL).ids();
     expect([...second]).toEqual([...first]);
     // Picker order: the five named games, then the generic/raw control.
-    expect(first.slice(0, 6)).toEqual([...NAMED_GAME_PROFILE_IDS, GENERIC_PROFILE_ID]);
+    expect(first.slice(0, NAMED_GAME_PROFILE_IDS.length + 1)).toEqual([...NAMED_GAME_PROFILE_IDS, GENERIC_PROFILE_ID]);
   });
 
   it("filters by status and visibility", () => {
@@ -52,10 +52,16 @@ describe("game profile registry — deterministic lookup (requirement 8)", () =>
     expect(
       registry.list({ status: ["experimental", "partially-verified"] }).map((p) => p.id),
     ).toEqual([
-      "fortnite",
-      "valorant",
       "apex-legends",
+      "battlefield-6",
       "call-of-duty-warzone",
+      "fortnite",
+      "marvel-rivals",
+      "overwatch-2",
+      "pubg-battlegrounds",
+      "rainbow-six-siege",
+      "the-finals",
+      "valorant",
       "fixture-per-scope",
       "fixture-power-law",
     ]);
@@ -180,17 +186,26 @@ describe("game profile registry — saved selections (requirements 17, 20)", () 
 });
 
 describe("the shipped public registry (Pass 2, requirement 8)", () => {
-  it("contains the five named games and the generic/raw control, in picker order", () => {
+  it("contains the eleven named games alphabetically and the generic/raw control last", () => {
     expect(GAME_PROFILE_REGISTRY.ids()).toEqual([...NAMED_GAME_PROFILE_IDS, GENERIC_PROFILE_ID]);
-    expect(PUBLIC_GAME_PROFILES).toHaveLength(6);
-    expect(GAME_PROFILE_REGISTRY.selectable().map((p) => p.displayName)).toEqual([
-      "Fortnite",
-      "Valorant",
-      "Counter-Strike 2",
+    expect(PUBLIC_GAME_PROFILES).toHaveLength(12);
+    const names = GAME_PROFILE_REGISTRY.selectable().map((p) => p.displayName);
+    expect(names).toEqual([
       "Apex Legends",
+      "Battlefield 6",
       "Call of Duty / Warzone",
+      "Counter-Strike 2",
+      "Fortnite",
+      "Marvel Rivals",
+      "Overwatch 2",
+      "PUBG: Battlegrounds",
+      "Rainbow Six Siege",
+      "The Finals",
+      "Valorant",
       "Generic / Raw",
     ]);
+    const games = names.slice(0, -1);
+    expect([...games].sort((a, b) => a.localeCompare(b))).toEqual(games);
   });
 
   it("every named game carries a publisher and a cited source; only the control is a unit definition", () => {
