@@ -227,6 +227,13 @@ jobs:
   windows-installer:
     runs-on: windows-latest
     needs: [native-windows]
+    # The upgrade gate downloads the previous release candidate: from its
+    # GitHub release (contents: read) or, failing that, from the CI artifact
+    # of the run that built it (actions: read). The default token has neither
+    # spelled out, and the artifact route answered 403 without them.
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
