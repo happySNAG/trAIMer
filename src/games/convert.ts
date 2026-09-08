@@ -25,6 +25,8 @@ import {
 import {
   DEFAULT_ASPECT_RATIO,
   resolveFovModel,
+  verticalToHorizontal,
+  type FovAxis,
   type ResolvedFov,
 } from "./fov.ts";
 import {
@@ -211,9 +213,13 @@ export interface ConvertedZoom {
   readonly nativeBehavior: ZoomLevelSpec["nativeBehavior"];
   /** null when the profile declares no setting the player can change. */
   readonly setting: ConvertedSetting | null;
-  /** Degrees per count this zoom ends up at, using the rounded values. */
-  readonly achievedDegreesPerCount: number;
-  readonly achievedCmPer360: number;
+  /**
+   * Degrees per count this zoom ends up at, using the rounded values. `null`
+   * when there is no single answer — a game-applied coefficient gives every
+   * optic its own value, and the profile does not pretend to know them all.
+   */
+  readonly achievedDegreesPerCount: number | null;
+  readonly achievedCmPer360: number | null;
   readonly fovDegrees: number | null;
   readonly notes: readonly string[];
 }
@@ -242,6 +248,72 @@ export interface GameConversion {
   readonly roundTripTolerance: number;
   readonly warnings: readonly string[];
   readonly notes: readonly string[];
+}
+
+/**
+ * A resolved FOV re-stated on a given axis convention.
+ *
+ * The linear angle ratio a Source-lineage engine applies is taken on ITS
+ * numbers — 40° over 90°, both quoted at 4:3 — and would come out differently
+ * on the 16:9 horizontal angles, so the ratio has to be formed on the axis the
+ * hip-fire number is stated on.
+ */
+export function fovDegreesOnAxis(fov: ResolvedFov, axis: FovAxis): number {
+  switch (axis) {
+    case "horizontal":
+      return fov.horizontalDeg;
+    case "vertical":
+      return fov.verticalDeg;
+    case "horizontal-at-4-3":
+      return verticalToHorizontal(fov.verticalDeg, 4 / 3);
+    case "horizontal-at-16-9":
+      return verticalToHorizontal(fov.verticalDeg, 16 / 9);
+  }
+}
+
+/**
+ * True when converting this profile reads a field of view the player can set.
+ * Drives whether the picker shows an FOV control at all: a configurable FOV
+ * that no conversion path reads would be a decorative input.
+ */
+export function conversionUsesFov(profile: GameProfile): boolean {
+  if (profile.fov.kind !== "configurable") return false;
+  if (profile.fov.affectsHipfireSensitivity) return true;
+  // A coefficient the game applies itself is translated without any FOV;
+  // only a zoom whose ratio THIS layer computes can read one.
+  const fovZooms = zoomLevelsOf(profile).filter(
+    (z) => z.nativeBehavior !== "hipfire" && z.nativeBehavior !== "monitor-distance-coefficient",
+  );
+  if (fovZooms.length === 0) return false;
+  return (
+    profile.supportedMatching.includes("monitor-distance") ||
+    fovZooms.some(
+      (z) =>
+        z.nativeBehavior === "fov-relative-multiplier" ||
+        z.nativeBehavior === "fov-ratio-multiplier",
+    )
+  );
+}
+
+/**
+ * Translates a matching philosophy into the coefficient a game that applies
+ * monitor-distance matching ITSELF expects, on the axis that game matches on.
+ *
+ * Matching a fraction c of the horizontal half-width is the same point on the
+ * screen as matching c × aspect of the vertical half-height, because
+ * tan(θ_h) = aspect × tan(θ_v). Returns null for a philosophy the coefficient
+ * cannot express (physical-360 would need an infinite coefficient).
+ */
+export function monitorDistanceCoefficientFor(
+  matching: ZoomMatchMethod,
+  gameAxis: "horizontal" | "vertical",
+  aspectRatio: number,
+): number | null {
+  if (matching.kind !== "monitor-distance") return null;
+  const c = matching.coefficient ?? 0;
+  const axis = matching.axis ?? "horizontal";
+  if (axis === gameAxis) return c;
+  return gameAxis === "vertical" ? c * aspectRatio : c / aspectRatio;
 }
 
 /** Resolves the FOV of one zoom level, deriving it from magnification if need be. */
@@ -289,7 +361,11 @@ export function gameSettingsFromCanonical(
   const exactHip = valueForDegreesPerCount(model, target.x, "x");
   const hipQuant = quantize(profile.hipfireField.entry, exactHip);
   const achievedDegPerCountX = degreesPerCountForValue(model, hipQuant.ui, "x");
-  notes.push(...hipQuant.notes);
+  notes.push(
+    ...hipQuant.notes.map((n) =>
+      profile.axes.independentAxes ? `${profile.hipfireField.label}: ${n}` : n,
+    ),
+  );
 
   // ---- vertical ----
   const ratio = builtInVerticalRatio(profile);
@@ -321,7 +397,7 @@ export function gameSettingsFromCanonical(
         ? effectiveValue / hipQuant.ui
         : effectiveValue;
     const vertQuant = quantize(field.entry, exactVertical);
-    notes.push(...vertQuant.notes);
+    notes.push(...vertQuant.notes.map((n) => `${field.label}: ${n}`));
     vertical = {
       field: field.field,
       label: field.label,
@@ -381,6 +457,61 @@ export function gameSettingsFromCanonical(
     const zoomNotes: string[] = [...zoom.notes];
     const zoomFov = resolveZoomFov(zoom, hipFov, aspectRatio);
 
+    const valueScale = zoom.valueScale ?? 1;
+
+    // ---- a coefficient the game applies itself (Pass 2) ----
+    if (zoom.nativeBehavior === "monitor-distance-coefficient" && zoom.setting) {
+      const gameAxis = zoom.coefficientAxis ?? "vertical";
+      let exactCoefficient: number | null;
+      if (matching.kind === "game-native") {
+        exactCoefficient = zoom.neutralValue;
+        if (exactCoefficient === null) {
+          zoomNotes.push(
+            "This game's stock coefficient is not recorded in the profile, so no value is suggested.",
+          );
+        } else {
+          zoomNotes.push("Left at the game's own default relationship.");
+        }
+      } else {
+        exactCoefficient = monitorDistanceCoefficientFor(matching, gameAxis, aspectRatio);
+        if (exactCoefficient === null) {
+          zoomNotes.push(
+            `${describeMatchingKind(matching)} cannot be expressed as a monitor-distance coefficient; no value is suggested.`,
+          );
+        } else if ((matching.axis ?? "horizontal") !== gameAxis) {
+          zoomNotes.push(
+            `Converted to the ${gameAxis} axis this game matches on, assuming a ${describeAspect(aspectRatio)} display.`,
+          );
+        }
+      }
+      if (exactCoefficient === null) {
+        zooms.push(unconverted(zoom, zoomNotes, null, null, zoomFov));
+        continue;
+      }
+      const q = quantize(zoom.setting.entry, exactCoefficient * valueScale);
+      zoomNotes.push(...q.notes);
+      zooms.push({
+        zoomId: zoom.id,
+        label: zoom.label,
+        magnification: zoom.magnification,
+        nativeBehavior: zoom.nativeBehavior,
+        setting: {
+          field: zoom.setting.field,
+          label: zoom.setting.label,
+          value: q,
+          display: `${q.ui.toFixed(zoom.setting.entry.uiDecimals)}${zoom.setting.entry.unitSuffix}`,
+        },
+        // Every optic lands somewhere different under a coefficient; the
+        // game computes each one from its own FOV and the profile does not
+        // claim to know them.
+        achievedDegreesPerCount: null,
+        achievedCmPer360: null,
+        fovDegrees: zoomFov?.statedDeg ?? null,
+        notes: zoomNotes,
+      });
+      continue;
+    }
+
     let ratioToHip: number | null;
     try {
       ratioToHip = zoomSensitivityRatio(matching, hipFov, zoomFov);
@@ -392,17 +523,15 @@ export function gameSettingsFromCanonical(
     }
 
     if (zoom.nativeBehavior === "hipfire" || !zoom.setting) {
-      zooms.push({
-        zoomId: zoom.id,
-        label: zoom.label,
-        magnification: zoom.magnification,
-        nativeBehavior: zoom.nativeBehavior,
-        setting: null,
-        achievedDegreesPerCount: achievedDegPerCountX,
-        achievedCmPer360: 360 / (achievedDegPerCountX * countsPerCm),
-        fovDegrees: zoomFov?.statedDeg ?? null,
-        notes: zoomNotes,
-      });
+      zooms.push(
+        unconverted(
+          zoom,
+          zoomNotes,
+          achievedDegPerCountX,
+          360 / (achievedDegPerCountX * countsPerCm),
+          zoomFov,
+        ),
+      );
       continue;
     }
 
@@ -410,6 +539,12 @@ export function gameSettingsFromCanonical(
       hipFov && zoomFov
         ? Math.tan((zoomFov.horizontalDeg * Math.PI) / 360) /
           Math.tan((hipFov.horizontalDeg * Math.PI) / 360)
+        : null;
+    // The linear angle ratio, on the axis the game states its hip-fire FOV.
+    const linearFovRatio =
+      hipFov && zoomFov
+        ? fovDegreesOnAxis(zoomFov, hipFov.statedAxis) /
+          fovDegreesOnAxis(hipFov, hipFov.statedAxis)
         : null;
 
     let exactValue: number | null = null;
@@ -440,36 +575,49 @@ export function gameSettingsFromCanonical(
         case "independent-scalar":
           exactValue = valueForDegreesPerCount(model, achievedDegPerCountX * ratioToHip, "x");
           break;
+        case "fov-ratio-multiplier":
+          if (linearFovRatio === null || linearFovRatio <= 0) {
+            zoomNotes.push(
+              "This optic's sensitivity is scaled by the game's own field-of-view ratio, which this profile cannot form here; no value is suggested.",
+            );
+          } else {
+            exactValue = ratioToHip / linearFovRatio;
+          }
+          break;
+        default:
+          break;
       }
     }
 
     if (exactValue === null) {
-      zooms.push({
-        zoomId: zoom.id,
-        label: zoom.label,
-        magnification: zoom.magnification,
-        nativeBehavior: zoom.nativeBehavior,
-        setting: null,
-        achievedDegreesPerCount: achievedDegPerCountX,
-        achievedCmPer360: 360 / (achievedDegPerCountX * countsPerCm),
-        fovDegrees: zoomFov?.statedDeg ?? null,
-        notes: zoomNotes,
-      });
+      zooms.push(
+        unconverted(
+          zoom,
+          zoomNotes,
+          achievedDegPerCountX,
+          360 / (achievedDegPerCountX * countsPerCm),
+          zoomFov,
+        ),
+      );
       continue;
     }
 
-    const q = quantize(zoom.setting.entry, exactValue);
+    const q = quantize(zoom.setting.entry, exactValue * valueScale);
     zoomNotes.push(...q.notes);
+    const applied = q.ui / valueScale;
     let achievedZoomDegPerCount: number;
     switch (zoom.nativeBehavior) {
       case "multiplies-hipfire":
-        achievedZoomDegPerCount = achievedDegPerCountX * q.ui;
+        achievedZoomDegPerCount = achievedDegPerCountX * applied;
         break;
       case "fov-relative-multiplier":
-        achievedZoomDegPerCount = achievedDegPerCountX * q.ui * (fovFactor ?? 1);
+        achievedZoomDegPerCount = achievedDegPerCountX * applied * (fovFactor ?? 1);
+        break;
+      case "fov-ratio-multiplier":
+        achievedZoomDegPerCount = achievedDegPerCountX * applied * (linearFovRatio ?? 1);
         break;
       case "independent-scalar":
-        achievedZoomDegPerCount = degreesPerCountForValue(model, q.ui, "x");
+        achievedZoomDegPerCount = degreesPerCountForValue(model, applied, "x");
         break;
       default:
         achievedZoomDegPerCount = achievedDegPerCountX;
@@ -533,6 +681,52 @@ export function gameSettingsFromCanonical(
     warnings,
     notes,
   };
+}
+
+/** A zoom level that produced no setting, with whatever is known about it. */
+function unconverted(
+  zoom: ZoomLevelSpec,
+  notes: readonly string[],
+  achievedDegreesPerCount: number | null,
+  achievedCmPer360: number | null,
+  zoomFov: ResolvedFov | null,
+): ConvertedZoom {
+  return {
+    zoomId: zoom.id,
+    label: zoom.label,
+    magnification: zoom.magnification,
+    nativeBehavior: zoom.nativeBehavior,
+    setting: null,
+    achievedDegreesPerCount,
+    achievedCmPer360,
+    fovDegrees: zoomFov?.statedDeg ?? null,
+    notes,
+  };
+}
+
+function describeMatchingKind(method: ZoomMatchMethod): string {
+  switch (method.kind) {
+    case "physical-360-distance":
+      return "Same-physical-sensitivity matching";
+    case "game-native":
+      return "The game's own default";
+    case "monitor-distance":
+      return "Monitor-distance matching";
+  }
+}
+
+function describeAspect(aspectRatio: number): string {
+  const known: [number, string][] = [
+    [16 / 9, "16:9"],
+    [16 / 10, "16:10"],
+    [4 / 3, "4:3"],
+    [21 / 9, "21:9"],
+    [32 / 9, "32:9"],
+  ];
+  for (const [value, label] of known) {
+    if (Math.abs(value - aspectRatio) < 1e-6) return label;
+  }
+  return `${aspectRatio.toFixed(3)}:1`;
 }
 
 // ---------------------------------------------------------------------------

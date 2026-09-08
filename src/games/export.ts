@@ -78,12 +78,27 @@ export interface GameRecommendationExport {
     readonly cmPer360X: number;
     readonly cmPer360Y: number;
     readonly display: string;
+    /** The hip-fire value alone, formatted as the game's own UI shows it. */
+    readonly hipfireDisplay: string;
+    readonly verticalDisplay: string | null;
   } | null;
 
   /** What to set, with every rounding consequence attached. */
   readonly recommended: GameConversion;
   /** One line per value the player has to type. */
   readonly entryLines: readonly string[];
+  /**
+   * Exact equivalent versus what the game accepts, for every value the
+   * game's own grid or range moved. Empty when nothing was lost.
+   */
+  readonly exactVsEntered: readonly {
+    readonly label: string;
+    readonly exact: string;
+    readonly enter: string;
+    /** A finer value for a configuration file, when the profile has one. */
+    readonly config: string | null;
+    readonly clamped: boolean;
+  }[];
 
   /** The physical sensitivity underneath both of the above. */
   readonly physicalEquivalent: {
@@ -130,6 +145,34 @@ export function buildGameRecommendationExport(
     if (zoom.setting) entryLines.push(entryLine(zoom.setting));
   }
 
+  // "Exact equivalent / Enter in game", one pair per value the game's grid
+  // moved (requirement 11 of Pass 2). Rounding loss is never hidden.
+  const exactVsEntered: {
+    label: string;
+    exact: string;
+    enter: string;
+    config: string | null;
+    clamped: boolean;
+  }[] = [];
+  const settingsToCheck: ConvertedSetting[] = [conversion.hipfire];
+  if (conversion.vertical) settingsToCheck.push(conversion.vertical);
+  for (const zoom of conversion.zooms) if (zoom.setting) settingsToCheck.push(zoom.setting);
+  for (const setting of settingsToCheck) {
+    const q = setting.value;
+    if (!q.roundingLoss && !q.clampedToMin && !q.clampedToMax) continue;
+    const decimals = setting.display.includes(".")
+      ? setting.display.replace(/[^0-9.]/g, "").split(".")[1]?.length ?? 0
+      : 0;
+    const suffix = setting.display.replace(/[-0-9.]/g, "");
+    exactVsEntered.push({
+      label: setting.label,
+      exact: `${q.exact.toFixed(decimals + 2)}${suffix}`,
+      enter: setting.display,
+      config: q.config !== null && q.config !== q.ui ? `${q.config}${suffix}` : null,
+      clamped: q.clampedToMin || q.clampedToMax,
+    });
+  }
+
   const precisionNotes: string[] = [...conversion.notes];
   for (const zoom of conversion.zooms) {
     for (const note of zoom.notes) precisionNotes.push(`${zoom.label}: ${note}`);
@@ -142,6 +185,11 @@ export function buildGameRecommendationExport(
         cmPer360X: cmPer360X(input.current.aim),
         cmPer360Y: cmPer360Y(input.current.aim),
         display: `${profile.hipfireField.label}: ${input.current.settings.hipfire.toFixed(profile.hipfireField.entry.uiDecimals)}${profile.hipfireField.entry.unitSuffix}`,
+        hipfireDisplay: `${input.current.settings.hipfire.toFixed(profile.hipfireField.entry.uiDecimals)}${profile.hipfireField.entry.unitSuffix}`,
+        verticalDisplay:
+          input.current.settings.vertical != null && profile.axes.verticalField
+            ? `${input.current.settings.vertical.toFixed(profile.axes.verticalField.entry.uiDecimals)}${profile.axes.verticalField.entry.unitSuffix}`
+            : null,
       }
     : null;
 
@@ -171,6 +219,7 @@ export function buildGameRecommendationExport(
     current,
     recommended: conversion,
     entryLines,
+    exactVsEntered,
     physicalEquivalent: {
       degreesPerCmX: input.recommended.aim.degreesPerCmX,
       degreesPerCmY: input.recommended.aim.degreesPerCmY,

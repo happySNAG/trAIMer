@@ -441,10 +441,123 @@ export const FIXTURE_DEPRECATED: GameProfile = {
     "The game changed its sensitivity scale in a patch, so values converted under this definition are no longer correct.",
 };
 
+/**
+ * A linear-FOV-ratio zoom (the Source / Valorant relationship) with a
+ * percentage-scaled targeting value, and a monitor-distance coefficient the
+ * game applies itself (Pass 2 behaviours).
+ */
+export const FIXTURE_ENGINE_SCALED: GameProfile = {
+  schemaVersion: GAME_PROFILE_SCHEMA_VERSION,
+  id: "fixture-engine-scaled",
+  displayName: "Fixture — engine-scaled zoom and coefficient",
+  publisher: null,
+  gameFamily: "trAIMer fixtures",
+  profileVersion: 1,
+  status: "verified",
+  visibility: "fixture",
+  platforms: ["pc"],
+  sensitivityModel: {
+    kind: "linear-yaw",
+    yawDegreesPerCountAtOne: 0.022,
+    pitchDegreesPerCountAtOne: null,
+  },
+  hipfireField: {
+    field: "sensitivity",
+    label: "Sensitivity",
+    entry: {
+      min: 0.1,
+      max: 8,
+      step: null,
+      uiDecimals: 2,
+      configDecimals: 6,
+      rounding: "nearest",
+      unitSuffix: "",
+    },
+  },
+  axes: {
+    independentAxes: false,
+    verticalSemantics: "none",
+    verticalField: null,
+    builtInVerticalRatio: null,
+  },
+  dpi: {
+    countBased: true,
+    assumesWindowsPointerSpeedDefault: true,
+    requiresRawInput: true,
+    notes: [],
+  },
+  fov: { kind: "fixed", axis: "horizontal-at-4-3", degrees: 90 },
+  zoom: {
+    kind: "per-zoom",
+    zooms: [
+      {
+        id: "scope",
+        label: "Scope (40°)",
+        magnification: null,
+        fov: { kind: "fixed", axis: "horizontal-at-4-3", degrees: 40 },
+        setting: {
+          field: "zoomRatioPercent",
+          label: "Zoom sensitivity",
+          entry: {
+            min: 10,
+            max: 300,
+            step: 1,
+            stepOrigin: 0,
+            uiDecimals: 0,
+            configDecimals: null,
+            rounding: "nearest",
+            unitSuffix: "%",
+            clampAdvice: "none",
+          },
+        },
+        neutralValue: 1,
+        nativeBehavior: "fov-ratio-multiplier",
+        valueScale: 100,
+        notes: [],
+      },
+      {
+        id: "coefficient",
+        label: "Aim down sights (game-applied coefficient)",
+        magnification: null,
+        fov: { kind: "none" },
+        setting: {
+          field: "coefficient",
+          label: "Monitor distance coefficient",
+          entry: {
+            min: 0,
+            max: 2,
+            step: 0.01,
+            stepOrigin: 0,
+            uiDecimals: 2,
+            configDecimals: null,
+            rounding: "nearest",
+            unitSuffix: "",
+            allowZero: true,
+            clampAdvice: "none",
+          },
+        },
+        neutralValue: 1.33,
+        nativeBehavior: "monitor-distance-coefficient",
+        coefficientAxis: "vertical",
+        notes: [],
+      },
+    ],
+  },
+  defaultMatching: MATCHING.gameNative,
+  supportedMatching: ["physical-360-distance", "monitor-distance", "game-native"],
+  unitDefinition: "1.00 turns the view 0.022° per mouse count.",
+  knownEdgeCases: [],
+  warnings: [],
+  source: FIXTURE_SOURCE,
+  supersededByProfileId: null,
+  deprecationNote: null,
+};
+
 export const ARCHITECTURE_FIXTURE_PROFILES: readonly GameProfile[] = [
   FIXTURE_LINKED_STEPPED,
   FIXTURE_INDEPENDENT_CONTINUOUS,
   FIXTURE_PER_SCOPE,
   FIXTURE_POWER_LAW,
+  FIXTURE_ENGINE_SCALED,
   FIXTURE_DEPRECATED,
 ];

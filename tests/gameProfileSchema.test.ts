@@ -15,6 +15,7 @@ import {
 import { GENERIC_RAW_PROFILE } from "../src/games/profiles/generic.ts";
 import {
   ARCHITECTURE_FIXTURE_PROFILES,
+  FIXTURE_ENGINE_SCALED,
   FIXTURE_LINKED_STEPPED,
   FIXTURE_PER_SCOPE,
 } from "../src/games/fixtures.ts";
@@ -283,6 +284,63 @@ describe("game profile validation — malformed profiles fail closed", () => {
       (d.dpi as Record<string, unknown>).countBased = false;
     });
     expect(errorPaths(bad)).toContain("dpi.countBased");
+  });
+});
+
+describe("game profile validation — Pass 2 zoom behaviours", () => {
+  function zoomDraft(d: Record<string, unknown>, index: number): Record<string, unknown> {
+    return ((d.zoom as Record<string, unknown>).zooms as Record<string, unknown>[])[index]!;
+  }
+
+  it("accepts the engine-scaled fixture with no issues", () => {
+    const result = validateGameProfile(FIXTURE_ENGINE_SCALED);
+    expect(result.valid).toBe(true);
+    expect(result.issues).toEqual([]);
+  });
+
+  it("a coefficient must accept zero and must name its axis", () => {
+    const noZero = mutate(FIXTURE_ENGINE_SCALED, (d) => {
+      ((zoomDraft(d, 1).setting as Record<string, unknown>).entry as Record<string, unknown>).allowZero = false;
+    });
+    expect(errorPaths(noZero)).toContain("zoom[1].setting.entry");
+    expect(errorPaths(noZero)).toContain("zoom[1].setting.entry.allowZero");
+    const noAxis = mutate(FIXTURE_ENGINE_SCALED, (d) => {
+      delete zoomDraft(d, 1).coefficientAxis;
+    });
+    expect(errorPaths(noAxis)).toContain("zoom[1].coefficientAxis");
+  });
+
+  it("a coefficient axis on any other behaviour is refused", () => {
+    const stray = mutate(FIXTURE_ENGINE_SCALED, (d) => {
+      zoomDraft(d, 0).coefficientAxis = "vertical";
+    });
+    expect(errorPaths(stray)).toContain("zoom[0].coefficientAxis");
+  });
+
+  it("a linear-ratio zoom needs a field of view on both sides", () => {
+    const noZoomFov = mutate(FIXTURE_ENGINE_SCALED, (d) => {
+      zoomDraft(d, 0).fov = { kind: "none" };
+    });
+    expect(errorPaths(noZoomFov)).toContain("zoom[0].fov");
+    const noHipFov = mutate(FIXTURE_ENGINE_SCALED, (d) => {
+      d.fov = { kind: "none" };
+      d.supportedMatching = ["physical-360-distance", "game-native"];
+    });
+    expect(errorPaths(noHipFov)).toContain("zoom[0].nativeBehavior");
+  });
+
+  it("a value scale must be a positive number", () => {
+    const bad = mutate(FIXTURE_ENGINE_SCALED, (d) => {
+      zoomDraft(d, 0).valueScale = 0;
+    });
+    expect(errorPaths(bad)).toContain("zoom[0].valueScale");
+  });
+
+  it("a zero minimum is still refused on an ordinary sensitivity", () => {
+    const bad = mutate(GENERIC_RAW_PROFILE, (d) => {
+      ((d.hipfireField as Record<string, unknown>).entry as Record<string, unknown>).min = 0;
+    });
+    expect(errorPaths(bad)).toContain("hipfireField.entry");
   });
 });
 

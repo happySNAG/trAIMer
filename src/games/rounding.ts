@@ -39,6 +39,19 @@ export interface ValueEntrySpec {
   readonly rounding: RoundingMode;
   /** Unit shown next to the number ("%", "×", "" for a bare scalar). */
   readonly unitSuffix: string;
+  /**
+   * True for a control whose zero is meaningful (a monitor-distance
+   * coefficient of 0.00 is the FOV-relative limit). A sensitivity never sets
+   * this; the validator rejects a zero minimum unless it is set.
+   */
+  readonly allowZero?: boolean | undefined;
+  /**
+   * What to tell the player when the exact value falls off the range.
+   * `dpi` (the default) says a DPI change reaches it — true for a hip-fire
+   * sensitivity, meaningless for a multiplier or a coefficient, which say
+   * `none`.
+   */
+  readonly clampAdvice?: "dpi" | "none" | undefined;
 }
 
 /** The result of putting one exact value onto a game's entry grid. */
@@ -165,14 +178,15 @@ export function quantize(spec: ValueEntrySpec, exact: number): QuantizedValue {
   const roundingLoss =
     Math.abs(value - exact) > NEGLIGIBLE_RELATIVE * Math.max(1, Math.abs(exact));
 
+  const dpiAdvice = (spec.clampAdvice ?? "dpi") === "dpi";
   if (clampedToMin) {
     notes.push(
-      `This game's lowest accepted value is ${formatEntryValue(spec, spec.min)}; the exact equivalent (${exact.toFixed(spec.uiDecimals + 2)}${spec.unitSuffix}) is below it. Lower your DPI to reach it.`,
+      `This game's lowest accepted value is ${formatEntryValue(spec, spec.min)}; the exact equivalent (${exact.toFixed(spec.uiDecimals + 2)}${spec.unitSuffix}) is below it.${dpiAdvice ? " Lower your DPI to reach it." : " The game cannot express it; the nearest accepted value is shown."}`,
     );
   }
   if (clampedToMax) {
     notes.push(
-      `This game's highest accepted value is ${formatEntryValue(spec, spec.max)}; the exact equivalent (${exact.toFixed(spec.uiDecimals + 2)}${spec.unitSuffix}) is above it. Raise your DPI to reach it.`,
+      `This game's highest accepted value is ${formatEntryValue(spec, spec.max)}; the exact equivalent (${exact.toFixed(spec.uiDecimals + 2)}${spec.unitSuffix}) is above it.${dpiAdvice ? " Raise your DPI to reach it." : " The game cannot express it; the nearest accepted value is shown."}`,
     );
   }
   if (roundingLoss && !clampedToMin && !clampedToMax) {

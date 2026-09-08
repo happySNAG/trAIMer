@@ -284,7 +284,7 @@ describe("matching philosophies (requirement 6)", () => {
     });
     for (const zoom of conversion.zooms) {
       if (zoom.setting?.value.clampedToMax || zoom.setting?.value.clampedToMin) continue;
-      expect(zoom.achievedCmPer360 / conversion.achievedCmPer360.x).toBeCloseTo(1, 1);
+      expect(zoom.achievedCmPer360! / conversion.achievedCmPer360.x).toBeCloseTo(1, 1);
     }
     expect(cmPer360X(conversion.achieved)).toBeCloseTo(conversion.achievedCmPer360.x, 12);
   });

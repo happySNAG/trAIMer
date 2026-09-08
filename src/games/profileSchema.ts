@@ -190,7 +190,24 @@ export type ZoomNativeBehavior =
    */
   | "fov-relative-multiplier"
   /** The zoom carries its own absolute sensitivity on the game's scale. */
-  | "independent-scalar";
+  | "independent-scalar"
+  /**
+   * deg/count(zoom) = deg/count(hip) × value × (fov_zoom / fov_hip), the
+   * ratio taken on the game's OWN stated FOV numbers (degrees, not tangents).
+   * The Source / Counter-Strike lineage and Valorant do this: a multiplier of
+   * 1.0 scales sensitivity by the linear angle ratio, which is close to — but
+   * not — FOV-relative matching (Pass 2).
+   */
+  | "fov-ratio-multiplier"
+  /**
+   * The setting IS a monitor-distance coefficient the game applies itself:
+   * the game computes the zoom ratio from its own FOVs, and the player's
+   * number names which fraction of the half-screen (on `coefficientAxis`) is
+   * matched. Call of Duty's "Relative" ADS mode (Pass 2). The conversion
+   * needs no FOV model of its own; it translates the matching philosophy into
+   * the coefficient and leaves the arithmetic to the game.
+   */
+  | "monitor-distance-coefficient";
 
 /** One aim state a game can be in: hip-fire, ADS, or a specific optic. */
 export interface ZoomLevelSpec {
@@ -206,6 +223,14 @@ export interface ZoomLevelSpec {
   /** Value of that setting that yields the game's stock behaviour. */
   readonly neutralValue: number | null;
   readonly nativeBehavior: ZoomNativeBehavior;
+  /**
+   * Setting units per unit multiplier. A game that shows an ADS multiplier
+   * as a percentage declares 100 here, so a ratio of 1.0 is entered as 100%.
+   * Defaults to 1.
+   */
+  readonly valueScale?: number | undefined;
+  /** `monitor-distance-coefficient` only: the screen axis the game matches on. */
+  readonly coefficientAxis?: "horizontal" | "vertical" | undefined;
   readonly notes: readonly string[];
 }
 

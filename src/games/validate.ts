@@ -82,7 +82,7 @@ function checkEntry(
       message: `impossible sensitivity range: min ${entry.min} is not below max ${entry.max}`,
     });
   }
-  if (entry.min <= 0) {
+  if (entry.min < 0 || (entry.min === 0 && entry.allowZero !== true)) {
     issues.push({
       severity: "error",
       path,
@@ -648,6 +648,8 @@ export function validateGameProfile(profile: GameProfile): ProfileValidation {
         "multiplies-hipfire",
         "fov-relative-multiplier",
         "independent-scalar",
+        "fov-ratio-multiplier",
+        "monitor-distance-coefficient",
       ];
       if (!behaviors.includes(zoom.nativeBehavior)) {
         issues.push({
@@ -678,6 +680,56 @@ export function validateGameProfile(profile: GameProfile): ProfileValidation {
           severity: "error",
           path: `${path}.fov`,
           message: 'unsupported ADS model combination: "fov-relative-multiplier" requires a field of view for this zoom',
+        });
+      }
+      // Pass 2 behaviours: each needs exactly the data its arithmetic reads.
+      if (
+        zoom.nativeBehavior === "fov-ratio-multiplier" &&
+        (zoom.fov.kind === "none" && zoom.magnification === null)
+      ) {
+        issues.push({
+          severity: "error",
+          path: `${path}.fov`,
+          message: 'unsupported ADS model combination: "fov-ratio-multiplier" needs this zoom\'s field of view (or a magnification to derive it from)',
+        });
+      }
+      if (zoom.nativeBehavior === "fov-ratio-multiplier" && profile.fov?.kind === "none") {
+        issues.push({
+          severity: "error",
+          path: `${path}.nativeBehavior`,
+          message: 'unsupported ADS model combination: "fov-ratio-multiplier" needs a hip-fire field of view on the profile',
+        });
+      }
+      if (zoom.nativeBehavior === "monitor-distance-coefficient") {
+        if (zoom.coefficientAxis !== "horizontal" && zoom.coefficientAxis !== "vertical") {
+          issues.push({
+            severity: "error",
+            path: `${path}.coefficientAxis`,
+            message: '"monitor-distance-coefficient" must name the screen axis the game matches on',
+          });
+        }
+        if (zoom.setting && zoom.setting.entry && zoom.setting.entry.allowZero !== true) {
+          issues.push({
+            severity: "error",
+            path: `${path}.setting.entry.allowZero`,
+            message: "a monitor-distance coefficient must accept 0 (the FOV-relative limit)",
+          });
+        }
+      } else if (zoom.coefficientAxis !== undefined) {
+        issues.push({
+          severity: "error",
+          path: `${path}.coefficientAxis`,
+          message: `a coefficient axis is only meaningful for "monitor-distance-coefficient" (behaviour is "${zoom.nativeBehavior}")`,
+        });
+      }
+      if (
+        zoom.valueScale !== undefined &&
+        (!isFiniteNumber(zoom.valueScale) || zoom.valueScale <= 0)
+      ) {
+        issues.push({
+          severity: "error",
+          path: `${path}.valueScale`,
+          message: `impossible value scale ${String(zoom.valueScale)}: must be a positive number`,
         });
       }
     });
