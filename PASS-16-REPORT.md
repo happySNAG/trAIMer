@@ -35,7 +35,7 @@ writing, what it does not convert.
 | `786bc35` | Show the five games in the picker and their numbers on the results screen |
 | `394e34d` | Cut 1.0.0-rc.10 for Game Profile Campaign Pass 2 |
 | `a8d0ef9` | Freeze the RC identifier at 1.0.0-rc.10 (the frozen-version test in `tests/pass5Engine.test.ts` still said rc.9; caught by the local re-run after the first push, so CI run 34177835281 on `394e34d` was cancelled and superseded) |
-| `«REPORT»` | Add the Pass 16 report |
+| `ec220b2` | Add the Pass 16 report (this file; a follow-up commit fills in this hash) |
 
 ---
 
