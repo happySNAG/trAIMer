@@ -27,7 +27,7 @@ export const V1_RC_PROTOCOL_DEFAULTS = {
     id: "v1-rc-protocol",
     version: "rc-defaults-v1",
     honestyNote:
-      "Chosen conservatively from simulation campaigns only. First real Aldo sessions may justify tuning; until then these stay fixed so results remain comparable.",
+      "Chosen conservatively from simulation campaigns only. First real player sessions may justify tuning; until then these stay fixed so results remain comparable.",
   },
 
   warmupTrialsPerCandidateBlock: {

@@ -85,7 +85,7 @@ export function renderDiagnosticsView(
   container.append(
     pageHeader(
       "Diagnostics",
-      "Everything here runs on this machine only. The capture check talks to the local Aldo helper — nothing ever leaves your PC.",
+      "Everything here runs on this machine only. The capture check talks to the local trAIMer capture helper — nothing ever leaves your PC.",
     ),
   );
 

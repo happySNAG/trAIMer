@@ -124,7 +124,7 @@ export function decideCaptureTier(input: {
       activeKind: "native",
       caption: "native capture · raw input",
       detail:
-        "Measured samples come from the local Aldo capture helper (Windows Raw Input). The mouse stays locked to the arena.",
+        "Measured samples come from the local trAIMer capture helper (Windows Raw Input). The mouse stays locked to the arena.",
       native: {
         shellPresent: input.shellPresent,
         platformSupported: input.platformSupported,

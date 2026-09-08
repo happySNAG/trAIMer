@@ -40,6 +40,11 @@ export const LEGACY_PRODUCT_PATTERNS = [
   "aldo_capture_helper",
   "start-aldo-lab",
   "stop-aldo-lab",
+  // Two shipped UI strings named the helper after the working title until
+  // 1.0.0 ("the local Aldo capture helper"); the full-name patterns above
+  // never matched them.
+  "Aldo capture helper",
+  "Aldo helper",
 ];
 
 export const PRODUCT_NAME = "trAIMer";
