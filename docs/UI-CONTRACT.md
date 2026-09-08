@@ -239,3 +239,26 @@ Additions to §5 (non-negotiable product behaviors):
   producing a sensitivity recommendation.
 - trAIMer never touches a game — no processes, no memory, no files, no input
   injection. See docs/GAME-PROFILES.md §11.
+
+### Pass 5 additions (additive, non-breaking)
+
+- The Aim Test screen's card order is: session setup (name, DPI, starting
+  sensitivity, breaks, advanced parameters), then `#setup-game-profile`,
+  then the calibration-length cards (`#setup-modes`), then a Start card
+  holding the submit button. Every id is unchanged; only the order moved.
+  The first `details.details` in `#view-setup` is still the advanced
+  parameters block whenever no game is selected.
+- `#game-profile-status` renders **above** the profile's inputs, carries the
+  classes `profile-status profile-status-<status>`, and contains the badge
+  plus a `.profile-status-text` sentence. Its text still contains
+  "What it does not cover:" for every non-verified profile.
+- Picker option text for an experimental profile is
+  `<displayName> (experimental)` (`profileOptionLabel`). Option values are
+  still profile ids; the Generic / Raw option text is unchanged.
+- Provenance URLs render as `a.reference-link[target=_blank]` in the profile
+  details and in the results conversion's "How this conversion was made".
+  The app never fetches them; the desktop shell hands the click to the
+  system browser.
+- The results "What to do next" card adds one line naming the manual step
+  when a game conversion is ready: it refers to the "What to set in <game>"
+  list and states that trAIMer does not change game settings.

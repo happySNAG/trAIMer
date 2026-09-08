@@ -140,12 +140,14 @@ export function renderGameProfilePanel(
       .filter(matches);
     if (recent.length > 0 && needle === "") {
       const group = el("optgroup", { label: "Recently used" });
-      for (const p of recent) group.append(el("option", { value: p.id, text: p.displayName }));
+      for (const p of recent) {
+        group.append(el("option", { value: p.id, text: profileOptionLabel(p) }));
+      }
       select.append(group);
     }
     const games = el("optgroup", { label: "Games (A–Z)" });
     for (const p of namedGames.filter(matches)) {
-      games.append(el("option", { value: p.id, text: p.displayName }));
+      games.append(el("option", { value: p.id, text: profileOptionLabel(p) }));
     }
     if (games.childElementCount > 0) select.append(games);
     const other = el("optgroup", { label: "Other" });
@@ -213,6 +215,29 @@ export function renderGameProfilePanel(
       });
     };
 
+    // The status is the first thing shown about a chosen game — above its
+    // inputs, not below them — so a player never types a value into an
+    // experimental profile without having been told what that means
+    // (Pass 5, requirement 7). The block is tone-coded by status: an
+    // experimental profile is visibly not equivalent to a verified one.
+    const pickedBadge = profileStatusBadge(profile);
+    if (pickedBadge) {
+      body.push(
+        el(
+          "div",
+          {
+            id: "game-profile-status",
+            class: `profile-status profile-status-${profile.status}`,
+            role: "status",
+          },
+          [
+            el("div", { class: "profile-status-head" }, [pickedBadge]),
+            el("p", { class: "profile-status-text", text: profileStatusExplanation(profile) }),
+          ],
+        ),
+      );
+    }
+
     const hipEntry = profile.hipfireField.entry;
     const hipInput = numberInput("game-current-hipfire", selection.currentHipfire, {
       min: hipEntry.min,
@@ -261,16 +286,6 @@ export function renderGameProfilePanel(
     }
 
     body.push(el("div", { class: "form-grid" }, inputs));
-
-    const pickedBadge = profileStatusBadge(profile);
-    if (pickedBadge) {
-      body.push(
-        el("div", { id: "game-profile-status" }, [
-          pickedBadge,
-          el("span", { class: "note", text: ` ${profileStatusExplanation(profile)}` }),
-        ]),
-      );
-    }
 
     const matchingOptions = availableMatching(profile);
     if (matchingOptions.length > 1) {
@@ -352,7 +367,7 @@ export function renderGameProfilePanel(
       experimental: "Experimental — unconfirmed against the game",
       deprecated: "Deprecated",
     };
-    const provenance: [string, string][] = [
+    const provenance: [string, string | Node][] = [
       ["Status", statusLabel[profile.status] ?? profile.status],
       ["What 1.00 means", profile.unitDefinition],
       ["Source", profile.source.title],
@@ -363,7 +378,7 @@ export function renderGameProfilePanel(
       ["Confidence", profile.source.confidence],
       ["Conversion definition", `v${profile.profileVersion}`],
     ];
-    if (profile.source.url) provenance.push(["Reference", profile.source.url]);
+    if (profile.source.url) provenance.push(["Reference", referenceLink(profile.source.url)]);
     if (profile.fov.kind === "fixed") {
       provenance.push([
         "Field of view",
@@ -451,7 +466,7 @@ export function profileStatusExplanation(profile: {
     case "partially-verified":
       return `Hip-fire conversion is well supported; some scoped behaviour is not.${tail}`;
     case "experimental":
-      return `Its numbers have not been confirmed against the game, so every converted value carries that warning.${tail}`;
+      return `Its numbers have not been confirmed against the game, so every converted value carries that warning. You can still use it: treat the number as a starting point and check it in the game before trusting it.${tail}`;
     case "deprecated":
       return `This profile is no longer recommended.${tail}`;
     default:
@@ -467,4 +482,38 @@ export function profileStatusBadge(profile: {
   if (profile.status === "experimental") return badge("warn", "Experimental profile");
   if (profile.status === "deprecated") return badge("danger", "Deprecated profile");
   return badge("info", "Partly verified");
+}
+
+/**
+ * The name a profile is listed under in the picker.
+ *
+ * An experimental profile says so IN THE LIST, not only after it has been
+ * chosen: a player scanning for their game sees the qualification at the
+ * same moment they see the name (Pass 5, requirement 7). Partly verified
+ * profiles are the common case and are explained once chosen, where there is
+ * room to say what "partly" means for that game.
+ */
+export function profileOptionLabel(profile: { displayName: string; status: string }): string {
+  return profile.status === "experimental"
+    ? `${profile.displayName} (experimental)`
+    : profile.displayName;
+}
+
+/**
+ * A provenance URL rendered as a link a player can actually follow.
+ *
+ * trAIMer never fetches this itself: in the desktop shell the click is handed
+ * to the system browser by the window-open handler, and in a browser it opens
+ * a new tab. Either way the app makes no request — the no-telemetry audit's
+ * allowance covers the string, not any traffic.
+ */
+export function referenceLink(url: string): HTMLElement {
+  const link = el("a", {
+    href: url,
+    target: "_blank",
+    rel: "noopener noreferrer",
+    class: "reference-link",
+    text: url,
+  });
+  return link;
 }

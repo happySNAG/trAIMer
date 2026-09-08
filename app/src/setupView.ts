@@ -73,7 +73,7 @@ export function renderSetupView(
   container.append(
     pageHeader(
       "Aim Test",
-      "A blinded session that measures your aim across several sensitivities and recommends the one the evidence supports.",
+      "A blinded session that measures your aim across several sensitivities and recommends the one the evidence supports. Enter your mouse DPI, pick your game, choose how long to test, and play.",
     ),
   );
 
@@ -123,13 +123,13 @@ export function renderSetupView(
   const playerGrid = el("div", { class: "form-grid" }, [
     field("Player name", nameInput),
     field("Mouse DPI", dpiInput, {
-      hint: "The DPI configured in your mouse software. Keep it fixed across sessions.",
+      hint: "The DPI set in your mouse software (800 and 1600 are the most common). Keep it fixed across sessions; everything below is measured against it.",
     }),
   ]);
 
   const sensGrid = el("div", { class: "form-grid" }, [
     field("Starting sensitivity — X (%)", sensXInput, {
-      hint: "The starting point of the search, on a percentage scale. The recommendation is reported relative to this number; choose your game below to see it in that game's own units.",
+      hint: "The starting point of the search, on trAIMer's own percentage scale. You do not need to know how it maps to your game: choose your game below, enter the sensitivity you play at there, and the recommendation is shown in that game's units.",
     }),
     field("Starting sensitivity — Y (%)", sensYInput, {
       hint: "Leave equal to X unless you deliberately run an asymmetric setup.",
@@ -348,8 +348,11 @@ export function renderSetupView(
   refreshArenaFeelNote = refreshArenaNote;
   refreshArenaNote();
 
+  // The screen reads top to bottom in the order a first-time player needs
+  // (Pass 5, requirement 21): who and what mouse, which game and what they
+  // run there today, how long to test, then start. The mode card used to sit
+  // first, before the player had said anything about themselves.
   const form = el("form", {}, []);
-  form.append(modeCard);
   const formCard = card(
     { title: "Session setup", subtitle: "Saved automatically for next time", icon: "settings" },
     playerGrid,
@@ -368,9 +371,6 @@ export function renderSetupView(
       "Advanced session parameters",
       advancedGrid,
     ),
-    sessionNote,
-    arenaNote,
-    el("div", {}, [startBtn]),
   );
   form.append(formCard);
 
@@ -414,6 +414,20 @@ export function renderSetupView(
   refreshModeSelection();
   form.append(gameHolder);
   refreshGamePanel();
+  form.append(modeCard);
+  form.append(
+    card(
+      {
+        title: "Start",
+        subtitle: "trAIMer never changes a game's settings. When the test ends, it tells you what to set, and you change it in the game yourself.",
+        icon: "play",
+        class: "setup-start",
+      },
+      sessionNote,
+      arenaNote,
+      el("div", {}, [startBtn]),
+    ),
+  );
   container.append(form);
 }
 

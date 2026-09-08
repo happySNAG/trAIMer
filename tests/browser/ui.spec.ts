@@ -97,7 +97,7 @@ test.describe("UI Pass 3 refinements", () => {
     await page.goto("/");
     await expect(page.locator("#view-home")).toContainText("Confirm your setup");
     await expect(page.locator("#view-home")).toContainText("Play the blinded test");
-    await expect(page.locator("#view-home")).toContainText("Get a measured answer");
+    await expect(page.locator("#view-home")).toContainText("Set it in your game");
   });
 });
 

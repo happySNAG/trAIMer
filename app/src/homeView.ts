@@ -155,7 +155,7 @@ export async function renderHomeView(container: HTMLElement, ctx: HomeContext): 
               el("p", { style: "font-weight:650", text: "No sessions yet" }),
               el("p", {
                 class: "muted",
-                text: "Your first full session takes roughly 30–50 minutes with enforced rests, and ends with a measured recommendation.",
+                text: "A Quick test takes about 3 minutes, Standard about 4 and Precision about 8, breaks included. Every one ends with a measured answer or an honest \"more data needed\".",
               }),
             ]),
             button("Start your first test", {
@@ -186,9 +186,9 @@ function buildFirstUseSteps(): HTMLElement {
   body.style.padding = "0";
   const wrap = el("div", { class: "cell-grid-3" });
   const steps: [string, string, string][] = [
-    ["1", "Confirm your setup", "Enter your mouse DPI, your current sensitivity and your game — that's the starting point of the search."],
-    ["2", "Play the blinded test", "Short aim drills across several hidden sensitivities, with rests enforced to protect the data."],
-    ["3", "Get a measured answer", "The engine compares the evidence and recommends the sensitivity it actually supports."],
+    ["1", "Confirm your setup", "Enter your mouse DPI, pick your game and type the sensitivity you play at. No need to know what cm/360 or eDPI mean — trAIMer does that arithmetic."],
+    ["2", "Play the blinded test", "Short shooting and tracking drills across several hidden sensitivities, with rests between them. Quick, Standard or Precision sets how long it takes."],
+    ["3", "Set it in your game", "The engine compares the evidence and recommends the sensitivity it actually supports, in your game's own units. You change the setting in the game yourself."],
   ];
   for (const [num, title, body_] of steps) {
     const cell = el("div", {});

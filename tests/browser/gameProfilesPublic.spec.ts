@@ -320,6 +320,18 @@ test("a completed session records its profile and version, and changing game lat
   await expect(page.locator("#view-results")).toContainText("Recommended for Valorant", {
     timeout: 15_000,
   });
+  // Pass 5, requirement 22: "what do I do next?" names the manual step.
+  await expect(page.locator("#view-results .next-steps")).toContainText(
+    "Open Valorant's settings",
+  );
+  await expect(page.locator("#view-results .next-steps")).toContainText(
+    "does not change game settings",
+  );
+  // The provenance reference is a real link, not a bare string.
+  await expect(page.locator("#view-results a.reference-link").first()).toHaveAttribute(
+    "href",
+    /^https:\/\//,
+  );
 
   // History carries the id and the definition version, never a display name.
   await page.click(`#tabs button[data-tab="history"]`);

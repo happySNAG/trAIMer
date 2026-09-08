@@ -135,6 +135,20 @@ test.describe("each new game shows only the settings it has", () => {
     await expect(page.locator("#game-fov")).toHaveValue("90");
     await expect(page.locator("#game-matching-select")).toHaveCount(0);
     await expect(page.locator("#game-profile-status")).toContainText("Experimental");
+    // Pass 5, requirement 7: the qualification is visible IN THE LIST, the
+    // status block sits above the inputs (before a value can be typed), it
+    // is tone-coded so it cannot read as verified, and it says what to do.
+    await expect(
+      page.locator("#game-profile-select optgroup[label='Games (A–Z)'] option[value='pubg-battlegrounds']"),
+    ).toHaveText("PUBG: Battlegrounds (experimental)");
+    await expect(page.locator("#game-profile-status")).toHaveClass(/profile-status-experimental/);
+    await expect(page.locator("#game-profile-status")).toContainText("check it in the game");
+    const statusBeforeInput = await page.evaluate(() => {
+      const status = document.querySelector("#game-profile-status");
+      const input = document.querySelector("#game-current-hipfire");
+      return !!status && !!input && !!(status.compareDocumentPosition(input) & Node.DOCUMENT_POSITION_FOLLOWING);
+    });
+    expect(statusBeforeInput).toBe(true);
   });
 
   test("The Finals: one whole-number sensitivity, no FOV input, no philosophy choice", async ({ page }) => {
@@ -155,6 +169,10 @@ test.describe("each new game shows only the settings it has", () => {
     await expect(page.locator("#game-matching-select option")).toHaveCount(3);
     await expect(page.locator("#game-matching-select")).not.toContainText("Same physical sensitivity");
     await expect(page.locator("#game-profile-status")).toContainText("Experimental");
+    await expect(
+      page.locator("#game-profile-select optgroup[label='Games (A–Z)'] option[value='battlefield-6']"),
+    ).toHaveText("Battlefield 6 (experimental)");
+    await expect(page.locator("#game-profile-status")).toHaveClass(/profile-status-experimental/);
     const details = page.locator("#setup-game-profile details");
     await details.locator("summary").click();
     await expect(details).toContainText("Battlefield 2042 and earlier");

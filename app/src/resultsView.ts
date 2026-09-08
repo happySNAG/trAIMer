@@ -15,7 +15,7 @@ import {
 } from "../../src/results/recommendationState.ts";
 import { CALIBRATION_MODES } from "../../src/experiments/sessionModes.ts";
 import type { GameRecommendationOutcome } from "./gameConversionBridge.ts";
-import { profileStatusBadge } from "./gameProfileView.ts";
+import { profileStatusBadge, referenceLink } from "./gameProfileView.ts";
 import { el, clear } from "./dom.ts";
 import {
   badge,
@@ -475,6 +475,17 @@ function renderNextSteps(
         }),
       );
     }
+  }
+
+  // The one step trAIMer cannot do for the player, said where the player is
+  // looking for what to do (Pass 5, requirement 22): the numbers under
+  // "Recommended for <game>" are typed into the game's own settings screen.
+  const conversion = input.gameRecommendation ?? null;
+  if (conversion && conversion.kind === "ready" && presentation && presentation.state !== "insufficient") {
+    const game = conversion.exported.profileDisplayName;
+    lines.push(
+      `Open ${game}'s settings and enter the values from the “What to set in ${game}” list above. trAIMer does not change game settings for you.`,
+    );
   }
 
   if (onlySoftwareFaults) {
@@ -1076,7 +1087,7 @@ function renderGameRecommendation(input: ResultsInput): HTMLElement | null {
     }),
   );
 
-  const provenance: [string, string][] = [
+  const provenance: [string, string | Node][] = [
     ["Scoped aim matched by", g.matchingLabel],
     ["Based on", g.physicalEquivalent.basis],
     ["What 1.00 means", g.unitDefinition],
@@ -1086,7 +1097,9 @@ function renderGameRecommendation(input: ResultsInput): HTMLElement | null {
     ["Conversion definition", `v${g.profileVersion}`],
     ["DPI used", String(g.dpi)],
   ];
-  if (g.provenance.sourceUrl) provenance.push(["Reference", g.provenance.sourceUrl]);
+  if (g.provenance.sourceUrl) {
+    provenance.push(["Reference", referenceLink(g.provenance.sourceUrl)]);
+  }
   body.push(detailsBlock("How this conversion was made", kvList(provenance)));
 
   return card(

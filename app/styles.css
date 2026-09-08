@@ -2503,3 +2503,40 @@ body.drill-tracking .run-bottombar {
   font-weight: 600;
   color: var(--warn);
 }
+
+/* ---- profile status (Pass 5): visible where the game is chosen ---------- */
+.profile-status {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--line-1);
+  background: var(--neutral-dim);
+  margin: 4px 0 10px;
+}
+.profile-status-text {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text-2);
+}
+.profile-status-experimental {
+  border-color: var(--warn);
+  background: var(--warn-dim);
+}
+.profile-status-experimental .profile-status-text { color: var(--text-1); }
+.profile-status-deprecated {
+  border-color: var(--danger);
+  background: var(--danger-dim);
+}
+.profile-status-partially-verified {
+  border-color: var(--info);
+  background: var(--info-dim);
+}
+.reference-link {
+  color: var(--accent);
+  word-break: break-all;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}

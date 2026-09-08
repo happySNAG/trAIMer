@@ -36,13 +36,13 @@ test.describe("choosing a game profile", () => {
     await expect(options.nth(0)).toHaveText(/No game selected/);
     await expect(page.locator("#game-profile-select optgroup[label='Games (A–Z)'] option")).toHaveText([
       "Apex Legends",
-      "Battlefield 6",
+      "Battlefield 6 (experimental)",
       "Call of Duty / Warzone",
       "Counter-Strike 2",
       "Fortnite",
       "Marvel Rivals",
       "Overwatch 2",
-      "PUBG: Battlegrounds",
+      "PUBG: Battlegrounds (experimental)",
       "Rainbow Six Siege",
       "The Finals",
       "Valorant",

@@ -62,7 +62,7 @@ export const SETTINGS_KEY = "traimer-settings";
 export const LEGACY_SETTINGS_KEY = "aldo-aim-lab-settings";
 
 export const DEFAULT_SETTINGS: AppSettings = {
-  playerName: "Aldo",
+  playerName: "Player",
   calibrationMode: DEFAULT_CALIBRATION_MODE,
   dpi: 800,
   sensX: 7,
