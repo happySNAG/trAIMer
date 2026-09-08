@@ -1,6 +1,6 @@
 {
   "name": "traimer",
-  "version": "1.0.0-rc.12",
+  "version": "1.0.0-rc.13",
   "private": true,
   "type": "module",
   "description": "trAIMer — Train. Measure. Tune. Aim measurement and sensitivity optimization engine (headless core), with a versioned game-profile layer that converts a measured physical sensitivity into per-game settings.",

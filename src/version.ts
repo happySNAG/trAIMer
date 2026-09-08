@@ -6,7 +6,22 @@
  * these strings so any historical result can be traced to the exact code that
  * produced it.
  *
- * The V1 release candidate is identified as 1.0.0-rc.12 (Game Profile
+ * The V1 release candidate is identified as 1.0.0-rc.13 (Game Profile
+ * Campaign Pass 5 of 5: public-release hardening. No profile formula
+ * changed. Adds the public README, support matrix, license, contributing
+ * guide, profile-proposal template, issue templates, security and privacy
+ * documents, release notes and changelog; makes an experimental profile's
+ * status visible in the picker list and above its inputs; reorders the Aim
+ * Test screen into the order a first-time player needs; tells the player on
+ * the results screen to change the setting in the game themselves; turns
+ * provenance URLs into links; and adds three installed-app gates to CI — an
+ * end-to-end calibration on the installed build, an in-place upgrade from
+ * rc.12 with the earlier session preserved, and a silent uninstall that
+ * keeps user data followed by a reinstall that finds it. 1.0.0 was not cut
+ * because no human has yet completed a calibration on real hardware on any
+ * build since rc.9, when the arena first applied the blinded candidate
+ * sensitivity; see docs/RELEASE.md.)
+ * rc.12 (Game Profile
  * Campaign Pass 4 of 5: no new games, but every one of the twelve public
  * profiles re-researched from scratch and treated as untrusted until
  * re-confirmed from outside this repository. Eight base constants were
@@ -122,7 +137,7 @@ export const PRODUCT_NAME = "trAIMer";
 export const PRODUCT_TAGLINE = "Train. Measure. Tune.";
 
 /** Application release version for the V1 release candidate. */
-export const APP_VERSION = "1.0.0-rc.12";
+export const APP_VERSION = "1.0.0-rc.13";
 
 /**
  * Engine contract version: bump when a persisted engine-facing data contract

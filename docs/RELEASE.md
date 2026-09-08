@@ -1,8 +1,8 @@
-# Release & version metadata (Pass 4)
+# Release & version metadata
 
 ## Version strings (`src/version.ts`)
 
-- `APP_VERSION` — `1.0.0-rc.12` for the V1 release line (rc.1 was the Pass 5
+- `APP_VERSION` — `1.0.0-rc.13` for the V1 release line (rc.1 was the Pass 5
   candidate and shipped a non-executable helper; rc.2 was the Pass 8
   pre-hardware candidate and still launched via PowerShell; rc.3 was the Pass 9
   installed-desktop-application candidate, which installed and launched on
@@ -32,7 +32,13 @@
   pass — every public profile independently re-verified, Battlefield 6's
   stock ADS coefficient corrected from 177.8% to 133.3%, and golden tests
   added whose expected values come from published sources rather than from
-  this repository's own constants).
+  this repository's own constants; rc.13 is Pass 5, public-release
+  hardening — no engine or profile change; public documentation, license,
+  contribution path, issue templates, experimental-profile labelling in the
+  picker, first-run ordering, and three new installed-app gates: a complete
+  calibration on the installed build, an in-place upgrade from rc.12 with
+  the earlier session preserved, and a silent uninstall that keeps data
+  followed by a reinstall that finds it).
 - `ENGINE_VERSION` — `engine-v4` (bumped per engineering pass with contract
   changes).
 - `OPTIMIZER_VERSION_V4` — `optimizer-v3` (paired-effects surrogate,
@@ -58,6 +64,26 @@
   reports that and the History view shows it. The session itself stays
   readable and complete (docs/ARENA-SENSITIVITY.md §8).
 
+## The 1.0.0 decision
+
+1.0.0 is cut when every item in the checklist below holds **and** step 6 —
+a human running the on-hardware validation — has been done on a build no
+older than rc.9. That is the build in which the arena first applied the
+blinded candidate sensitivity (docs/ARENA-SENSITIVITY.md); every hardware
+session before it compared sensitivities that felt identical, so none of
+them counts. As of rc.13 the last hardware session on record is rc.7
+(PASS-15-REPORT.md), so step 6 is the one open item, and the release stays a
+candidate. The automated installed-app gates (arena entry, candidate gain,
+picker, full calibration, upgrade, uninstall/reinstall) are evidence that
+the build works; they are not a substitute for one person doing it.
+
+What "done" looks like for step 6: one Standard or Precision calibration on
+the installed rc.13 build, with a real mouse, recorded in a pass report
+with the session's History detail (candidate gain applied, capture tier,
+recommendation state). No specific result is required — "More data needed"
+is an acceptable honest outcome — only that the flow was completed by a
+person and behaved as documented.
+
 ## V1 release checklist
 
 1. `npm test && npm run lint && npm run typecheck && npm run build`
@@ -66,17 +92,31 @@
 3b. `npm run verify:candidate-gain` — two blinded candidates must move the
    crosshair by measurably different amounts in the real shell. A build that
    fails this measures everything except the variable it exists to measure.
+3c. `node scripts/verify-docs.mjs` — links resolve, version strings are this
+   build's, the support matrix matches the registry.
+3d. `node scripts/verify-installed-smoke.mjs` — a complete calibration in the
+   Electron shell: profile, DPI, Quick mode, hits, tracking, a break,
+   results with the conversion, History, clean close.
 4. Push and let the `windows-installer` CI job build the real artifacts on a
    Windows runner. It compiles the helper with MSVC `/W4 /WX`, **verifies the
    binary is a genuine x64 PE**, runs it with `--version` to prove it
-   executes, builds the NSIS installer, silently installs it, and smoke-tests
-   the installed application's startup and clean shutdown.
+   executes, builds the NSIS installer, installs the **previous** RC and
+   completes a calibration on it, silently installs the new one over it,
+   smoke-tests startup and clean shutdown, drives the installed app through
+   arena entry, candidate gain, the game picker and a full calibration (with
+   the previous RC's session still in History), then uninstalls silently,
+   checks the data survived, reinstalls and checks History again.
 5. Download `traimer-windows-installer` → `trAIMer-Setup.exe`.
 6. Install it on the target Windows PC and run the on-hardware validation in
    `docs/HUMAN-VALIDATION.md` (a compile is not hardware validation).
 7. Tag `v1.0.0` once hardware validation passes. `dist-app/`, the shell and
    the helper ship inside one installer, so engine and transport protocol can
    never drift apart in the field.
+8. Publish: a GitHub release on the tag with `trAIMer-Setup-<version>.exe`,
+   `trAIMer-Setup.exe`, `trAIMer-Setup-SHA256.txt` and `docs/RELEASE-NOTES.md`
+   as the body. Never overwrite an existing release; a rebuilt installer is a
+   new version. Then update `PRIOR_RC_*` in `.github/workflows/ci.yml` so the
+   next build upgrades from the release just published.
 
 ## Shipped artifact
 
@@ -89,7 +129,7 @@
 
 | Component | Version |
 |---|---|
-| App | 1.0.0-rc.12 |
+| App | 1.0.0-rc.13 |
 | Engine | engine-v4 |
 | Optimizer | optimizer-v3 (paired fit + adequacy gating + change-point) |
 | Scoring model | scoring-v1 (weights: accuracy .28, speed .14, tracking .14, correction .12, overshoot .11, undershoot .11, consistency .10) |
@@ -110,7 +150,7 @@ by `scripts/verify-release.mjs`.
 
 | Browser | Status | Capture path | Notes |
 |---|---|---|---|
-| Chrome/Edge ≥ 114 (Windows) | **supported (primary)** | pointermove-coalesced + Pointer Lock + native tier-1 via loopback helper | target platform for Aldo's PC |
+| Chrome/Edge ≥ 114 (Windows) | **supported (primary)** | pointermove-coalesced + Pointer Lock + native tier-1 via loopback helper | the shipped desktop shell's runtime |
 | Chromium ≥ 114 (other OS) | supported | coalesced + Pointer Lock; native helper not shipped yet | full engine behavior |
 | Firefox ESR | functional, untested in CI | pointermove without coalescing (frame-limited sampling) | preflight warns `NO_COALESCED_EVENTS`; quality gates still apply |
 | Safari 17+ | functional, untested | mousemove fallback (silent while still) | preflight warns `MOUSEMOVE_ONLY_FALLBACK`; motion-aware gap validation handles silence |
