@@ -95,7 +95,7 @@ attach it to the report.
 | # | Check | Expected | Gate | Evidence |
 |---|-------|----------|------|----------|
 | FP1 | Aim Test tab → **Game sensitivity** card | One select ("Game"), no other game fields, and a line explaining that results are physical without one | HARD | |
-| FP2 | Open the Game select | Seven entries in this order: "No game selected", Fortnite, Valorant, Counter-Strike 2, Apex Legends, Call of Duty / Warzone, Generic / Raw. No "Fixture" entry | HARD | |
+| FP2 | Open the Game select | "No game selected", then a Games (A–Z) group of eleven: Apex Legends, Battlefield 6, Call of Duty / Warzone, Counter-Strike 2, Fortnite, Marvel Rivals, Overwatch 2, PUBG: Battlegrounds, Rainbow Six Siege, The Finals, Valorant; then Other: Generic / Raw. A "Find a game" box sits above it. No "Fixture" entry | HARD | |
 | FP3 | Pick **Generic / Raw** | Current sensitivity and vertical fields appear; no field-of-view field; no scoped-matching select | | |
 | FP4 | Enter current sensitivity `1`, leave DPI at 800 | "Physical equivalent" reads **57.1 cm/360**, and a sentence names the DPI | HARD | |
 | FP5 | Change Mouse DPI to 1600 (leave the game value at 1) | The equivalent halves to **28.6 cm/360** — the same setting is a different physical sensitivity | HARD | |

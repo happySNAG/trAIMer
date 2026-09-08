@@ -31,7 +31,7 @@ jobs:
       - name: RELEASE GATE - game profiles fail closed and stay out of the measurement core
         # A malformed profile must never produce a sensitivity recommendation,
         # and no profile may reach a running game. See docs/GAME-PROFILES.md.
-        run: npx vitest run tests/gameProfileSchema.test.ts tests/gameProfileRegistry.test.ts tests/gameProfileBoundary.test.ts tests/gameRoundTrip.test.ts tests/gameProfileIntegration.test.ts
+        run: npx vitest run tests/gameProfileSchema.test.ts tests/gameProfileRegistry.test.ts tests/gameProfileBoundary.test.ts tests/gameRoundTrip.test.ts tests/gameProfileIntegration.test.ts tests/gamePublicProfiles.test.ts tests/gamePublicProfilesPass3.test.ts
       - name: no-telemetry audit (sources)
         run: node scripts/audit-no-telemetry.mjs
       - name: RELEASE GATE - branding (sources + player docs)
@@ -254,6 +254,13 @@ jobs:
       - name: RELEASE GATE - the arena applies the candidate sensitivity (dev tree)
         shell: bash
         run: node scripts/verify-candidate-gain.mjs
+      - name: RELEASE GATE - the game picker offers every public profile (dev tree)
+        # Pass 2 proved the profiles were bundled; nothing drove the picker.
+        # This walks the real picker: every profile the registry declares is
+        # offered, renders its own fields, converts a value, and no fixture
+        # or legacy name appears. See docs/GAME-PROFILES.md §15.
+        shell: bash
+        run: node scripts/verify-game-picker.mjs
       - name: RELEASE GATE - required frontend assets present
         shell: bash
         run: node scripts/verify-windows-artifacts.mjs --frontend dist-app
@@ -377,6 +384,22 @@ jobs:
           Start-Sleep -Seconds 2
           node scripts/verify-candidate-gain.mjs --exe $exe
           if ($LASTEXITCODE -ne 0) { throw "candidate-gain gate failed on the installed app" }
+          Get-Process -Name "trAIMer" -ErrorAction SilentlyContinue | Stop-Process -Force
+          Get-Process -Name "traimer_capture_helper" -ErrorAction SilentlyContinue | Stop-Process -Force
+
+      - name: RELEASE GATE - the INSTALLED app's game picker offers every public profile
+        shell: pwsh
+        # The gap Pass 2 reported: the installer carried the profiles, but no
+        # gate selected one inside the installed application. This one does,
+        # for every public profile, plus Generic / Raw, persistence across a
+        # reload, the filter box, and the absence of fixtures and legacy names.
+        run: |
+          $exe = "C:\traimer-install-test\trAIMer.exe"
+          Get-Process -Name "trAIMer" -ErrorAction SilentlyContinue | Stop-Process -Force
+          Get-Process -Name "traimer_capture_helper" -ErrorAction SilentlyContinue | Stop-Process -Force
+          Start-Sleep -Seconds 2
+          node scripts/verify-game-picker.mjs --exe $exe
+          if ($LASTEXITCODE -ne 0) { throw "game-picker gate failed on the installed app" }
           Get-Process -Name "trAIMer" -ErrorAction SilentlyContinue | Stop-Process -Force
           Get-Process -Name "traimer_capture_helper" -ErrorAction SilentlyContinue | Stop-Process -Force
 

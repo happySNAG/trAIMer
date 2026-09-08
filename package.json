@@ -1,6 +1,6 @@
 {
   "name": "traimer",
-  "version": "1.0.0-rc.10",
+  "version": "1.0.0-rc.11",
   "private": true,
   "type": "module",
   "description": "trAIMer — Train. Measure. Tune. Aim measurement and sensitivity optimization engine (headless core), with a versioned game-profile layer that converts a measured physical sensitivity into per-game settings.",
@@ -24,6 +24,7 @@
     "verify:windows-artifacts": "node scripts/verify-windows-artifacts.mjs",
     "verify:arena-entry": "node scripts/verify-arena-entry.mjs",
     "verify:candidate-gain": "node scripts/verify-candidate-gain.mjs",
+    "verify:game-picker": "node scripts/verify-game-picker.mjs",
     "verify:branding": "node scripts/verify-branding.mjs",
     "audit:no-telemetry": "node scripts/audit-no-telemetry.mjs",
     "demo:help": "tsx src/demo/cli.ts --help",

@@ -39,7 +39,7 @@ import { planCandidateBlocks } from "../../src/experiments/protocol.ts";
 import { APP_VERSION, ENGINE_VERSION, PRODUCT_NAME } from "../../src/version.ts";
 import { toAimLabError } from "../../src/errors/types.ts";
 import { LocalDiagnosticLog } from "../../src/diagnostics/localLog.ts";
-import { installTestHooks, testModeEnabled } from "./testHooks.ts";
+import { installGameProfileHook, installTestHooks, testModeEnabled } from "./testHooks.ts";
 import {
   gatherPreflightEnvironment,
   loadStoredEngineVersions,
@@ -1396,3 +1396,7 @@ void (async () => {
 // ---- initial view ----
 
 void renderHome();
+
+// The read-only registry hook for the installed-app picker gate. Test mode
+// only; it converts nothing and exposes only what the picker already shows.
+if (testModeEnabled()) installGameProfileHook();

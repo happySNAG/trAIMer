@@ -1,5 +1,6 @@
 import {
   GAME_PROFILE_REGISTRY,
+  GENERIC_PROFILE_ID,
   defaultSelectionFor,
   importCurrentSensitivity,
   matchingMethodOf,
@@ -41,6 +42,31 @@ export interface GameProfilePanelCallbacks {
 }
 
 const NO_GAME = "";
+
+/** Ids of the last few games the player chose, most recent first. */
+const RECENT_KEY = "traimer-recent-game-profiles";
+const RECENT_LIMIT = 3;
+/** Above this many games the picker grows a filter box. */
+const FILTER_THRESHOLD = 6;
+
+function readRecent(): string[] {
+  try {
+    const raw = localStorage.getItem(RECENT_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed.filter((x): x is string => typeof x === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
+function rememberRecent(id: string): void {
+  try {
+    const next = [id, ...readRecent().filter((x) => x !== id)].slice(0, RECENT_LIMIT);
+    localStorage.setItem(RECENT_KEY, JSON.stringify(next));
+  } catch {
+    // Storage is a convenience; the selection itself lives in settings.
+  }
+}
 
 function numberInput(
   id: string,
@@ -91,26 +117,74 @@ export function renderGameProfilePanel(
       : null;
 
   const select = el("select", { id: "game-profile-select" }) as HTMLSelectElement;
-  select.append(
-    el("option", { value: NO_GAME, text: "No game selected — physical sensitivity only" }),
-  );
-  for (const option of selectable) {
-    select.append(el("option", { value: option.id, text: option.displayName }));
-  }
-  select.value = profile?.id ?? NO_GAME;
+
+  // The list is organised, not just long (Pass 3, requirement 9): the games
+  // the player used most recently first, then every named game
+  // alphabetically (the registry's order), then the generic/raw control on
+  // its own. A filter box narrows the list by name once it is long enough to
+  // need one. Fixture profiles never reach `selectable()`, so they cannot
+  // appear here.
+  const namedGames = selectable.filter((p) => p.id !== GENERIC_PROFILE_ID);
+  const control = selectable.filter((p) => p.id === GENERIC_PROFILE_ID);
+  const recentIds = readRecent().filter((id) => namedGames.some((p) => p.id === id));
+  const populate = (filterText: string): void => {
+    const needle = filterText.trim().toLowerCase();
+    const matches = (p: GameProfile): boolean =>
+      needle === "" || p.displayName.toLowerCase().includes(needle) || p.id === profile?.id;
+    clear(select);
+    select.append(
+      el("option", { value: NO_GAME, text: "No game selected — physical sensitivity only" }),
+    );
+    const recent = recentIds
+      .map((id) => namedGames.find((p) => p.id === id)!)
+      .filter(matches);
+    if (recent.length > 0 && needle === "") {
+      const group = el("optgroup", { label: "Recently used" });
+      for (const p of recent) group.append(el("option", { value: p.id, text: p.displayName }));
+      select.append(group);
+    }
+    const games = el("optgroup", { label: "Games (A–Z)" });
+    for (const p of namedGames.filter(matches)) {
+      games.append(el("option", { value: p.id, text: p.displayName }));
+    }
+    if (games.childElementCount > 0) select.append(games);
+    const other = el("optgroup", { label: "Other" });
+    for (const p of control.filter(matches)) {
+      other.append(el("option", { value: p.id, text: p.displayName }));
+    }
+    if (other.childElementCount > 0) select.append(other);
+    select.value = profile?.id ?? NO_GAME;
+  };
+  populate("");
 
   select.addEventListener("change", () => {
     const picked = select.value === NO_GAME ? null : GAME_PROFILE_REGISTRY.get(select.value);
+    if (picked) rememberRecent(picked.id);
     callbacks.onChange(picked ? defaultSelectionFor(picked) : null);
   });
 
-  const body: (Node | string)[] = [
-    el("div", { class: "form-grid" }, [
-      field("Game", select, {
-        hint: "trAIMer measures your aim in physical units. A game profile turns that into the number that game accepts.",
+  const pickerFields: HTMLElement[] = [];
+  if (selectable.length > FILTER_THRESHOLD) {
+    const filter = el("input", {
+      type: "search",
+      id: "game-profile-filter",
+      placeholder: `Find a game (${namedGames.length} available)`,
+      autocomplete: "off",
+    }) as HTMLInputElement;
+    filter.addEventListener("input", () => populate(filter.value));
+    pickerFields.push(
+      field("Find a game", filter, {
+        hint: "Type part of a name to shorten the list below.",
       }),
-    ]),
-  ];
+    );
+  }
+  pickerFields.push(
+    field("Game", select, {
+      hint: "trAIMer measures your aim in physical units. A game profile turns that into the number that game accepts.",
+    }),
+  );
+
+  const body: (Node | string)[] = [el("div", { class: "form-grid" }, pickerFields)];
 
   // ---- a saved selection this build reads differently, or not at all ----
   if (compatibility && compatibility.status === "unknown-profile") {
@@ -199,7 +273,7 @@ export function renderGameProfilePanel(
               profile.status === "partially-verified"
                 ? " Hip-fire conversion is trusted; what is not covered is listed under the profile details below."
                 : profile.status === "experimental"
-                  ? " Its numbers have not been confirmed against the game."
+                  ? " Its numbers have not been confirmed against the game; every converted value carries that warning, and what is uncertain is listed under the profile details below."
                   : "",
           }),
         ]),

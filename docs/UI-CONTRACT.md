@@ -214,6 +214,21 @@ Additions to §4 (calculations that must stay out of presentation code):
 - `PUBLIC_GAME_PROFILES` is six profiles in picker order; the generic control
   is now displayed as "Generic / Raw" (its id is unchanged).
 
+### Game Profile Pass 3 additions (additive, non-breaking)
+
+- `FovModel` gained `scaled-from-hipfire` (zoom levels only) and an optional
+  `hipfireScaling` on configurable hip-fire FOVs; `hipfireFovFactor` and
+  `resolveScaledFov` (`src/games/fov.ts`) are the only places either is
+  evaluated.
+- `QuantizedValue.clampedToMin/Max` now mean "the EXACT value lies outside
+  the game's range", including a value the grid would have snapped onto the
+  floor.
+- `window.__ALDO_GAME_PROFILES_FOR_TESTING__` — a read-only, test-mode-only
+  registry hook the installed-app picker gate reads; it converts nothing.
+- The picker groups options (`Recently used` / `Games (A–Z)` / `Other`) and
+  shows a `#game-profile-filter` box once more than six profiles are
+  selectable. Option values are still profile ids.
+
 Additions to §5 (non-negotiable product behaviors):
 
 - Rounding loss is never hidden. When a game's own entry grid cannot express

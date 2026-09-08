@@ -26,20 +26,30 @@ test.describe("choosing a game profile", () => {
     await expect(panel).toContainText("physical sensitivity");
   });
 
-  test("offers the five public games and Generic / Raw, in that order, and no fixture", async ({
+  test("offers the eleven public games alphabetically, then Generic / Raw, and no fixture", async ({
     page,
   }) => {
     await page.goto("/");
     await page.click(`#tabs button[data-tab="setup"]`);
     const options = page.locator("#game-profile-select option");
-    await expect(options).toHaveCount(7);
+    await expect(options).toHaveCount(13);
     await expect(options.nth(0)).toHaveText(/No game selected/);
-    await expect(options.nth(1)).toHaveText("Fortnite");
-    await expect(options.nth(2)).toHaveText("Valorant");
-    await expect(options.nth(3)).toHaveText("Counter-Strike 2");
-    await expect(options.nth(4)).toHaveText("Apex Legends");
-    await expect(options.nth(5)).toHaveText("Call of Duty / Warzone");
-    await expect(options.nth(6)).toHaveText("Generic / Raw");
+    await expect(page.locator("#game-profile-select optgroup[label='Games (A–Z)'] option")).toHaveText([
+      "Apex Legends",
+      "Battlefield 6",
+      "Call of Duty / Warzone",
+      "Counter-Strike 2",
+      "Fortnite",
+      "Marvel Rivals",
+      "Overwatch 2",
+      "PUBG: Battlegrounds",
+      "Rainbow Six Siege",
+      "The Finals",
+      "Valorant",
+    ]);
+    await expect(page.locator("#game-profile-select optgroup[label='Other'] option")).toHaveText([
+      "Generic / Raw",
+    ]);
     await expect(page.locator("#game-profile-select")).not.toContainText("Fixture");
   });
 
